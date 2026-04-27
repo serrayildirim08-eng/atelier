@@ -117,6 +117,11 @@ export async function POST(request: Request): Promise<Response> {
       // to pick up to 6 signal-dense PDFs across four buckets: contract,
       // CV, passport, bank statement. The first three alphabetically are
       // a fallback if no filename matches.
+      //
+      // Runs in parallel with Phase 1 (per-PDF classify + extract): the
+      // subtype result is only consumed when the final IngestSuccess is
+      // assembled, so its model call overlaps the per-PDF wave entirely.
+      // Frees the 3-8 s detect critical-path cost.
       send(controller, {
         type: 'progress',
         stage: 'subtype_detecting',
@@ -124,38 +129,43 @@ export async function POST(request: Request): Promise<Response> {
         total: pdfPaths.length,
       });
 
-      let e2Subtype: E2CaseSubtype | null = null;
-      try {
-        const samplePaths = pickRawDocSamplePaths(pdfPaths);
-        const samples = await Promise.all(
-          samplePaths.map(async (p) => {
-            const buf = await fs.readFile(p);
-            const parsed = await extractPdfText(buf);
-            return {
-              filename: path.relative(rootPath, p),
-              text: parsed.text,
-            };
-          }),
-        );
-        if (samples.length > 0) {
-          e2Subtype = await detectE2Subtype(samples, { mode: 'raw_docs' });
+      const e2SubtypePromise: Promise<E2CaseSubtype | null> = (async () => {
+        try {
+          const samplePaths = pickRawDocSamplePaths(pdfPaths);
+          const samples = await Promise.all(
+            samplePaths.map(async (p) => {
+              const buf = await fs.readFile(p);
+              const parsed = await extractPdfText(buf);
+              return {
+                filename: path.relative(rootPath, p),
+                text: parsed.text,
+              };
+            }),
+          );
+          if (samples.length === 0) return null;
+          const subtype = await detectE2Subtype(samples, { mode: 'raw_docs' });
           send(controller, {
             type: 'subtype_result',
-            principal_subtype: e2Subtype.principal_subtype,
-            procedural_posture: e2Subtype.procedural_posture,
-            has_dependents: e2Subtype.has_dependents,
-            detection_confidence: e2Subtype.detection_confidence,
+            principal_subtype: subtype.principal_subtype,
+            procedural_posture: subtype.procedural_posture,
+            has_dependents: subtype.has_dependents,
+            detection_confidence: subtype.detection_confidence,
             sample_files: samples.map((s) => s.filename),
           });
+          return subtype;
+        } catch (e: unknown) {
+          send(controller, {
+            type: 'subtype_error',
+            message: e instanceof Error ? e.message : String(e),
+          });
+          return null;
         }
-      } catch (e: unknown) {
-        send(controller, {
-          type: 'subtype_error',
-          message: e instanceof Error ? e.message : String(e),
-        });
-      }
+      })();
 
-      // Phase 1 — per-PDF classify + extract (Haiku, parallel)
+      // Phase 1 — per-PDF classify + extract (Haiku, parallel). Runs
+      // concurrently with Phase 0.6 above. Stream events from the two
+      // phases interleave on the wire; the UI handles each event type
+      // independently.
       send(controller, {
         type: 'progress',
         stage: 'classifying',
@@ -204,6 +214,10 @@ export async function POST(request: Request): Promise<Response> {
           !!r.facts && !r.error,
       );
       const memory = groupByDocType(usable);
+
+      // Resolve the Phase 0.6 promise. By now Phase 1's wave dwarfs the
+      // subtype call, so this is typically a no-op await.
+      const e2Subtype = await e2SubtypePromise;
 
       let result: IngestResult;
       try {
