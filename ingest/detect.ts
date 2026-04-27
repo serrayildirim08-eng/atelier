@@ -1,7 +1,8 @@
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { getAnthropic } from '@/lib/anthropic';
 import { logAnthropicUsage } from '@/lib/usage-log';
-import { DetectionSchema, type Detection } from './schema';
+import { DetectionSchema, type Detection, type DetectionWithSubtype } from './schema';
+import { detectE2Subtype } from './extractors/subtype-detect';
 
 const SYSTEM_PROMPT = `You are an immigration paralegal performing fast case-type triage on a client's case folder. Read the document samples and decide which one of four visa types the case is. Return a structured detection result.
 
@@ -186,4 +187,44 @@ export async function detectCaseType(samples: DetectionInput[]): Promise<Detecti
   });
 
   return response.parsed_output;
+}
+
+/**
+ * Phase-0 + Phase-0.6 chain. Runs the case-type detector and, if the
+ * verdict is E2, follows up with the sub-type classifier
+ * (manuals/_E2-SUBTYPE-TAXONOMY.md §12). Sub-type detection is best-effort:
+ * if it errors, we fall back to a LOW-confidence individual_investor /
+ * uscis_extension placeholder so the caller still has a non-null shape to
+ * branch on, but we surface the error in detection_signals.
+ */
+export async function detectCaseTypeWithSubtype(
+  samples: DetectionInput[],
+): Promise<DetectionWithSubtype> {
+  const detection = await detectCaseType(samples);
+
+  if (detection.case_type !== 'E2') {
+    return { ...detection, e2_subtype: null };
+  }
+
+  try {
+    const e2_subtype = await detectE2Subtype(samples);
+    return { ...detection, e2_subtype };
+  } catch (e: unknown) {
+    return {
+      ...detection,
+      e2_subtype: {
+        principal_subtype: 'individual_investor',
+        procedural_posture: 'uscis_extension',
+        has_dependents: false,
+        dependent_count: 0,
+        dependent_breakdown: null,
+        detection_signals: [
+          `[subtype-detect-error] ${e instanceof Error ? e.message : String(e)}`,
+        ],
+        detection_confidence: 'LOW',
+        reasoning:
+          'Sub-type classifier failed; fell back to LOW-confidence individual_investor / uscis_extension placeholder. Attorney must confirm sub-type before drafting.',
+      },
+    };
+  }
 }

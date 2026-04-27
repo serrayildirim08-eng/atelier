@@ -1,0 +1,378 @@
+/**
+ * E-2 typed memory: per-document micro-schemas.
+ *
+ * Each PDF in a case folder is classified into ONE doc_type and a small,
+ * type-specific schema is filled. The collection of these per-PDF
+ * extractions is the "typed memory" the aggregator reasons over to
+ * produce a unified E2FactsSchema.
+ *
+ * Design choices:
+ * - Per-type schemas stay minimal (6-10 leaf fields each). The aggregator
+ *   does the heavy lifting; the per-PDF extractor only captures what is
+ *   directly visible in that one document.
+ * - Provenance (source_page, source_quote, confidence) is preserved on
+ *   every leaf via the same Field<T> wrapper used by the matter-level
+ *   schema, so citations remain traceable through aggregation.
+ */
+
+import { z } from 'zod';
+import type { ContractFacts } from './extractors/contract.schema';
+
+const Field = <T extends z.ZodTypeAny>(value: T) =>
+  z.preprocess(
+    (v: unknown) => {
+      if (v === null || v === undefined) {
+        return { value: null, source_page: null, source_quote: null, confidence: null };
+      }
+      if (typeof v !== 'object' || Array.isArray(v)) {
+        return { value: v, source_page: null, source_quote: null, confidence: null };
+      }
+      return v;
+    },
+    z.object({
+      value: value.nullable(),
+      source_page: z.number().int().nullable(),
+      source_quote: z.string().nullable(),
+      confidence: z.number().min(0).max(1).nullable(),
+    }),
+  );
+
+/* ---------------------------------------------------------------------- */
+/* Doc-type taxonomy                                                      */
+/* ---------------------------------------------------------------------- */
+
+export const DocTypeEnum = z.enum([
+  'passport',
+  'status_doc',
+  'bank_statement',
+  'tax_doc',
+  'money_movement',
+  'source_of_funds',
+  'formation_doc',
+  'ownership_evidence',
+  'lease_or_property',
+  'business_plan',
+  'invoice_or_receipt',
+  'business_contract',
+  'payroll_doc',
+  'uscis_or_dos_form',
+  'cover_letter',
+  'expert_letter',
+  'other',
+]);
+export type DocType = z.infer<typeof DocTypeEnum>;
+
+export const DOC_TYPE_LABELS: Record<DocType, string> = {
+  passport: 'Passport',
+  status_doc: 'US status / I-94 / visa stamp',
+  bank_statement: 'Bank statement',
+  tax_doc: 'Tax return / W-2',
+  money_movement: 'Wire / transfer / check',
+  source_of_funds: 'Source of funds (deed, gift, inheritance, loan)',
+  formation_doc: 'Articles / EIN / operating agreement',
+  ownership_evidence: 'Cap table / share certificate',
+  lease_or_property: 'Lease / premises / property',
+  business_plan: 'Business plan',
+  invoice_or_receipt: 'Invoice / purchase receipt',
+  business_contract: 'Customer / vendor contract',
+  payroll_doc: 'Payroll / employment record',
+  uscis_or_dos_form: 'USCIS / DOS form (I-129, DS-160, DS-156E, G-28)',
+  cover_letter: 'Cover letter / petition memo',
+  expert_letter: 'Expert / advisory letter',
+  other: 'Other',
+};
+
+/* ---------------------------------------------------------------------- */
+/* Per-type micro-schemas                                                 */
+/* ---------------------------------------------------------------------- */
+
+const PassportFactsSchema = z.object({
+  doc_type: z.literal('passport'),
+  full_name: Field(z.string()),
+  dob: Field(z.string()),
+  nationality: Field(z.string()),
+  passport_number: Field(z.string()),
+  passport_expiry: Field(z.string()),
+  place_of_birth: Field(z.string()),
+  issue_date: Field(z.string()),
+});
+
+const StatusDocFactsSchema = z.object({
+  doc_type: z.literal('status_doc'),
+  full_name: Field(z.string()),
+  status_class: Field(z.string()),
+  i94_admission_number: Field(z.string()),
+  admission_date: Field(z.string()),
+  authorized_until: Field(z.string()),
+  issuing_office: Field(z.string()),
+});
+
+const BankTransferEntrySchema = z.object({
+  date: Field(z.string()),
+  amount_usd: Field(z.number()),
+  counterparty: Field(z.string()),
+  direction: Field(z.enum(['in', 'out'])),
+});
+
+const BankStatementFactsSchema = z.object({
+  doc_type: z.literal('bank_statement'),
+  account_holder: Field(z.string()),
+  bank_name: Field(z.string()),
+  account_last4: Field(z.string()),
+  statement_period: Field(z.string()),
+  ending_balance_usd: Field(z.number()),
+  notable_transfers: z.array(BankTransferEntrySchema),
+});
+
+const TaxDocFactsSchema = z.object({
+  doc_type: z.literal('tax_doc'),
+  filer_name: Field(z.string()),
+  tax_year: Field(z.string()),
+  form_type: Field(z.string()),
+  total_income_usd: Field(z.number()),
+  jurisdiction: Field(z.string()),
+});
+
+const MoneyMovementFactsSchema = z.object({
+  doc_type: z.literal('money_movement'),
+  amount_usd: Field(z.number()),
+  amount_origin: Field(z.number()),
+  origin_currency_code: Field(z.string()),
+  fx_rate_used: Field(z.number()),
+  date: Field(z.string()),
+  from_holder: Field(z.string()),
+  from_account_last4: Field(z.string()),
+  to_holder: Field(z.string()),
+  to_account_last4: Field(z.string()),
+  reference: Field(z.string()),
+});
+
+const SourceOfFundsFactsSchema = z.object({
+  doc_type: z.literal('source_of_funds'),
+  category: Field(
+    z.enum([
+      'deed_of_sale',
+      'gift_letter',
+      'inheritance',
+      'loan_agreement',
+      'sale_of_business',
+      'salary_or_savings',
+      'crypto',
+      'other',
+    ]),
+  ),
+  amount_usd: Field(z.number()),
+  date: Field(z.string()),
+  donor_or_seller: Field(z.string()),
+  recipient: Field(z.string()),
+  notarized_or_apostilled: Field(z.boolean()),
+  notes: Field(z.string()),
+});
+
+const FormationDocFactsSchema = z.object({
+  doc_type: z.literal('formation_doc'),
+  kind: Field(
+    z.enum([
+      'articles_of_incorporation',
+      'articles_of_organization',
+      'ein_letter',
+      'operating_agreement',
+      'bylaws',
+      'amendment',
+      'other',
+    ]),
+  ),
+  entity_legal_name: Field(z.string()),
+  entity_type: Field(z.string()),
+  formation_date: Field(z.string()),
+  state_of_formation: Field(z.string()),
+  ein: Field(z.string()),
+});
+
+const OwnershipEntryDocSchema = z.object({
+  owner_name: Field(z.string()),
+  ownership_percent: Field(z.number()),
+  nationality: Field(z.string()),
+});
+
+const OwnershipEvidenceFactsSchema = z.object({
+  doc_type: z.literal('ownership_evidence'),
+  kind: Field(
+    z.enum(['cap_table', 'share_certificate', 'operating_agreement_exhibit', 'other']),
+  ),
+  entity_name: Field(z.string()),
+  ownership_entries: z.array(OwnershipEntryDocSchema),
+  total_shares_or_units: Field(z.number()),
+  document_date: Field(z.string()),
+});
+
+const LeaseOrPropertyFactsSchema = z.object({
+  doc_type: z.literal('lease_or_property'),
+  address: Field(z.string()),
+  lessor: Field(z.string()),
+  lessee: Field(z.string()),
+  term_start: Field(z.string()),
+  term_end: Field(z.string()),
+  monthly_rent_usd: Field(z.number()),
+  deposit_usd: Field(z.number()),
+  square_footage: Field(z.number()),
+});
+
+const BusinessPlanFactsSchema = z.object({
+  doc_type: z.literal('business_plan'),
+  enterprise_name: Field(z.string()),
+  industry: Field(z.string()),
+  naics_code: Field(z.string()),
+  projected_revenue_year1_usd: Field(z.number()),
+  projected_revenue_year5_usd: Field(z.number()),
+  hire_plan_summary: Field(z.string()),
+  market_summary: Field(z.string()),
+  five_year_horizon_addressed: Field(z.boolean()),
+});
+
+const InvoiceOrReceiptFactsSchema = z.object({
+  doc_type: z.literal('invoice_or_receipt'),
+  vendor: Field(z.string()),
+  item_description: Field(z.string()),
+  amount_usd: Field(z.number()),
+  date: Field(z.string()),
+  payment_method: Field(z.string()),
+  category: Field(
+    z.enum([
+      'equipment',
+      'inventory',
+      'build_out',
+      'professional_fees',
+      'marketing',
+      'lease_deposit',
+      'franchise_fee',
+      'working_capital',
+      'other',
+    ]),
+  ),
+});
+
+const BusinessContractFactsSchema = z.object({
+  doc_type: z.literal('business_contract'),
+  counterparty_name: Field(z.string()),
+  role: Field(z.enum(['customer', 'vendor', 'service_provider', 'partner', 'other'])),
+  contract_value_usd: Field(z.number()),
+  term_summary: Field(z.string()),
+  signed_date: Field(z.string()),
+});
+
+const PayrollDocFactsSchema = z.object({
+  doc_type: z.literal('payroll_doc'),
+  employer_name: Field(z.string()),
+  employee_count: Field(z.number()),
+  pay_period: Field(z.string()),
+  total_payroll_usd: Field(z.number()),
+  has_w2_employees: Field(z.boolean()),
+});
+
+const UscisOrDosFormFactsSchema = z.object({
+  doc_type: z.literal('uscis_or_dos_form'),
+  form_id: Field(z.string()),
+  form_edition: Field(z.string()),
+  beneficiary_name: Field(z.string()),
+  petitioner_name: Field(z.string()),
+  signature_present: Field(z.boolean()),
+  signature_date: Field(z.string()),
+  attorney_g28_present: Field(z.boolean()),
+  // I-129 E Supplement only: dollar amount of the treaty-investor
+  // investment as restated on the form. Drives the manual §4.5 quality
+  // gate against the membership_interest_transfer_agreement contract's
+  // total_consideration_amount (mismatch = severity 5).
+  investment_amount_usd: Field(z.number()),
+});
+
+const CoverLetterFactsSchema = z.object({
+  doc_type: z.literal('cover_letter'),
+  visa_type_argued: Field(z.string()),
+  addressee: Field(z.string()),
+  attorney_name: Field(z.string()),
+  attorney_signature_present: Field(z.boolean()),
+  letter_date: Field(z.string()),
+  word_count_estimate: Field(z.number()),
+});
+
+const ExpertLetterFactsSchema = z.object({
+  doc_type: z.literal('expert_letter'),
+  writer_name: Field(z.string()),
+  writer_title: Field(z.string()),
+  writer_institution: Field(z.string()),
+  writer_country: Field(z.string()),
+  relationship_to_beneficiary: Field(z.string()),
+  letter_date: Field(z.string()),
+  strongest_sentence: Field(z.string()),
+});
+
+const OtherFactsSchema = z.object({
+  doc_type: z.literal('other'),
+  one_line_summary: Field(z.string()),
+  key_facts: z.array(
+    z.object({
+      key: Field(z.string()),
+      value: Field(z.string()),
+    }),
+  ),
+});
+
+/* ---------------------------------------------------------------------- */
+/* Discriminated union — the per-PDF facts schema                          */
+/* ---------------------------------------------------------------------- */
+
+export const PerPdfFactsSchema = z.discriminatedUnion('doc_type', [
+  PassportFactsSchema,
+  StatusDocFactsSchema,
+  BankStatementFactsSchema,
+  TaxDocFactsSchema,
+  MoneyMovementFactsSchema,
+  SourceOfFundsFactsSchema,
+  FormationDocFactsSchema,
+  OwnershipEvidenceFactsSchema,
+  LeaseOrPropertyFactsSchema,
+  BusinessPlanFactsSchema,
+  InvoiceOrReceiptFactsSchema,
+  BusinessContractFactsSchema,
+  PayrollDocFactsSchema,
+  UscisOrDosFormFactsSchema,
+  CoverLetterFactsSchema,
+  ExpertLetterFactsSchema,
+  OtherFactsSchema,
+]);
+
+export type PerPdfFacts = z.infer<typeof PerPdfFactsSchema>;
+
+export interface PerPdfResult {
+  filename: string;
+  pageCount: number;
+  facts?: PerPdfFacts;
+  /**
+   * Rich contract extraction, attached as a second pass when the first-pass
+   * classifier returns a contract-flavored doc_type (business_contract,
+   * lease_or_property, ownership_evidence, formation_doc). The contract
+   * facts use their own contract_subtype-discriminated schema; the original
+   * `facts` field stays populated with the thin doc_type extraction so
+   * downstream consumers that don't know about contracts still work.
+   */
+  contract?: ContractFacts;
+  error?: { code: string; message: string };
+}
+
+/**
+ * Memory groups per-PDF extractions by doc_type. The aggregator and the
+ * frontend both read this shape.
+ */
+export type TypedMemory = Partial<Record<DocType, PerPdfResult[]>>;
+
+export function groupByDocType(results: PerPdfResult[]): TypedMemory {
+  const out: TypedMemory = {};
+  for (const r of results) {
+    const t = r.facts?.doc_type ?? 'other';
+    const list = out[t] ?? [];
+    list.push(r);
+    out[t] = list;
+  }
+  return out;
+}

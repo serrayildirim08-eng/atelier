@@ -1,14 +1,23 @@
 import { extractPdfText } from './pdf';
 import { extractFactsByCaseType } from './claude';
 import { extractFactsViaVision } from './vision';
-import { detectCaseType } from './detect';
-import type { CaseFacts, CaseType, E2Facts, EB1AFacts, EB1BFacts, EB1CFacts } from './schema';
+import { detectCaseTypeWithSubtype } from './detect';
+import type {
+  CaseFacts,
+  CaseType,
+  E2CaseSubtype,
+  E2Facts,
+  EB1AFacts,
+  EB1BFacts,
+  EB1CFacts,
+} from './schema';
 import type { ReviewReport } from '@/reason';
 import type { VerifyReport } from '@/lib/verify';
 
 export type {
   CaseType,
   CaseFacts,
+  E2CaseSubtype,
   E2Facts,
   EB1AFacts,
   EB1BFacts,
@@ -21,6 +30,13 @@ export interface IngestSuccess {
   detection_confidence: number;
   detection_reasoning: string;
   caseFacts: CaseFacts;
+  /**
+   * Phase-0.6 sub-type detection (manuals/_E2-SUBTYPE-TAXONOMY.md §12).
+   * Populated when caseFacts.case_type === 'E2'; null otherwise. Carries
+   * principal_subtype, procedural_posture, and dependent breakdown — the
+   * downstream drafter / reviewer / extractor branch on this.
+   */
+  e2_subtype?: E2CaseSubtype | null;
   draft?: string;
   draftError?: { code: string; message: string };
   verify_report?: VerifyReport;
@@ -106,11 +122,13 @@ export async function ingestMatter(
   let caseType: CaseType;
   let detectionConfidence: number;
   let detectionReasoning: string;
+  let e2Subtype: E2CaseSubtype | null;
   try {
-    const detection = await detectCaseType(samples);
+    const detection = await detectCaseTypeWithSubtype(samples);
     caseType = detection.case_type;
     detectionConfidence = detection.confidence;
     detectionReasoning = detection.reasoning;
+    e2Subtype = detection.e2_subtype;
   } catch (e: unknown) {
     return {
       filename: matterName,
@@ -132,6 +150,7 @@ export async function ingestMatter(
       detection_confidence: detectionConfidence,
       detection_reasoning: detectionReasoning,
       caseFacts,
+      e2_subtype: e2Subtype,
       source_pdfs: sourcePdfs,
       scanned_pdfs: scannedPdfs,
     };
@@ -167,13 +186,17 @@ export async function ingestPdf(buffer: Buffer, filename: string): Promise<Inges
   let caseType: CaseType;
   let detectionConfidence: number;
   let detectionReasoning: string;
+  let e2Subtype: E2CaseSubtype | null;
   try {
-    const detection = await detectCaseType([{ filename, text: pdf.text }]);
+    const detection = await detectCaseTypeWithSubtype([
+      { filename, text: pdf.text },
+    ]);
     caseType = detection.case_type;
     detectionConfidence = detection.confidence;
     detectionReasoning = pdf.looksLikeScan
       ? `${detection.reasoning} [Note: PDF appears scanned; detection ran on sparse OCR-like text.]`
       : detection.reasoning;
+    e2Subtype = detection.e2_subtype;
   } catch (e: unknown) {
     return {
       filename,
@@ -195,6 +218,7 @@ export async function ingestPdf(buffer: Buffer, filename: string): Promise<Inges
       detection_confidence: detectionConfidence,
       detection_reasoning: detectionReasoning,
       caseFacts,
+      e2_subtype: e2Subtype,
     };
   } catch (e: unknown) {
     return {

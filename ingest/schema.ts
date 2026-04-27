@@ -6,12 +6,27 @@ import { z } from 'zod';
  * score. Null at any field means the source did not support a value.
  */
 const Field = <T extends z.ZodTypeAny>(value: T) =>
-  z.object({
-    value: value.nullable(),
-    source_page: z.number().int().nullable(),
-    source_quote: z.string().nullable(),
-    confidence: z.number().min(0).max(1).nullable(),
-  });
+  z.preprocess(
+    (v: unknown) => {
+      if (v === null || v === undefined) {
+        return { value: null, source_page: null, source_quote: null, confidence: null };
+      }
+      // The aggregator sometimes emits bare scalars / arrays where a Field is
+      // required. Wrap them with null provenance so the rest of the schema
+      // doesn't fail validation. The aggregator prompt forbids this, but
+      // resilience here lets the pipeline keep moving.
+      if (typeof v !== 'object' || Array.isArray(v)) {
+        return { value: v, source_page: null, source_quote: null, confidence: null };
+      }
+      return v;
+    },
+    z.object({
+      value: value.nullable(),
+      source_page: z.number().int().nullable(),
+      source_quote: z.string().nullable(),
+      confidence: z.number().min(0).max(1).nullable(),
+    }),
+  );
 
 /* ---------------------------------------------------------------------- */
 /* Case-type discriminator                                                */
@@ -348,3 +363,25 @@ export const DetectionSchema = z.object({
 });
 
 export type Detection = z.infer<typeof DetectionSchema>;
+
+// Re-export the E-2 sub-type structure so callers can import the full
+// post-detection shape from a single module. The chained sub-type
+// classifier (Phase-0.6, runs only when case_type='E2') is implemented in
+// ingest/extractors/subtype-detect.ts.
+export type {
+  E2CaseSubtype,
+  E2PrincipalSubtype,
+  E2ProceduralPosture,
+  E2DetectionConfidence,
+} from './extractors/subtype-detect.schema';
+
+import type { E2CaseSubtype as _E2CaseSubtype } from './extractors/subtype-detect.schema';
+
+/**
+ * Detection bundle returned by the Phase-0 + Phase-0.6 chain. When
+ * case_type is 'E2', e2_subtype is populated by the chained sub-type
+ * classifier; for the other case types it stays null.
+ */
+export interface DetectionWithSubtype extends Detection {
+  e2_subtype: _E2CaseSubtype | null;
+}
