@@ -23,16 +23,18 @@ const SCAN_DETECTION_CHARS_PER_PAGE = 50;
 export async function extractPdfText(buffer: Buffer): Promise<ExtractedPdf> {
   const parser = new PDFParse({ data: buffer });
   try {
-    const info = await parser.getInfo({ parsePageInfo: true });
-    const pageCount = info.total ?? 0;
-
-    const pages: string[] = [];
-    for (let i = 1; i <= pageCount; i++) {
-      const r = await parser.getText({ partial: [i] });
-      pages.push(`[page ${i}]\n${r.text ?? ''}`);
-    }
-
-    const text = pages.join('\n\n');
+    // Single getText() call returns every page in one pass via
+    // result.pages[]. The previous implementation looped per-page with
+    // partial:[i] (N sequential parses) plus a getInfo({parsePageInfo})
+    // (N more passes for link metadata we never use) — together ~2N
+    // re-parses. pdf-parse v2's getText already gives us .pages and
+    // .total in one shot, so the whole document is parsed once and we
+    // just rebuild the [page N] markers from the per-page rows.
+    const result = await parser.getText();
+    const pageCount = result.total ?? result.pages.length;
+    const text = result.pages
+      .map((p) => `[page ${p.num}]\n${p.text ?? ''}`)
+      .join('\n\n');
     const charsPerPage = pageCount > 0 ? text.length / pageCount : 0;
     const looksLikeScan = pageCount > 0 && charsPerPage < SCAN_DETECTION_CHARS_PER_PAGE;
 
