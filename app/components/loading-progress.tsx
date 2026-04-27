@@ -367,10 +367,48 @@ export function LoadingProgress({ events, startedAt }: Props) {
     return () => clearInterval(id);
   }, []);
 
+  // Typewriter — reveal each row's value char-by-char in row order. When the
+  // active row's target is null we wait (cursor blinks on the underscore
+  // placeholder); when the target lands we type it out at ~22ms / character;
+  // once a row is fully typed the cursor jumps to the next incomplete row.
+  // typedLengths is fixed-length 9 (matches rows.length), reset only on full
+  // page refresh per spec.
+  const [typedLengths, setTypedLengths] = useState<number[]>(() =>
+    Array(state.rows.length).fill(0),
+  );
+  useEffect(() => {
+    const id = setInterval(() => {
+      setTypedLengths((prev) => {
+        for (let i = 0; i < state.rows.length; i += 1) {
+          const target = state.rows[i].value;
+          if (target === null) return prev; // blocked: data for this row not landed yet
+          const cur = prev[i] ?? 0;
+          if (cur < target.length) {
+            const next = [...prev];
+            next[i] = cur + 1;
+            return next;
+          }
+        }
+        return prev; // all rows fully typed
+      });
+    }, 22);
+    return () => clearInterval(id);
+  }, [state.rows]);
+
+  // First row whose typing is incomplete — cursor lives here.
+  const typingActiveRow = (() => {
+    for (let i = 0; i < state.rows.length; i += 1) {
+      const target = state.rows[i].value;
+      if (target === null) return i;
+      if ((typedLengths[i] ?? 0) < target.length) return i;
+    }
+    return -1;
+  })();
+
   const elapsedMs = Math.max(0, now - startedAt);
   const activeRowLabel =
-    !state.done && state.activeRowIndex >= 0 && state.activeRowIndex < state.rows.length
-      ? state.rows[state.activeRowIndex].label.toLowerCase()
+    !state.done && typingActiveRow >= 0 && typingActiveRow < state.rows.length
+      ? state.rows[typingActiveRow].label.toLowerCase()
       : null;
 
   return (
@@ -390,8 +428,14 @@ export function LoadingProgress({ events, startedAt }: Props) {
           height: 1em;
           background: var(--color-ink);
           vertical-align: -0.12em;
-          margin-left: 0.18em;
+          margin-left: 0.06em;
           animation: typewriter-cursor-blink 1s steps(1, end) infinite;
+        }
+        /* While actively typing characters the cursor is solid — typewriters */
+        /* don't blink while the carriage is moving. Blink only when waiting. */
+        .typewriter-cursor.is-solid {
+          animation: none;
+          opacity: 1;
         }
       `}</style>
 
@@ -488,32 +532,40 @@ export function LoadingProgress({ events, startedAt }: Props) {
 
         <dl className="grid grid-cols-[14rem_1fr] gap-x-7">
           {state.rows.map((row, i) => {
-            const filled = row.value !== null;
-            const isActive = !state.done && i === state.activeRowIndex && !filled;
+            const target = row.value;
+            const typed = typedLengths[i] ?? 0;
+            const isActive = !state.done && i === typingActiveRow;
+            // Two distinct active states: blocked (data not landed → cursor
+            // blinks on underscores) vs typing (data landed → cursor solid,
+            // characters reveal one tick at a time).
+            const isTyping = isActive && target !== null;
+            const safeTyped = target === null ? 0 : Math.min(typed, target.length);
             return (
               <div key={row.label} className="contents">
                 <dt className="border-b border-rule py-2.5 font-mono text-[0.66rem] font-semibold uppercase tracking-[0.22em] text-graphite">
                   {row.label}
                 </dt>
-                <dd
-                  className={
-                    'border-b border-rule py-2.5 text-[18px] leading-snug ' +
-                    (filled
-                      ? 'font-semibold text-ink'
-                      : 'font-medium text-graphite-soft')
-                  }
-                >
-                  {filled ? (
-                    <span>{row.value}</span>
-                  ) : (
+                <dd className="border-b border-rule py-2.5 text-[18px] leading-snug font-semibold text-ink">
+                  {target === null ? (
                     <span
-                      className="font-mono text-graphite-soft"
+                      className="font-mono text-graphite-soft font-medium"
                       style={{ letterSpacing: '0.04em' }}
                     >
                       {'_ '.repeat(24).trimEnd()}
                     </span>
+                  ) : (
+                    <span className="whitespace-pre-wrap break-words">
+                      {target.slice(0, safeTyped)}
+                    </span>
                   )}
-                  {isActive && <span className="typewriter-cursor" aria-hidden />}
+                  {isActive && (
+                    <span
+                      className={
+                        'typewriter-cursor' + (isTyping ? ' is-solid' : '')
+                      }
+                      aria-hidden
+                    />
+                  )}
                 </dd>
               </div>
             );
