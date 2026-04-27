@@ -16,6 +16,7 @@
 import { getAnthropic } from '@/lib/anthropic';
 import { logAnthropicUsage } from '@/lib/usage-log';
 import { pdfContentHash, readPdfCache, writePdfCache } from '@/lib/pdf-cache';
+import { sampleLongText } from '@/lib/token-count';
 import { extractPdfText } from './pdf';
 import {
   PerPdfFactsSchema,
@@ -333,9 +334,12 @@ export async function classifyAndExtractOnePdf(
     return { filename: input.filename, ...scanEntry };
   }
 
-  const text = parsed.text.length > MAX_TEXT_CHARS
-    ? parsed.text.slice(0, MAX_TEXT_CHARS) + '\n[…truncated…]'
-    : parsed.text;
+  // Front-half + last-quarter sampling for over-budget docs: legal
+  // documents (cover letters, business plans) carry critical content in
+  // both the opening framing and the signature/exhibit tail; plain
+  // front-only truncation drops the latter. Char-based heuristic — no
+  // countTokens round-trip on the per-PDF path (we have N PDFs/case).
+  const text = sampleLongText(parsed.text, MAX_TEXT_CHARS);
 
   const userMessage = `## Filename\n${input.filename}\n\n## Document text (pages delimited by [page N] markers)\n\n${text}\n\nRespond with ONLY a single JSON object matching the doc_type-discriminated PerPdfFacts schema. No prose, no markdown fences.`;
 

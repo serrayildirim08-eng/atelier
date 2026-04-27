@@ -14,6 +14,7 @@
 
 import { getAnthropic } from '@/lib/anthropic';
 import { logAnthropicUsage } from '@/lib/usage-log';
+import { countMessageTokens } from '@/lib/token-count';
 import { E2FactsSchema, type E2Facts } from './schema';
 import { DOC_TYPE_LABELS, type PerPdfResult, type TypedMemory } from './typed-memory';
 import {
@@ -136,9 +137,83 @@ For arrays (e.g., ownership_chain, source_of_funds, conflict_register), an empty
 Do NOT include any extra top-level keys not in E2FactsSchema. The schema's top-level keys are:
   case_type-specific facts: investor, enterprise, ownership_chain, investment, source_of_funds, elements_evidence, conflict_register
 
+DOCUMENT INVENTORY WITH ALIASES (read this section first):
+
+The user message includes a DOCUMENT INVENTORY block listing each PDF's raw filename, its classified doc_type, the canonical \`suggested_filename\` from the document-classifier-renamer, and (when applied) the attorney-accepted alias. The inventory is the source of truth for how to NAME documents in source_quote.
+
+When source_quote prefixes a quote with a filename, use this priority order:
+1. If an applied alias exists for the PDF, use the alias (e.g., "[kacar-salih-passport-bio-page.pdf p.2] John Doe, born 1985-03-10").
+2. Otherwise, if a suggested_filename exists with confidence ≥ 0.7, use the suggested_filename.
+3. Otherwise, use the raw filename as it appeared in the typed memory.
+
+Apply the same priority everywhere a filename appears in the unified output: source_quote prefixes on every Field<T>, conflict_register fact_a_doc / fact_b_doc, source_of_funds.origin_evidence, investment.items.evidence_doc. The drafter downstream cites by these names; using the alias means the cover letter ships with attorney-readable references like "(Exhibit: Kacar-Salih Passport Bio Page)" instead of "(Exhibit: 1709245687.pdf)".
+
+When NO alias is applied AND suggested_filename confidence is below 0.7, you may flag the entry in conflict_register at severity 1-2 (cosmetic, conflict_type='filename_uncanonical') so the attorney sees it in the dashboard, but do NOT block on this — uncanonical filenames are workflow noise, not a substantive RFE risk.
+
 Output: ONE JSON object matching E2FactsSchema. No prose, no commentary, no markdown fences. Begin your response with { and end with }.`;
 
 const USER_INSTRUCTION = `Below is the typed memory for this E-2 case folder. Reconcile the entries into a unified E2FactsSchema following the rules above.`;
+
+/**
+ * Per-PDF alias entry shape (matches the rename API's AliasEntry on disk).
+ * Only `alias` is consumed by the aggregator; the timestamps live on disk
+ * for audit. Aliases here are the attorney-ACCEPTED canonical filenames
+ * — distinct from the per-PDF facts.suggested_filename, which is the
+ * classifier's auto-suggestion (may or may not have been accepted).
+ */
+export interface FilenameAlias {
+  alias: string;
+}
+
+/**
+ * Build the DOCUMENT INVENTORY WITH ALIASES block surfaced into the
+ * aggregator's user prompt. Renders one row per raw PDF filename in the
+ * typed memory; columns are: pdf_path | doc_type | applied_alias |
+ * suggested_filename | suggestion_confidence. The system prompt's
+ * priority rules (alias → suggested_filename @ ≥0.7 → raw) reference
+ * this table.
+ */
+function buildDocInventoryWithAliases(
+  memory: TypedMemory,
+  aliases: Record<string, FilenameAlias> = {},
+): string {
+  type Row = {
+    pdf_path: string;
+    doc_type: string;
+    applied_alias: string;
+    suggested_filename: string;
+    suggestion_confidence: string;
+  };
+  const rows: Row[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    const docType = entry.facts?.doc_type ?? 'unclassified';
+    const sf = entry.facts && 'suggested_filename' in entry.facts
+      ? (entry.facts as { suggested_filename?: { value: string | null; confidence: number | null } })
+          .suggested_filename
+      : null;
+    rows.push({
+      pdf_path: entry.filename,
+      doc_type: docType,
+      applied_alias: aliases[entry.filename]?.alias ?? '—',
+      suggested_filename: sf?.value ?? '—',
+      suggestion_confidence:
+        sf?.confidence != null ? sf.confidence.toFixed(2) : '—',
+    });
+  }
+  if (rows.length === 0) return '';
+
+  const header =
+    '| pdf_path | doc_type | applied alias | suggested_filename | suggestion confidence |\n' +
+    '| --- | --- | --- | --- | --- |';
+  const body = rows
+    .map(
+      (r) =>
+        `| ${r.pdf_path} | ${r.doc_type} | ${r.applied_alias} | ${r.suggested_filename} | ${r.suggestion_confidence} |`,
+    )
+    .join('\n');
+
+  return `## DOCUMENT INVENTORY WITH ALIASES — ${rows.length} PDF${rows.length === 1 ? '' : 's'}\n\n${header}\n${body}`;
+}
 
 function memoryToPromptText(memory: TypedMemory): string {
   const sections: string[] = [];
@@ -987,7 +1062,7 @@ export function runCredentialVerifiabilityGate(
 
 export async function aggregateTypedMemoryToE2(
   memory: TypedMemory,
-  options?: { filingDate?: Date },
+  options?: { filingDate?: Date; aliases?: Record<string, FilenameAlias> },
 ): Promise<{
   caseFacts: E2Facts;
   usage: AggregateUsage;
@@ -1002,7 +1077,32 @@ export async function aggregateTypedMemoryToE2(
   credential_verifiability_results: CredentialVerifiabilityAuditRow[];
 }> {
   const memoryBlock = memoryToPromptText(memory);
-  const userMessage = `${USER_INSTRUCTION}\n\n# Typed memory\n\n${memoryBlock}\n\nRespond with ONLY a single JSON object matching the E2FactsSchema. No prose, no markdown fences, no commentary.`;
+  const inventoryBlock = buildDocInventoryWithAliases(memory, options?.aliases);
+  const inventorySection = inventoryBlock ? `\n\n${inventoryBlock}` : '';
+  const userMessage = `${USER_INSTRUCTION}${inventorySection}\n\n# Typed memory\n\n${memoryBlock}\n\nRespond with ONLY a single JSON object matching the E2FactsSchema. No prose, no markdown fences, no commentary.`;
+
+  // Pre-flight token count (free; observability only). Surfaces growth in
+  // typed memory before it lands as a request the API truncates or
+  // refuses. Threshold is well below Sonnet 4.6's context ceiling — this
+  // is an early-warning, not a hard gate. Failure is non-fatal.
+  const PREFLIGHT_WARN_TOKENS = 150_000;
+  try {
+    const count = await countMessageTokens({
+      model: 'claude-sonnet-4-6',
+      system: [{ type: 'text', text: SYSTEM_PROMPT }],
+      messages: [{ role: 'user', content: userMessage }],
+    });
+    if (count.input_tokens > PREFLIGHT_WARN_TOKENS) {
+      console.warn(
+        `[typed-aggregate] input_tokens=${count.input_tokens} exceeds ${PREFLIGHT_WARN_TOKENS} threshold; review schema growth.`,
+      );
+    }
+  } catch (e: unknown) {
+    console.warn(
+      '[typed-aggregate] countTokens failed:',
+      e instanceof Error ? e.message : String(e),
+    );
+  }
 
   // Anthropic's structured-output (messages.parse) caps at 16 union/nullable
   // parameters per schema. E2FactsSchema has ~176 (every Field<T> leaf is a
