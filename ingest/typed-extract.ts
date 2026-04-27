@@ -725,16 +725,54 @@ export async function classifyAndExtractOnePdf(
     };
   }
 
-  const validated = PerPdfFactsSchema.safeParse(raw);
+  type ParseResult = ReturnType<typeof PerPdfFactsSchema.safeParse>;
+  let validated: ParseResult = PerPdfFactsSchema.safeParse(raw);
+  const originalErrorMessage = !validated.success ? validated.error.message : '';
+
+  // Schema-mismatch fallback: when Haiku's structured output drifts from
+  // a discriminated-union variant (most often: an array field emitted as
+  // null/object/scalar), don't discard the entire PDF — synthesize a
+  // minimal `other`-typed entry so the aggregator at least sees the
+  // filename + suggested_filename and the doc shows up in the binder /
+  // exhibit list.
   if (!validated.success) {
-    return {
-      filename: input.filename,
-      pageCount: parsed.pageCount,
-      error: {
-        code: 'schema_mismatch',
-        message: validated.error.message.slice(0, 500),
-      },
+    const rawObj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+    const sf = rawObj.suggested_filename;
+    const dn = rawObj.display_name;
+    const summary = rawObj.one_line_summary;
+    const fallbackFacts = {
+      doc_type: 'other' as const,
+      suggested_filename:
+        sf && typeof sf === 'object' && 'value' in sf
+          ? sf
+          : { value: typeof sf === 'string' ? sf : null, source_page: null, source_quote: null, confidence: null },
+      display_name:
+        dn && typeof dn === 'object' && 'value' in dn
+          ? dn
+          : { value: typeof dn === 'string' ? dn : null, source_page: null, source_quote: null, confidence: null },
+      one_line_summary:
+        summary && typeof summary === 'object' && 'value' in summary
+          ? summary
+          : { value: `Schema mismatch — partial extraction available. ${originalErrorMessage.slice(0, 120)}`, source_page: null, source_quote: '[schema_mismatch fallback]', confidence: 0.3 },
+      key_facts: [],
     };
+    const reSafe = PerPdfFactsSchema.safeParse(fallbackFacts);
+    if (reSafe.success) {
+      validated = reSafe;
+      console.warn(
+        `[typed-extract] ${input.filename}: schema_mismatch — fell back to minimal 'other' entry. ${originalErrorMessage.slice(0, 200)}`,
+      );
+    } else {
+      // Even the fallback didn't validate — give up and surface the error.
+      return {
+        filename: input.filename,
+        pageCount: parsed.pageCount,
+        error: {
+          code: 'schema_mismatch',
+          message: validated.error.message.slice(0, 500),
+        },
+      };
+    }
   }
 
   logAnthropicUsage({

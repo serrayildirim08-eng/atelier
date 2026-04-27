@@ -28,6 +28,13 @@ interface ApprovalModalProps {
   generator: PreviewGenerator;
   /** Optional generator-specific args forwarded to the preview endpoint. */
   args?: Record<string, unknown>;
+  /**
+   * Live case facts. When supplied, the modal posts them in the body of
+   * /preview and /approve so the server uses the freshly-ingested matter
+   * instead of falling back to getMockMatter / getMockTypedMemory.
+   */
+  caseFacts?: unknown;
+  typedMemory?: unknown;
   onClose: () => void;
   onApproved?: (result: ApprovalResult) => void;
   onRejected?: () => void;
@@ -71,7 +78,12 @@ export function PreGenerationApprovalModal(props: ApprovalModalProps) {
     fetch(`/api/matter/${encodeURIComponent(matterId)}/preview`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ generator, args }),
+      body: JSON.stringify({
+        generator,
+        args,
+        case_facts: props.caseFacts,
+        typed_memory: props.typedMemory,
+      }),
     })
       .then(async (r) => {
         const body = await r.json().catch(() => ({}));
@@ -115,6 +127,8 @@ export function PreGenerationApprovalModal(props: ApprovalModalProps) {
           approved,
           attorney_initials: initials.trim(),
           edits: approved ? editArray : [],
+          case_facts: props.caseFacts,
+          typed_memory: props.typedMemory,
         }),
       });
       const body = await r.json().catch(() => ({}));

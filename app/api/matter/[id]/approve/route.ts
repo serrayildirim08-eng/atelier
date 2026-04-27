@@ -21,6 +21,8 @@ import {
   recordRejection,
   type PreviewEdit,
 } from '@/lib/preview-store';
+import type { CaseFacts } from '@/ingest/schema';
+import type { TypedMemory } from '@/ingest/typed-memory';
 import { getMockMatter, getMockTypedMemory } from '../mock-data';
 
 export const runtime = 'nodejs';
@@ -32,6 +34,20 @@ interface ApprovalBody {
   attorney_initials?: unknown;
   edits?: unknown;
   rejection_reason?: unknown;
+  /** Live caseFacts from the home page; overrides mock when present. */
+  case_facts?: unknown;
+  /** Live typed memory from the home page; overrides mock when present. */
+  typed_memory?: unknown;
+}
+
+function isCaseFacts(v: unknown): v is CaseFacts {
+  if (!v || typeof v !== 'object') return false;
+  const obj = v as Record<string, unknown>;
+  return typeof obj.case_type === 'string' && obj.facts !== undefined;
+}
+
+function isTypedMemory(v: unknown): v is TypedMemory {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
 }
 
 function parseEdits(input: unknown): PreviewEdit[] {
@@ -101,16 +117,21 @@ export async function POST(
     return Response.json({ rejected: true, preview: updated });
   }
 
-  // Approval path: execute generator, then stamp.
-  const matter = getMockMatter(id);
-  const memory = getMockTypedMemory(id);
+  // Approval path: execute generator, then stamp. Prefer caller-supplied
+  // facts (the live home-page matter); fall back to mock for the demo.
+  const caseFacts: CaseFacts = isCaseFacts(body.case_facts)
+    ? body.case_facts
+    : getMockMatter(id).caseFacts;
+  const memory: TypedMemory = isTypedMemory(body.typed_memory)
+    ? body.typed_memory
+    : getMockTypedMemory(id);
   const edits = parseEdits(body.edits);
 
   let executeResult;
   try {
     executeResult = await executeApprovedPreview(
       record,
-      matter.caseFacts,
+      caseFacts,
       memory,
       edits,
     );

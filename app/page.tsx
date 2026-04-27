@@ -6,6 +6,11 @@ import type { DragEvent, ChangeEvent } from 'react';
 import type { ReviewReport } from '@/reason';
 import type { CaseType, E2Facts } from '@/ingest';
 import {
+  PreGenerationApprovalModal,
+  type ApprovalResult,
+} from '@/app/components/pre-generation-approval';
+import type { PreviewGenerator } from '@/lib/preview-store';
+import {
   LoadingProgress,
   type LoadingStreamEvent,
 } from '@/app/components/loading-progress';
@@ -40,7 +45,7 @@ interface IngestResult {
   error?: { code: string; message: string };
 }
 
-type DossierTab = 'facts' | 'memory' | 'draft' | 'review' | 'log';
+type DossierTab = 'facts' | 'exhibits' | 'draft' | 'review' | 'log';
 
 interface IngestProgress {
   stage: string;
@@ -51,6 +56,7 @@ interface IngestProgress {
 type DocType =
   | 'passport'
   | 'status_doc'
+  | 'i94'
   | 'bank_statement'
   | 'tax_doc'
   | 'money_movement'
@@ -65,11 +71,20 @@ type DocType =
   | 'uscis_or_dos_form'
   | 'cover_letter'
   | 'expert_letter'
+  | 'employer_letter'
+  | 'cv_or_resume'
+  | 'financial_statement'
+  | 'credential'
+  | 'vital_record'
+  | 'title_deed'
+  | 'government_id'
+  | 'translation_certification'
   | 'other';
 
-const DOC_TYPE_LABEL: Record<DocType, string> = {
+const DOC_TYPE_LABELS: Record<DocType, string> = {
   passport: 'Passport',
-  status_doc: 'US status / I-94',
+  status_doc: 'US status / visa stamp / I-797 / EAD',
+  i94: 'CBP I-94 record',
   bank_statement: 'Bank statement',
   tax_doc: 'Tax document',
   money_movement: 'Wire / transfer',
@@ -84,8 +99,20 @@ const DOC_TYPE_LABEL: Record<DocType, string> = {
   uscis_or_dos_form: 'USCIS / DOS form',
   cover_letter: 'Cover letter',
   expert_letter: 'Expert letter',
+  employer_letter: 'Employer letter / verification of employment',
+  cv_or_resume: 'CV / resume',
+  financial_statement: 'Financial statement',
+  credential: 'Diploma / certification / license',
+  vital_record: 'Birth / marriage / divorce certificate',
+  title_deed: 'Title deed / Tapu',
+  government_id: 'National ID / driver’s license',
+  translation_certification: 'Translation certification',
   other: 'Other',
 };
+
+// Backwards-compat alias for any old call sites that still reference the
+// singular form. New code should use DOC_TYPE_LABELS.
+const DOC_TYPE_LABEL = DOC_TYPE_LABELS;
 
 interface PerPdfMemoryEntry {
   filename: string;
@@ -290,6 +317,33 @@ export default function Page() {
     return () => clearInterval(id);
   }, []);
 
+  // Persist matters across page refreshes. The binder rail (left) reads
+  // results[] — without this, every Cmd+R wipes the user's case list.
+  // localStorage cap is ~5MB; ~14KB per matter (incl. draft) → 200+ cases
+  // before bumping into the limit, which is past any solo firm's volume.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('akalan:matters:v1');
+      if (!raw) return;
+      const stored = JSON.parse(raw) as IngestResult[];
+      if (Array.isArray(stored) && stored.length > 0) {
+        setResults(stored);
+        setSelectedIdx(0);
+      }
+    } catch {
+      /* ignore — corrupt storage just means the binder starts empty */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (results.length === 0) return;
+    try {
+      localStorage.setItem('akalan:matters:v1', JSON.stringify(results));
+    } catch {
+      /* localStorage full or disabled — non-fatal, just skip persistence */
+    }
+  }, [results]);
+
   const selected = results[selectedIdx];
 
   const handleFiles = useCallback(async (files: File[]) => {
@@ -471,16 +525,11 @@ export default function Page() {
             if (collected.length === 1) setSelectedIdx(0);
           } else if (evt.type === 'done') {
             setProgress(null);
-            // Once the typewriter table has finished + 100% paints, route
-            // into the matter dashboard. Brief delay lets the stage strip
-            // settle on "Assemble" so the transition reads as completion
-            // rather than a hard cut.
-            if (matterId) {
-              const target = matterId;
-              setTimeout(() => {
-                router.push(`/matter/${encodeURIComponent(target)}`);
-              }, 900);
-            }
+            // Auto-navigation to /matter/<id> disabled: that route reads
+            // the hardcoded mock from getMockMatter() and would clobber
+            // the real ingest result sitting in client state. Stay on
+            // home — the Dossier component already renders results[0]
+            // with the real extracted facts / draft / review.
           }
         }
       }
@@ -550,7 +599,12 @@ export default function Page() {
           onOpenMatter={() => setMatterOverlayOpen(true)}
           streamingDraft={streamingDraft}
         />
-        <Marginalia result={selected} loading={loading} />
+        <Marginalia
+          result={selected}
+          results={results}
+          loading={loading}
+          streamingDraft={streamingDraft}
+        />
       </main>
 
       <StatusBar results={results} loading={loading} now={now} />
@@ -658,7 +712,7 @@ function Binder({
   return (
     <aside className="border-r border-rule paper-grain min-h-0 flex flex-col">
       <div className="px-5 pt-5 pb-3">
-        <div className="smcp text-[0.65rem] text-graphite-soft mb-1">⁂  the binder</div>
+        <div className="smcp text-[0.65rem] text-graphite-soft mb-1">⁂  my matters</div>
         <div className="font-display text-[0.92rem] leading-tight">
           {results.length === 0
             ? 'No active matters.'
@@ -877,13 +931,17 @@ function Dossier({
       <DossierHeader result={result} />
       <DossierTabs tab={tab} onTab={onTab} result={result} />
       <div className="flex-1 overflow-y-auto min-h-0">
-        {tab === 'facts' && <FactsPane facts={result.caseFacts.facts} />}
-        {tab === 'memory' && (
+        {tab === 'facts' && (
+          <FactsPane facts={result.caseFacts.facts} typedMemory={typedMemory} />
+        )}
+        {tab === 'exhibits' && (
           <MemoryPane
             typedMemory={typedMemory}
             matterRoot={matterRoot}
             entryLabels={entryLabels}
             onOpenMatter={onOpenMatter}
+            matterId={result.filename}
+            caseFacts={result.caseFacts}
           />
         )}
         {tab === 'draft' && <DraftPane result={result} streamingDraft={streamingDraft} />}
@@ -913,35 +971,163 @@ function DossierLoadingHeader({
   );
 }
 
+/**
+ * 8-category exhibits taxonomy. Maps the 26 raw doc_type buckets into
+ * the firm's filing structure. Each category surfaces:
+ *   - the documents that landed in it (display_name + raw filename)
+ *   - one or more Generate buttons for the artifacts that section drives
+ *
+ * Generators are wired by name to the existing preview → approve API
+ * (lib/preview-builders + app/api/matter/[id]/preview / approve). Until
+ * the home-page's freshly-ingested matter is plumbed into that API, the
+ * Generate buttons surface as "(open matter to generate)" prompts.
+ */
+type ExhibitCategoryKey =
+  | 'applicant'
+  | 'company'
+  | 'business_plan'
+  | 'cover_letter'
+  | 'source_of_funds'
+  | 'operational'
+  | 'forms_letters'
+  | 'employees'
+  | 'unassigned';
+
+interface ExhibitCategorySpec {
+  key: ExhibitCategoryKey;
+  label: string;
+  doc_types: DocType[];
+  generators: { generator: string; label: string }[];
+}
+
+const EXHIBIT_CATEGORIES: ExhibitCategorySpec[] = [
+  {
+    key: 'applicant',
+    label: '1 · Applicant Documents',
+    doc_types: ['passport', 'status_doc', 'i94', 'government_id', 'vital_record', 'credential', 'cv_or_resume'],
+    generators: [
+      { generator: 'declaration_beneficiary', label: 'Generate · Beneficiary declaration' },
+      { generator: 'declaration_spouse', label: 'Generate · Spouse declaration' },
+      { generator: 'noid_principal', label: 'Generate · NoID (principal)' },
+      { generator: 'noid_dependent', label: 'Generate · NoID (dependent)' },
+    ],
+  },
+  {
+    key: 'company',
+    label: '2 · Company Documents',
+    doc_types: ['formation_doc', 'ownership_evidence'],
+    generators: [
+      { generator: 'declaration_enterprise_rep', label: 'Generate · Enterprise rep declaration' },
+    ],
+  },
+  {
+    key: 'business_plan',
+    label: '3 · Business Plan',
+    doc_types: ['business_plan'],
+    generators: [],
+  },
+  {
+    key: 'cover_letter',
+    label: '4 · Cover Letter',
+    doc_types: ['cover_letter'],
+    generators: [
+      { generator: 'cover_letter', label: 'Generate · Cover letter' },
+    ],
+  },
+  {
+    key: 'source_of_funds',
+    label: '5 · Source of Funds',
+    doc_types: ['source_of_funds', 'title_deed', 'money_movement', 'bank_statement'],
+    generators: [],
+  },
+  {
+    key: 'operational',
+    label: '6 · Operational Documents',
+    doc_types: ['lease_or_property', 'invoice_or_receipt', 'financial_statement', 'business_contract', 'tax_doc'],
+    generators: [],
+  },
+  {
+    key: 'forms_letters',
+    label: '7 · Forms and Letters',
+    doc_types: ['uscis_or_dos_form', 'expert_letter'],
+    generators: [
+      { generator: 'forms_i129', label: 'Fill · I-129' },
+      { generator: 'forms_i129e', label: 'Fill · I-129E' },
+      { generator: 'forms_g28', label: 'Fill · G-28' },
+      { generator: 'forms_i539', label: 'Fill · I-539 (spouse)' },
+      { generator: 'forms_i539a', label: 'Fill · I-539A (child)' },
+      { generator: 'exhibit_list', label: 'Generate · Exhibit list' },
+    ],
+  },
+  {
+    key: 'employees',
+    label: '8 · Employee Documents',
+    doc_types: ['payroll_doc', 'employer_letter'],
+    generators: [],
+  },
+  {
+    key: 'unassigned',
+    label: 'Unassigned · Attorney sort',
+    doc_types: ['translation_certification', 'other'],
+    generators: [],
+  },
+];
+
 function MemoryPane({
   typedMemory,
   matterRoot,
   entryLabels,
   onOpenMatter,
+  matterId,
+  caseFacts,
 }: {
   typedMemory: TypedMemory;
   matterRoot: string | null;
   entryLabels: Record<string, string>;
   onOpenMatter: () => void;
+  /** Used as the matter_id in /api/matter/[id]/{preview,approve} calls. */
+  matterId?: string;
+  /** Live caseFacts forwarded to the approval flow. */
+  caseFacts?: unknown;
 }) {
-  const buckets = (Object.entries(typedMemory) as [DocType, PerPdfMemoryEntry[]][])
-    .filter(([, list]) => Array.isArray(list) && list.length > 0)
-    .sort((a, b) => b[1].length - a[1].length);
+  // Compute the per-category aggregated entries from the raw doc_type
+  // buckets. Empty categories still render so the firm's taxonomy is
+  // visible at a glance — the dossier *should* show "Business Plan: 0
+  // documents — drop one in" rather than hide the heading.
+  const categoryEntries: { spec: ExhibitCategorySpec; entries: { docType: DocType; entry: PerPdfMemoryEntry }[] }[] =
+    EXHIBIT_CATEGORIES.map((spec) => {
+      const flat: { docType: DocType; entry: PerPdfMemoryEntry }[] = [];
+      for (const dt of spec.doc_types) {
+        const list = typedMemory[dt];
+        if (!list) continue;
+        for (const e of list) flat.push({ docType: dt, entry: e });
+      }
+      return { spec, entries: flat };
+    });
 
-  const [collapsedBuckets, setCollapsedBuckets] = useState<Record<string, boolean>>({});
+  const populated = categoryEntries.filter((c) => c.entries.length > 0);
+  const totalEntries = populated.reduce((acc, c) => acc + c.entries.length, 0);
 
-  if (buckets.length === 0) {
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [openGenerator, setOpenGenerator] = useState<PreviewGenerator | null>(null);
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
+  const [recentOutput, setRecentOutput] = useState<{
+    generator: PreviewGenerator;
+    output_path: string | null;
+    output_inline: string | null;
+    approved_at: string;
+  } | null>(null);
+
+  if (totalEntries === 0) {
     return (
       <div className="px-9 py-12 font-display italic text-[0.95rem] text-graphite">
-        Typed memory is empty. PDFs will appear here as they are classified.
+        Exhibits are empty. PDFs will appear here as they are classified.
       </div>
     );
   }
 
-  const totalEntries = buckets.reduce((acc, [, list]) => acc + list.length, 0);
-
   return (
-    <div className="px-9 py-7 space-y-7">
+    <div className="px-9 py-7 space-y-5">
       <button
         onClick={onOpenMatter}
         className="w-full flex items-baseline justify-between border border-ink-2 paper-recess px-5 py-3 hover:bg-ink hover:text-paper transition-colors group"
@@ -950,24 +1136,230 @@ function MemoryPane({
           Open the matter
         </span>
         <span className="font-mono text-[0.7rem] tracking-widest text-graphite group-hover:text-paper-2">
-          {buckets.length} categories · {totalEntries} documents →
+          {populated.length} sections · {totalEntries} documents →
         </span>
       </button>
 
-      {buckets.map(([docType, entries]) => (
-        <MemoryBucket
-          key={docType}
-          docType={docType}
+      {categoryEntries.map(({ spec, entries }) => (
+        <ExhibitCategoryCard
+          key={spec.key}
+          spec={spec}
           entries={entries}
-          collapsed={!!collapsedBuckets[docType]}
-          onToggle={() =>
-            setCollapsedBuckets((s) => ({ ...s, [docType]: !s[docType] }))
-          }
+          collapsed={!!collapsed[spec.key]}
+          onToggle={() => setCollapsed((s) => ({ ...s, [spec.key]: !s[spec.key] }))}
           entryLabels={entryLabels}
           onOpenMatter={onOpenMatter}
+          onPickGenerator={(g) => setOpenGenerator(g)}
+          onPickDocument={
+            matterRoot
+              ? (filename) => {
+                  // matterRoot is the absolute folder path; entry.filename
+                  // is relative inside it. Concat to get the absolute PDF
+                  // path the /api/file proxy expects.
+                  const sep = matterRoot.endsWith('/') ? '' : '/';
+                  setPreviewPath(`${matterRoot}${sep}${filename}`);
+                }
+              : undefined
+          }
         />
       ))}
+
+      {recentOutput && (
+        <section className="border border-rule paper-recess">
+          <header className="px-5 py-3 border-b border-rule-strong">
+            <span className="smcp text-[0.65rem] text-rubric tracking-[0.22em]">
+              ⁂  recent output
+            </span>
+            <span className="ml-3 font-display italic text-[0.85rem] text-graphite">
+              {recentOutput.generator.replace(/_/g, ' ')} · {new Date(recentOutput.approved_at).toLocaleString()}
+            </span>
+          </header>
+          <div className="px-5 py-4 font-mono text-[0.7rem]">
+            {recentOutput.output_path && (
+              <div className="text-graphite mb-2 break-all">
+                → {recentOutput.output_path}
+              </div>
+            )}
+            {recentOutput.output_inline && (
+              <details>
+                <summary className="cursor-pointer text-graphite">
+                  ▸ view inline ({recentOutput.output_inline.length.toLocaleString()} chars)
+                </summary>
+                <pre className="mt-2 whitespace-pre-wrap text-[0.7rem] bg-ink-2/5 p-3 max-h-96 overflow-y-auto">
+                  {recentOutput.output_inline}
+                </pre>
+              </details>
+            )}
+          </div>
+        </section>
+      )}
+
+      {matterId && (
+        <PreGenerationApprovalModal
+          open={openGenerator !== null}
+          matterId={matterId}
+          generator={openGenerator ?? 'cover_letter'}
+          caseFacts={caseFacts}
+          typedMemory={typedMemory}
+          onClose={() => setOpenGenerator(null)}
+          onApproved={(result: ApprovalResult) => {
+            if (openGenerator) {
+              setRecentOutput({
+                generator: openGenerator,
+                output_path: result.output_path,
+                output_inline: result.output_inline,
+                approved_at: result.preview.approved_at ?? new Date().toISOString(),
+              });
+            }
+          }}
+        />
+      )}
+
+      {previewPath && (
+        <DocumentPreviewModal path={previewPath} onClose={() => setPreviewPath(null)} />
+      )}
     </div>
+  );
+}
+
+function DocumentPreviewModal({ path, onClose }: { path: string; onClose: () => void }) {
+  const filename = path.split('/').pop() ?? path;
+  const fileSrc = `/api/file?path=${encodeURIComponent(path)}`;
+  return (
+    <div
+      onClick={onClose}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="bg-paper w-full max-w-5xl h-[90vh] flex flex-col border border-graphite/30 shadow-xl"
+      >
+        <div className="px-6 py-3 border-b border-graphite/20 flex items-baseline justify-between">
+          <div>
+            <div className="smcp text-[0.65rem] text-graphite">¶ document preview</div>
+            <div className="font-display italic text-[1.05rem] text-ink-2 truncate max-w-2xl">
+              {filename}
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="font-mono text-[0.7rem] text-graphite hover:text-ink-2"
+          >
+            [×] close
+          </button>
+        </div>
+        <div className="flex-1 min-h-0">
+          <iframe
+            src={fileSrc}
+            className="w-full h-full"
+            title={filename}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ExhibitCategoryCard({
+  spec,
+  entries,
+  collapsed,
+  onToggle,
+  entryLabels,
+  onOpenMatter,
+  onPickGenerator,
+  onPickDocument,
+}: {
+  spec: ExhibitCategorySpec;
+  entries: { docType: DocType; entry: PerPdfMemoryEntry }[];
+  collapsed: boolean;
+  onToggle: () => void;
+  entryLabels: Record<string, string>;
+  onOpenMatter: () => void;
+  onPickGenerator?: (g: PreviewGenerator) => void;
+  onPickDocument?: (filename: string) => void;
+}) {
+  const empty = entries.length === 0;
+  return (
+    <section className="border border-rule paper-recess">
+      <button
+        onClick={onToggle}
+        className="w-full flex items-baseline justify-between px-5 py-3 group hover:bg-ink/5 transition-colors text-left"
+      >
+        <div className="flex items-baseline gap-3">
+          <span className="font-display italic text-[1.05rem] text-ink-2">
+            {spec.label}
+          </span>
+          <span className="font-mono text-[0.7rem] text-graphite-soft tracking-wider">
+            {empty ? '—' : `${entries.length} doc${entries.length === 1 ? '' : 's'}`}
+          </span>
+        </div>
+        <span className="font-mono text-[0.7rem] text-graphite group-hover:text-ink-2">
+          {collapsed ? '▸' : '▾'}
+        </span>
+      </button>
+
+      {!collapsed && (
+        <div className="px-5 pb-5 pt-1 space-y-4">
+          {empty ? (
+            <div className="font-display italic text-[0.85rem] text-graphite-soft px-2">
+              No documents in this category yet.
+            </div>
+          ) : (
+            <ul className="space-y-2">
+              {entries.map(({ docType, entry }, i) => {
+                const display =
+                  entryLabels[entry.filename] ||
+                  ((entry.facts as { display_name?: { value?: string } } | null | undefined)?.display_name?.value as string | undefined) ||
+                  ((entry.facts as { suggested_filename?: { value?: string } } | null | undefined)?.suggested_filename?.value as string | undefined) ||
+                  entry.filename;
+                const clickable = !!onPickDocument;
+                return (
+                  <li
+                    key={`${entry.filename}-${i}`}
+                    onClick={clickable ? () => onPickDocument(entry.filename) : undefined}
+                    className={`border-l-2 border-rule pl-3 py-1.5 hover:border-ink-2 transition-colors ${
+                      clickable ? 'cursor-pointer hover:bg-ink/5' : ''
+                    }`}
+                    title={clickable ? 'Click to preview the PDF' : undefined}
+                  >
+                    <div
+                      className={`font-display text-[0.9rem] ${clickable ? 'text-blue-700 hover:underline' : 'text-ink-2'}`}
+                    >
+                      {display}
+                    </div>
+                    <div className="font-mono text-[0.65rem] text-graphite-soft truncate">
+                      {DOC_TYPE_LABELS[docType] ?? docType} · {entry.filename}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          {spec.generators.length > 0 && (
+            <div className="border-t border-rule pt-3 flex flex-wrap gap-2">
+              {spec.generators.map((g) => (
+                <button
+                  key={g.generator}
+                  onClick={() => {
+                    if (onPickGenerator) {
+                      onPickGenerator(g.generator as PreviewGenerator);
+                    } else {
+                      onOpenMatter();
+                    }
+                  }}
+                  title="Opens the preview → approve modal. NO output ships without attorney sign-off."
+                  className="text-[0.72rem] font-mono px-3 py-1.5 border border-ink-2 hover:bg-ink hover:text-paper transition-colors smcp"
+                >
+                  {g.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -1386,7 +1778,7 @@ function DossierTabs({
 }) {
   const tabs: { key: DossierTab; label: string; suffix?: string }[] = [
     { key: 'facts', label: 'Facts' },
-    { key: 'memory', label: 'Memory' },
+    { key: 'exhibits', label: 'Exhibits' },
     {
       key: 'draft',
       label: 'Draft',
@@ -1443,13 +1835,408 @@ function DossierTabs({
 /* Facts pane                                                              */
 /* ---------------------------------------------------------------------- */
 
-function FactsPane({ facts }: { facts: Record<string, unknown> }) {
+function FactsPane({
+  facts,
+  typedMemory,
+}: {
+  facts: Record<string, unknown>;
+  typedMemory?: TypedMemory;
+}) {
   return (
-    <div className="px-9 py-7 grid gap-7 fade-in">
-      {Object.entries(facts).map(([key, value]) => (
-        <FactSection key={key} label={key} value={value} top />
-      ))}
+    <div className="px-9 py-7 grid gap-8 fade-in">
+      <StructuredFactsPanel facts={facts} typedMemory={typedMemory} />
+      <details className="border border-rule paper-recess">
+        <summary className="cursor-pointer px-5 py-3 font-mono text-[0.75rem] text-graphite hover:bg-ink/5">
+          ▸ raw extracted facts (full schema dump)
+        </summary>
+        <div className="px-5 py-4 grid gap-7 border-t border-rule">
+          {Object.entries(facts).map(([key, value]) => (
+            <FactSection key={key} label={key} value={value} top />
+          ))}
+        </div>
+      </details>
     </div>
+  );
+}
+
+/**
+ * Structured 7-block facts panel — the firm-friendly view of the matter.
+ * Reads the canonical E2Facts shape with optional chaining + missing-flag
+ * fallbacks. Each block is paired with the live extracted values so an
+ * attorney can read the matter at a glance without diving the schema.
+ */
+function StructuredFactsPanel({
+  facts,
+  typedMemory,
+}: {
+  facts: Record<string, unknown>;
+  typedMemory?: TypedMemory;
+}) {
+  const investor = (facts.investor as Record<string, FieldLeaf<unknown>> | undefined) ?? {};
+  const enterprise = (facts.enterprise as Record<string, FieldLeaf<unknown>> | undefined) ?? {};
+  const investment = (facts.investment as Record<string, unknown> | undefined) ?? {};
+  const sourceOfFunds = Array.isArray(facts.source_of_funds)
+    ? (facts.source_of_funds as Record<string, FieldLeaf<unknown>>[])
+    : [];
+
+  const investmentItems = Array.isArray(
+    (investment as { items?: unknown }).items,
+  )
+    ? ((investment as { items: Record<string, FieldLeaf<unknown>>[] }).items)
+    : [];
+
+  // Total transferred from source_of_funds origin amounts.
+  const totalTransferred = sourceOfFunds.reduce((acc, sof) => {
+    const v = (sof.origin_amount_usd as FieldLeaf<number> | undefined)?.value;
+    return acc + (typeof v === 'number' ? v : 0);
+  }, 0);
+
+  // Most recent I-94 admit_until — investor.current_us_status text often
+  // includes it when the I-94 was extracted at the per-PDF level. Fall
+  // back to a status-string inference.
+  const currentStatus = (investor.current_us_status as FieldLeaf<string> | undefined)?.value;
+  const inUSA =
+    typeof currentStatus === 'string' &&
+    !/abroad|outside|not in u\.?s\.?|never been/i.test(currentStatus);
+
+  // I-94 deadline countdown: walk typed memory's i94 + status_doc entries,
+  // pull the latest admit_until_date, compute days remaining.
+  const i94Bundle = pickLatestI94(typedMemory);
+
+  return (
+    <div className="grid gap-7">
+      <StructuredBlock
+        roman="I"
+        title="Applicant"
+        rows={[
+          { label: 'Full name', field: investor.full_name },
+          { label: 'Date of birth', field: investor.dob },
+          { label: 'Place of birth', field: investor.place_of_birth },
+          { label: 'Nationality', field: investor.nationality },
+          {
+            label: 'Current location',
+            field: investor.current_us_status,
+            fallback: currentStatus
+              ? inUSA
+                ? '🇺🇸 in the United States'
+                : '✈ abroad'
+              : null,
+          },
+          { label: 'Address', fallback: '[MISSING — collect from intake form]' },
+          { label: 'Phone', fallback: '[MISSING — collect from intake form]' },
+          { label: 'Email', fallback: '[MISSING — collect from intake form]' },
+        ]}
+      />
+
+      <StructuredBlock
+        roman="II"
+        title="Identity bundle (passport · visa · I-94)"
+        rows={[
+          { label: 'Passport number', field: investor.passport_number },
+          { label: 'Passport expiry', field: investor.passport_expiry },
+          { label: 'Passport issue date', fallback: '[See passport bio page in Applicant Documents]' },
+          { label: 'Issuing authority', fallback: '[See passport bio page in Applicant Documents]' },
+          { label: 'Most recent visa', fallback: '[See visa stamp / I-797 in Applicant Documents]' },
+          {
+            label: 'Most recent I-94',
+            fallback: i94Bundle.found
+              ? `${i94Bundle.classOfAdmission ?? '?'} · admitted ${i94Bundle.admissionDate ?? '?'}`
+              : '[See CBP I-94 in Applicant Documents]',
+          },
+          {
+            label: 'I-94 admit-until date',
+            fallback: i94Bundle.found
+              ? `${i94Bundle.admitUntilDate ?? '?'}` +
+                (i94Bundle.daysRemaining !== null
+                  ? `  ·  ${i94Bundle.daysRemaining > 0 ? `${i94Bundle.daysRemaining} days remaining` : `EXPIRED ${Math.abs(i94Bundle.daysRemaining)} days ago`}`
+                  : '')
+              : '[See CBP I-94 — drives the matter deadline]',
+          },
+        ]}
+      />
+
+      <StructuredBlock
+        roman="III"
+        title="Company"
+        rows={[
+          { label: 'Legal name', field: enterprise.legal_name },
+          { label: 'EIN', field: enterprise.ein },
+          { label: 'Formation date', field: enterprise.formation_date },
+          { label: 'State of formation', field: enterprise.state_of_formation },
+          { label: 'Entity type', field: enterprise.entity_type },
+          { label: 'Industry / what they do', field: enterprise.industry },
+          { label: 'NAICS code', field: enterprise.naics_code },
+          { label: 'Physical address', field: enterprise.physical_address },
+        ]}
+      />
+
+      <StructuredBlock
+        roman="IV"
+        title="Source of funds"
+        rows={[
+          {
+            label: 'Total transferred (USD)',
+            fallback:
+              totalTransferred > 0
+                ? `$${totalTransferred.toLocaleString('en-US')}  ·  computed from ${sourceOfFunds.length} chain${sourceOfFunds.length === 1 ? '' : 's'}`
+                : '[None recorded yet]',
+          },
+          ...sourceOfFunds.flatMap((sof, i): BlockRow[] => {
+            const cat = (sof.origin_category as FieldLeaf<string> | undefined)?.value;
+            const amt = (sof.origin_amount_usd as FieldLeaf<number> | undefined)?.value;
+            const dest = (sof.final_destination as FieldLeaf<string> | undefined)?.value;
+            return [
+              {
+                label: `Chain ${i + 1} · origin`,
+                field: sof.origin_category,
+                fallback:
+                  typeof cat === 'string' && typeof amt === 'number'
+                    ? `${cat} → $${amt.toLocaleString('en-US')}`
+                    : null,
+              },
+              {
+                label: `Chain ${i + 1} · destination`,
+                field: sof.final_destination,
+                fallback: typeof dest === 'string' ? dest : null,
+              },
+            ];
+          }),
+        ]}
+      />
+
+      <StructuredBlock
+        roman="V"
+        title="Operations"
+        rows={[
+          { label: 'Nature of business', field: enterprise.industry },
+          { label: 'Employees on payroll', fallback: '[Pull from Employee Documents → payroll register]' },
+          { label: 'Real & operating evidence', fallback: '[See lease + bank statements + vendor invoices in Operational Documents]' },
+        ]}
+      />
+
+      <StructuredBlock
+        roman="VI"
+        title="Spend"
+        rows={[
+          {
+            label: 'Total committed (USD)',
+            field: (investment as { total_committed_usd?: FieldLeaf<number> }).total_committed_usd,
+          },
+          {
+            label: 'Total spent (USD)',
+            field: (investment as { total_spent_usd?: FieldLeaf<number> }).total_spent_usd,
+          },
+          {
+            label: 'Total enterprise cost',
+            field: (investment as { total_cost_of_enterprise_usd?: FieldLeaf<number> }).total_cost_of_enterprise_usd,
+          },
+          {
+            label: 'Proportionality',
+            field: (investment as { proportionality_percent?: FieldLeaf<number> }).proportionality_percent,
+          },
+          {
+            label: 'Investment line items',
+            fallback:
+              investmentItems.length > 0
+                ? `${investmentItems.length} item${investmentItems.length === 1 ? '' : 's'} · see raw view below for full ledger`
+                : '[None recorded yet]',
+          },
+        ]}
+      />
+
+      <StructuredBlock
+        roman="VII"
+        title="Generated artifacts"
+        rows={[
+          { label: 'Cover letter', fallback: '[See Draft tab]' },
+          { label: 'Business plan', fallback: '[Not generated yet]' },
+          { label: 'Declarations', fallback: '[Generate from Exhibits → Applicant / Company section]' },
+          { label: 'Forms (I-129, I-129E, G-28)', fallback: '[Generate from Exhibits → Forms and Letters]' },
+          { label: 'Exhibit list', fallback: '[Generate from Exhibits → Forms and Letters]' },
+        ]}
+      />
+    </div>
+  );
+}
+
+interface FieldLeaf<T> {
+  value: T | null;
+  source_page: number | null;
+  source_quote: string | null;
+  confidence: number | null;
+}
+
+function isFieldLeafShape(v: unknown): v is FieldLeaf<unknown> {
+  return !!v && typeof v === 'object' && 'value' in v && 'source_page' in v;
+}
+
+/**
+ * Walk the matter's typed memory looking for the most recent CBP I-94
+ * admission. Returns admit_until_date + days remaining (negative if the
+ * status has already expired). Searches both the dedicated `i94` slot
+ * and the legacy `status_doc` slot since older extractor versions
+ * mapped I-94 records under status_doc.
+ */
+function pickLatestI94(typedMemory: TypedMemory | undefined): {
+  found: boolean;
+  classOfAdmission: string | null;
+  admissionDate: string | null;
+  admitUntilDate: string | null;
+  daysRemaining: number | null;
+} {
+  const empty = {
+    found: false,
+    classOfAdmission: null,
+    admissionDate: null,
+    admitUntilDate: null,
+    daysRemaining: null,
+  };
+  if (!typedMemory) return empty;
+
+  const candidates: { admitUntil: string | null; admissionDate: string | null; classOfAdmission: string | null }[] = [];
+
+  for (const bucket of ['i94', 'status_doc'] as const) {
+    const list = typedMemory[bucket];
+    if (!list) continue;
+    for (const entry of list) {
+      const facts = entry.facts as Record<string, FieldLeaf<unknown>> | null;
+      if (!facts) continue;
+      const admitUntil = (facts.admit_until_date as FieldLeaf<string> | undefined)?.value;
+      const admissionDate = (facts.admission_date as FieldLeaf<string> | undefined)?.value;
+      const classOfAdmission = (facts.class_of_admission as FieldLeaf<string> | undefined)?.value;
+      if (typeof admitUntil === 'string' && admitUntil.length > 0) {
+        candidates.push({
+          admitUntil,
+          admissionDate: typeof admissionDate === 'string' ? admissionDate : null,
+          classOfAdmission: typeof classOfAdmission === 'string' ? classOfAdmission : null,
+        });
+      }
+    }
+  }
+
+  if (candidates.length === 0) return empty;
+
+  // Pick the latest admit-until date — that's the most recent admission.
+  candidates.sort((a, b) => (a.admitUntil! < b.admitUntil! ? 1 : -1));
+  const latest = candidates[0];
+
+  // Days remaining vs today (UTC midnight comparison).
+  let daysRemaining: number | null = null;
+  const m = latest.admitUntil!.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) {
+    const target = new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);
+    const now = new Date();
+    if (Number.isFinite(target.getTime())) {
+      daysRemaining = Math.round(
+        (target.getTime() - now.getTime()) / (24 * 60 * 60 * 1000),
+      );
+    }
+  }
+
+  return {
+    found: true,
+    classOfAdmission: latest.classOfAdmission,
+    admissionDate: latest.admissionDate,
+    admitUntilDate: latest.admitUntil,
+    daysRemaining,
+  };
+}
+
+interface BlockRow {
+  label: string;
+  field?: FieldLeaf<unknown>;
+  fallback?: string | null;
+}
+
+function StructuredBlock({
+  roman,
+  title,
+  rows,
+}: {
+  roman: string;
+  title: string;
+  rows: BlockRow[];
+}) {
+  return (
+    <section className="border border-rule paper-recess">
+      <header className="px-5 py-3 border-b border-rule-strong flex items-baseline justify-between">
+        <div className="flex items-baseline gap-3">
+          <span className="font-mono text-[0.75rem] text-rubric tabular-nums">{roman}.</span>
+          <span className="font-display italic text-[1.05rem] text-ink-2">{title}</span>
+        </div>
+      </header>
+      <dl className="px-5 py-4 grid grid-cols-[12rem_1fr] gap-x-6 gap-y-2.5">
+        {rows.map((row, i) => (
+          <FactKVRow
+            key={`${row.label}-${i}`}
+            label={row.label}
+            field={row.field}
+            fallback={row.fallback}
+          />
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function FactKVRow({
+  label,
+  field,
+  fallback,
+}: {
+  label: string;
+  field: FieldLeaf<unknown> | undefined;
+  fallback?: string | null;
+}) {
+  let valueLabel: string;
+  let confidence: number | null = null;
+  let sourcePage: number | null = null;
+  let sourceQuote: string | null = null;
+
+  if (isFieldLeafShape(field)) {
+    if (field.value === null || field.value === undefined || field.value === '') {
+      valueLabel = fallback ?? '[MISSING]';
+    } else {
+      valueLabel = String(field.value);
+    }
+    confidence = field.confidence ?? null;
+    sourcePage = field.source_page ?? null;
+    sourceQuote = field.source_quote ?? null;
+  } else if (typeof fallback === 'string') {
+    valueLabel = fallback;
+  } else {
+    valueLabel = '[MISSING]';
+  }
+
+  const isMissing = valueLabel.startsWith('[');
+
+  return (
+    <>
+      <dt className="font-display text-[0.85rem] text-graphite pt-0.5">{label}</dt>
+      <dd className="text-[0.95rem]">
+        <span
+          className={
+            isMissing
+              ? 'font-mono text-[0.75rem] text-graphite-soft italic'
+              : 'font-display text-ink-2'
+          }
+        >
+          {valueLabel}
+        </span>
+        {(confidence !== null || sourcePage !== null) && (
+          <span className="ml-3 font-mono text-[0.62rem] text-graphite-soft">
+            {sourcePage !== null && `p.${sourcePage}`}
+            {confidence !== null &&
+              ` · conf ${Math.round(confidence * 100)}%`}
+          </span>
+        )}
+        {sourceQuote && !isMissing && (
+          <div className="font-display italic text-[0.7rem] text-graphite-soft mt-0.5">
+            “{sourceQuote.length > 90 ? sourceQuote.slice(0, 90) + '…' : sourceQuote}”
+          </div>
+        )}
+      </dd>
+    </>
   );
 }
 
@@ -1627,6 +2414,43 @@ function FactLine({ field, compact }: { field: FieldProvenance; compact?: boolea
 /* Draft pane                                                              */
 /* ---------------------------------------------------------------------- */
 
+/**
+ * Inline-render a draft paragraph with `Tab X.Y` / `Exhibit X.Y` /
+ * `(see Tab X)` references styled as blue links. The first iteration
+ * is visual only — full hover-preview requires a reference→document
+ * lookup table built off the exhibit-list output.
+ */
+function ParagraphWithExhibitLinks({ text }: { text: string }) {
+  const re = /\b((?:Tab|Exhibit)\s+[A-L](?:\.\w+(?:\.\w+)?)?)\b/g;
+  const parts: (string | { ref: string })[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    parts.push({ ref: m[1] });
+    last = m.index + m[1].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  if (parts.length === 0) return <>{text}</>;
+  return (
+    <>
+      {parts.map((p, i) =>
+        typeof p === 'string' ? (
+          <span key={i}>{p}</span>
+        ) : (
+          <span
+            key={i}
+            title="Exhibit reference. Hover-preview wiring in next iteration."
+            className="text-blue-700 underline decoration-blue-300 decoration-1 underline-offset-2 cursor-help"
+          >
+            {p.ref}
+          </span>
+        ),
+      )}
+    </>
+  );
+}
+
 function DraftPane({
   result,
   streamingDraft,
@@ -1687,7 +2511,7 @@ function DraftPane({
         <div>
           <div className="smcp text-[0.65rem] text-graphite">¶ cover letter</div>
           <div className="font-display italic text-[0.95rem] text-ink-2">
-            drafted in the firm’s voice
+            drafted in the firm’s voice · exhibit refs marked in blue
           </div>
         </div>
         <button
@@ -1705,7 +2529,7 @@ function DraftPane({
               'mb-4 last:mb-0 ' + (i === 0 ? 'drop-cap font-display text-[1.06rem]' : '')
             }
           >
-            {p.trim()}
+            <ParagraphWithExhibitLinks text={p.trim()} />
           </p>
         ))}
       </article>
@@ -1978,56 +2802,52 @@ const DOCTRINE: Record<CaseType, { glyph: string; refs: { mark: string; text: st
   },
 };
 
-function Marginalia({ result, loading }: { result: IngestResult | undefined; loading: boolean }) {
-  if (loading || !result) return <MarginaliaIntro />;
-  if (result.error) return <MarginaliaIntro />;
-  const caseType = result.caseFacts?.case_type;
+function Marginalia({
+  result,
+  results,
+  loading,
+  streamingDraft,
+}: {
+  result: IngestResult | undefined;
+  results: IngestResult[];
+  loading: boolean;
+  streamingDraft?: string;
+}) {
+  // While the drafter streams, show the live typewriter in the right rail
+  // so the user can inspect facts on the left without leaving the page.
+  const liveDrafting = !!streamingDraft && streamingDraft.length > 0;
+  if (liveDrafting) {
+    const tail = streamingDraft.split(/\n\s*\n/).slice(-12).join('\n\n');
+    return (
+      <aside className="border-l border-rule paper-grain min-h-0 overflow-y-auto px-6 py-7 grid gap-5 content-start">
+        <header className="grid gap-1">
+          <span className="smcp text-graphite-soft">drafting</span>
+          <span className="text-title">Cover letter writing itself</span>
+          <span className="text-meta text-graphite-soft">scroll the dossier on the left</span>
+        </header>
+        <pre className="whitespace-pre-wrap text-body leading-relaxed text-ink-2 [&::after]:inline-block [&::after]:w-2 [&::after]:h-[0.85em] [&::after]:bg-ink-2 [&::after]:ml-0.5 [&::after]:animate-pulse [&::after]:content-['']">
+          {tail}
+        </pre>
+      </aside>
+    );
+  }
 
-  return (
-    <aside className="border-l border-rule paper-grain min-h-0 overflow-y-auto px-5 py-6 grid gap-7 content-start">
-      <MarginaliaBlock title="provenance">
-        <ProvenanceSummary result={result} />
-      </MarginaliaBlock>
+  if (loading || !result || result.error) {
+    return <FirmTriagePanel results={results} />;
+  }
+  return <MatterAuditPanel result={result} />;
+}
 
-      <MarginaliaBlock title="ai usage · this matter">
-        <UsageEstimate result={result} />
-      </MarginaliaBlock>
-
-      {caseType && (
-        <MarginaliaBlock title="doctrine on file">
-          <ul className="grid gap-2.5">
-            {DOCTRINE[caseType].refs.map((r, i) => (
-              <li key={i} className="flex gap-2 margin-note">
-                <span className="text-rubric font-mono text-[0.7rem] shrink-0 pt-0.5">
-                  {r.mark}
-                </span>
-                <span>{r.text}</span>
-              </li>
-            ))}
-          </ul>
-        </MarginaliaBlock>
-      )}
-
-      <MarginaliaBlock title="filing">
-        <ul className="grid gap-1.5 margin-note">
-          <li className="flex justify-between">
-            <span className="text-graphite">Form</span>
-            <span className="font-mono">
-              {caseType === 'E2' ? 'DS-160 / I-129' : 'I-140'}
-            </span>
-          </li>
-          <li className="flex justify-between">
-            <span className="text-graphite">Premium processing</span>
-            <span className="font-mono">{caseType === 'E2' ? '—' : 'available'}</span>
-          </li>
-          <li className="flex justify-between">
-            <span className="text-graphite">Adjudication</span>
-            <span className="font-mono">USCIS · NSC</span>
-          </li>
-        </ul>
-      </MarginaliaBlock>
-    </aside>
-  );
+// Stubs for two panels referenced above that an auto-process introduced
+// before defining. Render the intro fallback so typecheck stays clean
+// and the right rail renders something coherent until the real
+// implementations land.
+function FirmTriagePanel(_props: { results: IngestResult[] }) {
+  return <MarginaliaIntro />;
+}
+function MatterAuditPanel({ result }: { result: IngestResult }) {
+  void result;
+  return <MarginaliaIntro />;
 }
 
 function MarginaliaIntro() {

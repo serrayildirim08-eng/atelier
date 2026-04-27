@@ -311,7 +311,7 @@ export async function POST(request: Request): Promise<Response> {
         send(controller, {
           type: 'progress',
           stage: 'reviewing',
-          label: 'Auditing the draft against the unified facts',
+          label: 'Praying to immigration gods · auditing draft against the unified facts',
           total: pdfPaths.length,
         });
 
