@@ -27,6 +27,13 @@ import { extractContract } from './extractors/contract';
 import { extractBankReceipt } from './extractors/bank-receipt';
 import { extractWireConfirmation } from './extractors/wire-confirmation';
 import { extractGovernmentDoc } from './extractors/government-doc';
+import { extractPassport } from './extractors/passport';
+import { extractI94 } from './extractors/i94';
+import { extractVisaStamp } from './extractors/visa-stamp';
+import { extractVitalRecords } from './extractors/vital-records';
+import { extractPayroll } from './extractors/payroll';
+import { extractTaxReturn } from './extractors/tax-return';
+import { extractFinancialStatement } from './extractors/financial-statement';
 
 /**
  * Doc types that route through the rich contract extractor as a second
@@ -65,6 +72,45 @@ const WIRE_CONFIRMATION_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
  * taxonomy has no slot for them.
  */
 const GOVERNMENT_DOC_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
+  new Set<DocType>(['source_of_funds', 'other']);
+
+/**
+ * Doc types that route through the rich passport extractor (manual §3.1).
+ */
+const PASSPORT_FLAVORED_DOC_TYPES: ReadonlySet<DocType> = new Set<DocType>([
+  'passport',
+]);
+
+/**
+ * Doc types that route through the rich I-94 extractor (manual §3.4).
+ * The thin classifier lumps I-94, visa stamps, I-797 under status_doc;
+ * the I-94 extractor itself filters down to actual I-94 records.
+ */
+const I94_FLAVORED_DOC_TYPES: ReadonlySet<DocType> = new Set<DocType>([
+  'status_doc',
+]);
+
+/**
+ * Doc types that route through the rich visa-stamp / I-797 extractor
+ * (manual §3.2). Status_doc is necessary but not sufficient — the router
+ * also checks the filename hint (visa | stamp | i-797) to disambiguate
+ * from plain I-94 records. The thin classifier puts all three under
+ * status_doc, so a filename hint is the cheapest disambiguation.
+ */
+const VISA_STAMP_FLAVORED_DOC_TYPES: ReadonlySet<DocType> = new Set<DocType>([
+  'status_doc',
+]);
+
+/** Filename pattern that signals a visa stamp / I-797 within status_doc. */
+const VISA_STAMP_FILENAME_RE = /(visa|stamp|i-?797)/i;
+
+/**
+ * Doc types that route through the rich vital-records extractor (manual
+ * §12.3 / §12.4). Vital records typically land in `other` (no thin
+ * doc_type slot), occasionally in source_of_funds. Coexists with the
+ * government-doc extractor — both may fire on the same PDF.
+ */
+const VITAL_RECORDS_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
   new Set<DocType>(['source_of_funds', 'other']);
 
 function extractFirstJsonObject(text: string): string {
@@ -282,21 +328,43 @@ export async function classifyAndExtractOnePdf(
     pageCount: parsed.pageCount,
   };
 
-  const [contractResult, bankReceiptResult, wireConfirmationResult, governmentDocResult] =
-    await Promise.all([
-      CONTRACT_FLAVORED_DOC_TYPES.has(facts.doc_type)
-        ? extractContract(richInput)
-        : Promise.resolve(null),
-      BANK_RECEIPT_FLAVORED_DOC_TYPES.has(facts.doc_type)
-        ? extractBankReceipt(richInput)
-        : Promise.resolve(null),
-      WIRE_CONFIRMATION_FLAVORED_DOC_TYPES.has(facts.doc_type)
-        ? extractWireConfirmation(richInput)
-        : Promise.resolve(null),
-      GOVERNMENT_DOC_FLAVORED_DOC_TYPES.has(facts.doc_type)
-        ? extractGovernmentDoc(richInput)
-        : Promise.resolve(null),
-    ]);
+  const filenameSuggestsVisaStamp = VISA_STAMP_FILENAME_RE.test(input.filename);
+
+  const [
+    contractResult,
+    bankReceiptResult,
+    wireConfirmationResult,
+    governmentDocResult,
+    passportResult,
+    i94Result,
+    visaStampResult,
+    vitalRecordsResult,
+  ] = await Promise.all([
+    CONTRACT_FLAVORED_DOC_TYPES.has(facts.doc_type)
+      ? extractContract(richInput)
+      : Promise.resolve(null),
+    BANK_RECEIPT_FLAVORED_DOC_TYPES.has(facts.doc_type)
+      ? extractBankReceipt(richInput)
+      : Promise.resolve(null),
+    WIRE_CONFIRMATION_FLAVORED_DOC_TYPES.has(facts.doc_type)
+      ? extractWireConfirmation(richInput)
+      : Promise.resolve(null),
+    GOVERNMENT_DOC_FLAVORED_DOC_TYPES.has(facts.doc_type)
+      ? extractGovernmentDoc(richInput)
+      : Promise.resolve(null),
+    PASSPORT_FLAVORED_DOC_TYPES.has(facts.doc_type)
+      ? extractPassport(richInput)
+      : Promise.resolve(null),
+    I94_FLAVORED_DOC_TYPES.has(facts.doc_type)
+      ? extractI94(richInput)
+      : Promise.resolve(null),
+    VISA_STAMP_FLAVORED_DOC_TYPES.has(facts.doc_type) && filenameSuggestsVisaStamp
+      ? extractVisaStamp(richInput)
+      : Promise.resolve(null),
+    VITAL_RECORDS_FLAVORED_DOC_TYPES.has(facts.doc_type)
+      ? extractVitalRecords(richInput)
+      : Promise.resolve(null),
+  ]);
 
   let contract;
   if (contractResult?.facts) {
@@ -334,6 +402,42 @@ export async function classifyAndExtractOnePdf(
     );
   }
 
+  let passport;
+  if (passportResult?.facts) {
+    passport = passportResult.facts;
+  } else if (passportResult?.error) {
+    console.warn(
+      `[passport-extract] ${input.filename}: ${passportResult.error.code} — ${passportResult.error.message}`,
+    );
+  }
+
+  let i94;
+  if (i94Result?.facts) {
+    i94 = i94Result.facts;
+  } else if (i94Result?.error) {
+    console.warn(
+      `[i94-extract] ${input.filename}: ${i94Result.error.code} — ${i94Result.error.message}`,
+    );
+  }
+
+  let visaStamp;
+  if (visaStampResult?.facts) {
+    visaStamp = visaStampResult.facts;
+  } else if (visaStampResult?.error) {
+    console.warn(
+      `[visa-stamp-extract] ${input.filename}: ${visaStampResult.error.code} — ${visaStampResult.error.message}`,
+    );
+  }
+
+  let vitalRecords;
+  if (vitalRecordsResult?.facts) {
+    vitalRecords = vitalRecordsResult.facts;
+  } else if (vitalRecordsResult?.error) {
+    console.warn(
+      `[vital-records-extract] ${input.filename}: ${vitalRecordsResult.error.code} — ${vitalRecordsResult.error.message}`,
+    );
+  }
+
   const entry = {
     pageCount: parsed.pageCount,
     facts,
@@ -341,6 +445,10 @@ export async function classifyAndExtractOnePdf(
     bankReceipt,
     wireConfirmation,
     governmentDoc,
+    passport,
+    i94,
+    visaStamp,
+    vitalRecords,
   };
   writePdfCache(hash, entry);
   return { filename: input.filename, ...entry };

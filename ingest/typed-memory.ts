@@ -20,6 +20,13 @@ import type { ContractFacts } from './extractors/contract.schema';
 import type { BankReceiptFacts } from './extractors/bank-receipt.schema';
 import type { WireConfirmationFacts } from './extractors/wire-confirmation.schema';
 import type { GovernmentDocFacts } from './extractors/government-doc.schema';
+import type { PassportFactsRich } from './extractors/passport.schema';
+import type { I94Facts } from './extractors/i94.schema';
+import type { VisaStampFacts } from './extractors/visa-stamp.schema';
+import type { VitalRecordsFacts } from './extractors/vital-records.schema';
+import type { PayrollFacts } from './extractors/payroll.schema';
+import type { TaxReturnFacts } from './extractors/tax-return.schema';
+import type { FinancialStatementFacts } from './extractors/financial-statement.schema';
 
 const Field = <T extends z.ZodTypeAny>(value: T) =>
   z.preprocess(
@@ -385,6 +392,55 @@ export interface PerPdfResult {
    * title_deed sets the drafter's tapu-explanation defensive flag.
    */
   governmentDoc?: GovernmentDocFacts;
+  /**
+   * Rich passport extraction (manual §3.1). Splits full_name into native
+   * + ASCII forms, captures sex, and feeds the deterministic
+   * passport_expires_soon gate (≥ 6 months validity at filing).
+   */
+  passport?: PassportFactsRich;
+  /**
+   * Rich I-94 extraction (manual §3.4). Adds port_of_entry and feeds the
+   * deterministic status_violation_at_filing gate (admit_until ≥ filing).
+   */
+  i94?: I94Facts;
+  /**
+   * Rich visa-stamp / I-797 extraction (manual §3.2). Attached when the
+   * first-pass returns status_doc AND the filename matches
+   * /(visa|stamp|i-797)/i — the thin classifier lumps stamps, I-94s, and
+   * I-797 notices together under status_doc.
+   */
+  visaStamp?: VisaStampFacts;
+  /**
+   * Rich vital-records extraction (manual §12.3 / §12.4). Drills into
+   * translation certification (translator name + date) for the
+   * deterministic translation_certification_missing gate. Coexists with
+   * governmentDoc — both may fire on the same PDF.
+   */
+  vitalRecords?: VitalRecordsFacts;
+  /**
+   * Rich payroll extraction (manual §9 marginality / 9 FAM 402.9-6(D)).
+   * Discriminated by payroll_subtype (payroll_register | w2_summary |
+   * form_941 | employee_list | other_payroll). When a payroll_register
+   * carries employee_count_excluding_beneficiary ≥ 1 the aggregator sets
+   * marginality_evidence_present.us_workers_employed=true.
+   */
+  payroll?: PayrollFacts;
+  /**
+   * Rich tax-return extraction (manual §9 + investment-vs-balance-sheet
+   * gate). Discriminated by tax_return_subtype (form_1120 | form_1120s |
+   * form_1065 | form_1040_schedule_c | form_1040_k1 | other_tax_return).
+   * Variants with Schedule L feed the deterministic
+   * tax_balance_sheet_drift gate against the I-129 E Supplement.
+   */
+  taxReturn?: TaxReturnFacts;
+  /**
+   * Rich financial-statement extraction. Discriminated by
+   * statement_subtype (profit_and_loss | balance_sheet | cash_flow |
+   * combined_statements | other_financial). The P&L net_income feeds the
+   * deterministic pl_tax_net_income_drift gate against the matching
+   * tax-return for the same tax year.
+   */
+  financialStatement?: FinancialStatementFacts;
   error?: { code: string; message: string };
 }
 
