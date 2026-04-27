@@ -35,6 +35,9 @@ import type { CorporateFormationFacts } from './extractors/corporate-formation.s
 import type { ForeignCorporateFacts } from './extractors/foreign-corporate.schema';
 import type { ImagePhotoFacts } from './extractors/image-photo.schema';
 import type { RecommendationLetterFacts } from './extractors/recommendation-letter.schema';
+import type { CustomerContractFacts } from './extractors/customer-contract.schema';
+import type { RealEstatePurchaseFacts } from './extractors/real-estate-purchase.schema';
+import type { IncentiveDocumentFacts } from './extractors/incentive-document.schema';
 
 const Field = <T extends z.ZodTypeAny>(value: T) =>
   z.preprocess(
@@ -708,6 +711,32 @@ export interface PerPdfResult {
    * the filename hints at an image artifact (typed-extract.ts router).
    */
   imagePhoto?: ImagePhotoFacts;
+  /**
+   * Rich customer-contract extraction (manual MANUAL-SUBTYPE-4 §3.8.2 —
+   * offtake / supply / MSA / distribution agreements). Routes when the
+   * thin classifier returns business_contract AND the content / filename
+   * matches the customer-commitment pattern. Surfaced in the cover-letter
+   * DOING BUSINESS section as substantiality + marginality anchors.
+   */
+  customerContract?: CustomerContractFacts;
+  /**
+   * Rich real-estate purchase-agreement extraction (manual MANUAL-SUBTYPE-4
+   * §3.8.5). Routes when the thin classifier returns lease_or_property
+   * AND the content references purchase / sale / conveyance / closing.
+   * Drives the deterministic 'real_estate_buyer_mismatch' gate
+   * (severity 4) when buyer_legal_name disagrees with the Petitioner's
+   * legal_name.
+   */
+  realEstatePurchase?: RealEstatePurchaseFacts;
+  /**
+   * Rich incentive-document extraction (PTC, IRA, state credits, federal
+   * grants, tax exemptions). Routes when the thin classifier returns
+   * business_contract AND the content references incentives / tax credits
+   * / grants / IRA / PTC. Drives the deterministic
+   * 'incentive_recipient_mismatch' gate (severity 3) when
+   * recipient_legal_name disagrees with the Petitioner's legal_name.
+   */
+  incentiveDocument?: IncentiveDocumentFacts;
   error?: { code: string; message: string };
 }
 

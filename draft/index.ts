@@ -38,3 +38,21 @@ export {
   type DeclarationResult,
   type DraftDeclarationInputs,
 } from './declaration';
+
+export {
+  draftBusinessPlan,
+  renderBusinessPlanMarkdown,
+  collectAssumedFigures,
+  type BusinessPlanResult,
+  type DraftBusinessPlanInputs,
+  type AssumedFigureRow,
+} from './business-plan-writer';
+
+export {
+  ASSUMED_SENTINEL,
+  BusinessPlanSchema,
+  type BusinessPlan,
+  type ProjectedFigure,
+  type ProjectedYearPL,
+  type FinancialProjections,
+} from './business-plan-writer.schema';

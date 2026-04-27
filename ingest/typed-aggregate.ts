@@ -79,6 +79,9 @@ import {
   IMAGE_PHOTO_SUBTYPE_LABELS,
   type ImagePhotoFacts,
 } from './extractors/image-photo.schema';
+import type { CustomerContractFacts } from './extractors/customer-contract.schema';
+import type { RealEstatePurchaseFacts } from './extractors/real-estate-purchase.schema';
+import type { IncentiveDocumentFacts } from './extractors/incentive-document.schema';
 
 /** Tolerance for the manual §4.5 quality gate (USD). */
 const CONSIDERATION_GATE_TOLERANCE_USD = 100;
@@ -157,6 +160,8 @@ Cross-document gates (in addition to the per-element rules above):
 - Manual §9 (Marginality evidence). When the typed memory contains a payroll_register or employee_list with employee_count_excluding_beneficiary ≥ 1, the Petitioner is presumed to employ ≥1 U.S. worker beyond the Beneficiary — the §9 marginality narrative is supportable. The infrastructure surfaces this as marginality_evidence_present.us_workers_employed=true alongside the case facts; populate elements_evidence.more_than_marginal_basis accordingly. When no payroll evidence is present AND the enterprise is a solo Beneficiary investor, log a severity 3-4 'marginality_unsupported' conflict.
 - Manual §3.2 (Treaty-national ownership gate). When the typed memory contains a foreign-corporate shareholder_register, treaty_national_ownership_percent MUST be ≥ 50 (9 FAM 402.9-4(B)). Below 50 = severity 5 conflict_register entry with conflict_type='treaty_ownership_below_50'. Populate fact_a_doc with the shareholder-register filename. The infrastructure runs this gate deterministically.
 - Manual §6 (Board-resolution authorized-amount drift gate). When the typed memory contains a foreign-corporate board_resolution with authorized_amount_usd populated AND the I-129 E Supplement's investment_amount_usd is known, |authorized_amount_usd − I-129E investment_amount_usd| / I-129E investment_amount_usd MUST be ≤ 10%. Drift beyond 10% = severity 4 conflict_register entry with conflict_type='board_resolution_amount_drift'. Populate fact_a_doc with the board-resolution filename and fact_b_doc with the I-129E filename. The infrastructure runs this gate deterministically.
+- Manual MANUAL-SUBTYPE-4 §3.8.5 (Real-estate buyer-mismatch gate). When the typed memory contains a real-estate purchase whose buyer_legal_name does NOT match the Petitioner enterprise.legal_name, severity 4 conflict_register entry with conflict_type='real_estate_buyer_mismatch'. Reasoning: a deed in the Beneficiary's personal name (or a sister entity) breaks the at-risk-of-the-enterprise narrative — the property is not owned by the Petitioner. The infrastructure runs this gate deterministically using a normalized legal-name comparison; logging here is preferred so the narrative reflects it.
+- Manual MANUAL-SUBTYPE-4 (Incentive recipient-mismatch gate). When the typed memory contains an incentive document whose recipient_legal_name does NOT match the Petitioner enterprise.legal_name, severity 3 conflict_register entry with conflict_type='incentive_recipient_mismatch'. Reasoning: an incentive awarded to a parent / sister entity / the Beneficiary individually cannot be cited as Petitioner enterprise capacity. The infrastructure runs this gate deterministically.
 
 Provenance carry-over:
 - Every leaf field in the output schema carries source_page, source_quote, confidence.
@@ -295,6 +300,9 @@ function memoryToPromptText(memory: TypedMemory): string {
   const corporateFormationEntries: { filename: string; pageCount: number; corporateFormation: CorporateFormationFacts }[] = [];
   const foreignCorporateEntries: { filename: string; pageCount: number; foreignCorporate: ForeignCorporateFacts }[] = [];
   const imagePhotoEntries: { filename: string; pageCount: number; imagePhoto: ImagePhotoFacts }[] = [];
+  const customerContractEntries: { filename: string; pageCount: number; customerContract: CustomerContractFacts }[] = [];
+  const realEstatePurchaseEntries: { filename: string; pageCount: number; realEstatePurchase: RealEstatePurchaseFacts }[] = [];
+  const incentiveDocumentEntries: { filename: string; pageCount: number; incentiveDocument: IncentiveDocumentFacts }[] = [];
 
   for (const entry of iterMemoryEntries(memory)) {
     if (entry.contract) {
@@ -428,6 +436,27 @@ function memoryToPromptText(memory: TypedMemory): string {
         filename: entry.filename,
         pageCount: entry.pageCount,
         imagePhoto: entry.imagePhoto,
+      });
+    }
+    if (entry.customerContract) {
+      customerContractEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        customerContract: entry.customerContract,
+      });
+    }
+    if (entry.realEstatePurchase) {
+      realEstatePurchaseEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        realEstatePurchase: entry.realEstatePurchase,
+      });
+    }
+    if (entry.incentiveDocument) {
+      incentiveDocumentEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        incentiveDocument: entry.incentiveDocument,
       });
     }
   }
@@ -645,6 +674,42 @@ function memoryToPromptText(memory: TypedMemory): string {
       .join('\n\n');
     sections.push(
       `## IMAGE / PHOTO (rich extraction) — ${imagePhotoEntries.length} entr${imagePhotoEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (customerContractEntries.length > 0) {
+    const body = customerContractEntries
+      .map(
+        (e) =>
+          `### ${e.filename} (page count: ${e.pageCount})\n${JSON.stringify(e.customerContract, null, 2)}`,
+      )
+      .join('\n\n');
+    sections.push(
+      `## CUSTOMER CONTRACTS (rich extraction) — ${customerContractEntries.length} entr${customerContractEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (realEstatePurchaseEntries.length > 0) {
+    const body = realEstatePurchaseEntries
+      .map(
+        (e) =>
+          `### ${e.filename} (page count: ${e.pageCount})\n${JSON.stringify(e.realEstatePurchase, null, 2)}`,
+      )
+      .join('\n\n');
+    sections.push(
+      `## REAL ESTATE PURCHASES (rich extraction) — ${realEstatePurchaseEntries.length} entr${realEstatePurchaseEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (incentiveDocumentEntries.length > 0) {
+    const body = incentiveDocumentEntries
+      .map(
+        (e) =>
+          `### ${e.filename} (page count: ${e.pageCount})\n${JSON.stringify(e.incentiveDocument, null, 2)}`,
+      )
+      .join('\n\n');
+    sections.push(
+      `## INCENTIVES (rich extraction) — ${incentiveDocumentEntries.length} entr${incentiveDocumentEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
     );
   }
 
@@ -1435,6 +1500,158 @@ export function runPlTaxNetIncomeGate(
   return rows;
 }
 
+/**
+ * Manual MANUAL-SUBTYPE-4 §3.8.5 (real-estate buyer-mismatch gate). For
+ * every real-estate purchase agreement in the typed memory whose
+ * buyer_legal_name does not match the Petitioner's legal_name, ok=false.
+ * ok=true with reason='no_petitioner_name' when the Petitioner's name
+ * isn't known and the comparison cannot run.
+ */
+export interface RealEstateBuyerMismatchAuditRow {
+  filename: string;
+  ok: boolean;
+  reason: 'ok' | 'mismatch' | 'no_petitioner_name' | 'no_buyer_name';
+  buyer_legal_name: string | null;
+  petitioner_legal_name: string | null;
+  source_page: number | null;
+  source_quote: string | null;
+}
+
+/**
+ * Manual MANUAL-SUBTYPE-4 §3 (incentive recipient-mismatch gate). For
+ * every incentive document whose recipient_legal_name does not match
+ * the Petitioner's legal_name, ok=false. ok=true with
+ * reason='no_petitioner_name' when the Petitioner's name isn't known.
+ */
+export interface IncentiveRecipientMismatchAuditRow {
+  filename: string;
+  ok: boolean;
+  reason: 'ok' | 'mismatch' | 'no_petitioner_name' | 'no_recipient_name';
+  recipient_legal_name: string | null;
+  petitioner_legal_name: string | null;
+  source_page: number | null;
+  source_quote: string | null;
+}
+
+/**
+ * Normalize a legal name for comparison. Lowercases, collapses
+ * whitespace, strips trailing punctuation, and strips common entity
+ * suffixes so cosmetic differences don't trip the gate. The gate
+ * already only fires severity-3/4 (not dispositive) so a false-positive
+ * from cosmetic drift is recoverable, but we'd rather avoid it.
+ */
+function normalizeLegalName(name: string | null | undefined): string {
+  if (!name) return '';
+  return name
+    .toLowerCase()
+    .replace(/[.,]/g, ' ')
+    .replace(/\b(llc|l\.l\.c\.|inc|incorporated|corp|corporation|ltd|limited|co)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Manual MANUAL-SUBTYPE-4 §3.8.5 buyer-mismatch gate — pure / deterministic. */
+export function runRealEstateBuyerMismatchGate(
+  memory: TypedMemory,
+  petitionerLegalName: string | null,
+): RealEstateBuyerMismatchAuditRow[] {
+  const rows: RealEstateBuyerMismatchAuditRow[] = [];
+  const petitionerNorm = normalizeLegalName(petitionerLegalName);
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.realEstatePurchase) continue;
+    const buyer = entry.realEstatePurchase.buyer_legal_name.value;
+    const sourcePage = entry.realEstatePurchase.buyer_legal_name.source_page;
+    const sourceQuote = entry.realEstatePurchase.buyer_legal_name.source_quote;
+    if (!buyer) {
+      rows.push({
+        filename: entry.filename,
+        ok: true,
+        reason: 'no_buyer_name',
+        buyer_legal_name: buyer,
+        petitioner_legal_name: petitionerLegalName,
+        source_page: sourcePage,
+        source_quote: sourceQuote,
+      });
+      continue;
+    }
+    if (!petitionerNorm) {
+      rows.push({
+        filename: entry.filename,
+        ok: true,
+        reason: 'no_petitioner_name',
+        buyer_legal_name: buyer,
+        petitioner_legal_name: petitionerLegalName,
+        source_page: sourcePage,
+        source_quote: sourceQuote,
+      });
+      continue;
+    }
+    const buyerNorm = normalizeLegalName(buyer);
+    const matches = buyerNorm === petitionerNorm;
+    rows.push({
+      filename: entry.filename,
+      ok: matches,
+      reason: matches ? 'ok' : 'mismatch',
+      buyer_legal_name: buyer,
+      petitioner_legal_name: petitionerLegalName,
+      source_page: sourcePage,
+      source_quote: sourceQuote,
+    });
+  }
+  return rows;
+}
+
+/** Manual MANUAL-SUBTYPE-4 incentive recipient-mismatch gate — pure / deterministic. */
+export function runIncentiveRecipientMismatchGate(
+  memory: TypedMemory,
+  petitionerLegalName: string | null,
+): IncentiveRecipientMismatchAuditRow[] {
+  const rows: IncentiveRecipientMismatchAuditRow[] = [];
+  const petitionerNorm = normalizeLegalName(petitionerLegalName);
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.incentiveDocument) continue;
+    const recipient = entry.incentiveDocument.recipient_legal_name.value;
+    const sourcePage = entry.incentiveDocument.recipient_legal_name.source_page;
+    const sourceQuote = entry.incentiveDocument.recipient_legal_name.source_quote;
+    if (!recipient) {
+      rows.push({
+        filename: entry.filename,
+        ok: true,
+        reason: 'no_recipient_name',
+        recipient_legal_name: recipient,
+        petitioner_legal_name: petitionerLegalName,
+        source_page: sourcePage,
+        source_quote: sourceQuote,
+      });
+      continue;
+    }
+    if (!petitionerNorm) {
+      rows.push({
+        filename: entry.filename,
+        ok: true,
+        reason: 'no_petitioner_name',
+        recipient_legal_name: recipient,
+        petitioner_legal_name: petitionerLegalName,
+        source_page: sourcePage,
+        source_quote: sourceQuote,
+      });
+      continue;
+    }
+    const recipientNorm = normalizeLegalName(recipient);
+    const matches = recipientNorm === petitionerNorm;
+    rows.push({
+      filename: entry.filename,
+      ok: matches,
+      reason: matches ? 'ok' : 'mismatch',
+      recipient_legal_name: recipient,
+      petitioner_legal_name: petitionerLegalName,
+      source_page: sourcePage,
+      source_quote: sourceQuote,
+    });
+  }
+  return rows;
+}
+
 export async function aggregateTypedMemoryToE2(
   memory: TypedMemory,
   options?: { filingDate?: Date; aliases?: Record<string, FilenameAlias> },
@@ -1453,6 +1670,8 @@ export async function aggregateTypedMemoryToE2(
   credential_verifiability_results: CredentialVerifiabilityAuditRow[];
   tax_balance_sheet_results: TaxBalanceSheetAuditRow[];
   pl_tax_net_income_results: PlTaxNetIncomeAuditRow[];
+  real_estate_buyer_mismatch_results: RealEstateBuyerMismatchAuditRow[];
+  incentive_recipient_mismatch_results: IncentiveRecipientMismatchAuditRow[];
 }> {
   const memoryBlock = memoryToPromptText(memory);
   const inventoryBlock = buildDocInventoryWithAliases(memory, options?.aliases);
@@ -2342,6 +2561,131 @@ export async function aggregateTypedMemoryToE2(
     }
   }
 
+  // Manual MANUAL-SUBTYPE-4 §3.8.5 real-estate buyer-mismatch gate.
+  // Severity 4: a deed/purchase agreement in a non-Petitioner name
+  // breaks the at-risk-of-the-enterprise narrative.
+  const petitionerLegalName = parsed.data.enterprise.legal_name.value;
+  const realEstateBuyerRows = runRealEstateBuyerMismatchGate(
+    memory,
+    petitionerLegalName,
+  );
+  for (const row of realEstateBuyerRows) {
+    if (row.ok) continue;
+    if (row.reason !== 'mismatch') continue;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'real_estate_buyer_mismatch' &&
+        c.fact_a_doc.value === row.filename,
+    );
+    if (alreadyLogged) continue;
+    parsed.data.conflict_register.push({
+      description: {
+        value: `Real-estate purchase buyer "${row.buyer_legal_name ?? '?'}" disagrees with Petitioner legal name "${row.petitioner_legal_name ?? '?'}" — at-risk-of-the-enterprise narrative requires the purchase be held by the Petitioner. Manual MANUAL-SUBTYPE-4 §3.8.5 gate failed.`,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      conflict_type: {
+        value: 'real_estate_buyer_mismatch',
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      severity: {
+        value: 4,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      fact_a_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_a_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+    });
+  }
+
+  // Manual MANUAL-SUBTYPE-4 incentive recipient-mismatch gate.
+  // Severity 3: an incentive awarded to the Beneficiary personally /
+  // to a parent / sister entity cannot be claimed as Petitioner capacity.
+  const incentiveRecipientRows = runIncentiveRecipientMismatchGate(
+    memory,
+    petitionerLegalName,
+  );
+  for (const row of incentiveRecipientRows) {
+    if (row.ok) continue;
+    if (row.reason !== 'mismatch') continue;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'incentive_recipient_mismatch' &&
+        c.fact_a_doc.value === row.filename,
+    );
+    if (alreadyLogged) continue;
+    parsed.data.conflict_register.push({
+      description: {
+        value: `Incentive recipient "${row.recipient_legal_name ?? '?'}" disagrees with Petitioner legal name "${row.petitioner_legal_name ?? '?'}" — incentive cannot be claimed as Petitioner enterprise capacity until the recipient discrepancy is resolved.`,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      conflict_type: {
+        value: 'incentive_recipient_mismatch',
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      severity: {
+        value: 3,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      fact_a_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_a_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+    });
+  }
+
   return {
     caseFacts: parsed.data,
     usage: {
@@ -2360,5 +2704,7 @@ export async function aggregateTypedMemoryToE2(
     credential_verifiability_results: credentialRows,
     tax_balance_sheet_results: taxBalanceSheetRows,
     pl_tax_net_income_results: plTaxNetIncomeRows,
+    real_estate_buyer_mismatch_results: realEstateBuyerRows,
+    incentive_recipient_mismatch_results: incentiveRecipientRows,
   };
 }

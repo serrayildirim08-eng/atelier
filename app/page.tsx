@@ -1,9 +1,14 @@
 'use client';
 
 import { Fragment, useCallback, useState, useMemo, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import type { DragEvent, ChangeEvent } from 'react';
 import type { ReviewReport } from '@/reason';
 import type { CaseType, E2Facts } from '@/ingest';
+import {
+  LoadingProgress,
+  type LoadingStreamEvent,
+} from '@/app/components/loading-progress';
 
 /* ---------------------------------------------------------------------- */
 /* Types                                                                   */
@@ -260,6 +265,12 @@ export default function Page() {
   // when the closing `result` event lands (which carries the server-
   // authoritative final draft). DraftPane reads result.draft ?? this.
   const [streamingDraft, setStreamingDraft] = useState<string>('');
+  // Full event stream accumulator powering <LoadingProgress/>: every NDJSON
+  // line received from /api/ingest-path is pushed in order; the component
+  // reduces it into rows + stage-strip state. Reset on each new ingest.
+  const [streamEvents, setStreamEvents] = useState<LoadingStreamEvent[]>([]);
+  const [streamStartedAt, setStreamStartedAt] = useState<number | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     setIsElectron(typeof window !== 'undefined' && !!window.akalan?.pickFolder);
@@ -359,6 +370,8 @@ export default function Page() {
     setPerPdfCount({ done: 0, total: 0 });
     setMatterRoot(rootPath);
     setStreamingDraft('');
+    setStreamEvents([]);
+    setStreamStartedAt(Date.now());
 
     try {
       const res = await fetch('/api/ingest-path', {
@@ -387,6 +400,7 @@ export default function Page() {
       let buffer = '';
       const collected: IngestResult[] = [];
       let pdfCount = 0;
+      let matterId: string | null = null;
 
       for (;;) {
         const { value, done } = await reader.read();
@@ -402,8 +416,13 @@ export default function Page() {
           } catch {
             continue;
           }
+          // Mirror every event into the LoadingProgress accumulator before
+          // dispatching to the legacy reducers. The component reduces the
+          // full sequence into the typewriter rows + stage strip.
+          setStreamEvents((prev) => [...prev, evt as unknown as LoadingStreamEvent]);
           if (evt.type === 'start') {
             pdfCount = (evt.total as number) ?? 0;
+            matterId = (evt.matter as string) ?? null;
             setPerPdfCount({ done: 0, total: pdfCount });
             setProgress({
               stage: 'starting',
@@ -452,6 +471,16 @@ export default function Page() {
             if (collected.length === 1) setSelectedIdx(0);
           } else if (evt.type === 'done') {
             setProgress(null);
+            // Once the typewriter table has finished + 100% paints, route
+            // into the matter dashboard. Brief delay lets the stage strip
+            // settle on "Assemble" so the transition reads as completion
+            // rather than a hard cut.
+            if (matterId) {
+              const target = matterId;
+              setTimeout(() => {
+                router.push(`/matter/${encodeURIComponent(target)}`);
+              }, 900);
+            }
           }
         }
       }
@@ -470,7 +499,7 @@ export default function Page() {
       setLoading(false);
       setProgress(null);
     }
-  }, []);
+  }, [router]);
 
   const onPickFolderElectron = useCallback(async () => {
     if (!window.akalan?.pickFolder) return;
@@ -527,6 +556,17 @@ export default function Page() {
       <StatusBar results={results} loading={loading} now={now} />
 
       {dragActive && <DragOverlay />}
+
+      {loading && streamStartedAt !== null && (
+        <div className="fixed inset-0 z-40 paper-grain overflow-y-auto">
+          <div className="max-w-[80rem] mx-auto px-10 py-12">
+            <LoadingProgress
+              events={streamEvents}
+              startedAt={streamStartedAt}
+            />
+          </div>
+        </div>
+      )}
 
       {matterOverlayOpen && (
         <MatterOverlay
@@ -651,7 +691,7 @@ function Binder({
             onClick={onPickFolderElectron}
             className="block text-center px-3 py-1.5 border border-ink-2 text-[0.78rem] cursor-pointer hover:bg-ink hover:text-paper transition-colors smcp"
           >
-            ※ deposit a folder
+            ※ create new matter
           </button>
         ) : (
           <label className="block">
@@ -669,7 +709,7 @@ function Binder({
               onChange={onPickFolder}
             />
             <span className="block text-center px-3 py-1.5 border border-ink-2 text-[0.78rem] cursor-pointer hover:bg-ink hover:text-paper transition-colors smcp">
-              ※ deposit a folder
+              ※ create new matter
             </span>
           </label>
         )}

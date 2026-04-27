@@ -43,6 +43,9 @@ import { extractRecommendationLetter } from './extractors/recommendation-letter'
 import { extractCorporateFormation } from './extractors/corporate-formation';
 import { extractForeignCorporate } from './extractors/foreign-corporate';
 import { extractImagePhoto } from './extractors/image-photo';
+import { extractCustomerContract } from './extractors/customer-contract';
+import { extractRealEstatePurchase } from './extractors/real-estate-purchase';
+import { extractIncentiveDocument } from './extractors/incentive-document';
 
 /**
  * Doc types that route through the rich contract extractor as a second
@@ -236,6 +239,43 @@ const FOREIGN_CORPORATE_FILENAME_RE =
  */
 const IMAGE_PHOTO_FILENAME_RE =
   /(photo|signature|stamp|apostille|seal|imza|fotoğraf|fotograf|mühür|muhur)/i;
+
+/* ---------------------------------------------------------------------- */
+/* Batch 6 — customer-commitment / real-estate / incentive extractors      */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Customer-commitment commercial contracts (offtake / supply / MSA /
+ * distribution / long-term agreement). Routes when the thin classifier
+ * returns business_contract AND the filename or content references the
+ * customer-commitment pattern (manual MANUAL-SUBTYPE-4 §3.8.2).
+ */
+const CUSTOMER_CONTRACT_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
+  new Set<DocType>(['business_contract']);
+const CUSTOMER_CONTRACT_PATTERN_RE =
+  /(offtake|supply|distribution|MSA|master[-_\s]?services[-_\s]?agreement|long[-_\s]?term[-_\s]?agreement)/i;
+
+/**
+ * Real-estate purchase agreements / deeds. Routes when the thin
+ * classifier returns lease_or_property AND the content references
+ * purchase / sale / conveyance / closing language (manual
+ * MANUAL-SUBTYPE-4 §3.8.5).
+ */
+const REAL_ESTATE_PURCHASE_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
+  new Set<DocType>(['lease_or_property']);
+const REAL_ESTATE_PURCHASE_PATTERN_RE =
+  /(purchase[-_\s]?agreement|purchase[-_\s]?and[-_\s]?sale|conveyance|warranty[-_\s]?deed|quitclaim|grant[-_\s]?deed|special[-_\s]?warranty|closing[-_\s]?date|title[-_\s]?insurance|grantor|grantee|recorded[-_\s]?deed)/i;
+
+/**
+ * Government-incentive documents (PTC, IRA, state credits, federal
+ * grants, tax exemptions). Routes when the thin classifier returns
+ * business_contract AND the content references incentives / tax credits
+ * / grants / IRA / PTC.
+ */
+const INCENTIVE_DOCUMENT_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
+  new Set<DocType>(['business_contract']);
+const INCENTIVE_DOCUMENT_PATTERN_RE =
+  /(production[-_\s]?tax[-_\s]?credit|\bPTC\b|inflation[-_\s]?reduction[-_\s]?act|\bIRA\b|tax[-_\s]?credit|tax[-_\s]?exemption|federal[-_\s]?grant|state[-_\s]?credit|FILOT|fee[-_\s]?in[-_\s]?lieu|abatement|incentive[-_\s]?agreement|economic[-_\s]?development[-_\s]?credit)/i;
 
 function extractFirstJsonObject(text: string): string {
   const start = text.indexOf('{');
@@ -526,6 +566,19 @@ export async function classifyAndExtractOnePdf(
     FOREIGN_CORPORATE_FILENAME_RE.test(input.filename);
   const filenameSuggestsImagePhoto = IMAGE_PHOTO_FILENAME_RE.test(input.filename);
 
+  // Batch 6 routers — content-or-filename patterns. Customer contracts
+  // and incentive documents share the business_contract doc_type, so
+  // each pattern fires independently on filename OR sampled text.
+  const customerContractMatch =
+    CUSTOMER_CONTRACT_PATTERN_RE.test(input.filename) ||
+    CUSTOMER_CONTRACT_PATTERN_RE.test(text);
+  const realEstatePurchaseMatch =
+    REAL_ESTATE_PURCHASE_PATTERN_RE.test(input.filename) ||
+    REAL_ESTATE_PURCHASE_PATTERN_RE.test(text);
+  const incentiveDocumentMatch =
+    INCENTIVE_DOCUMENT_PATTERN_RE.test(input.filename) ||
+    INCENTIVE_DOCUMENT_PATTERN_RE.test(text);
+
   const [
     contractResult,
     bankReceiptResult,
@@ -546,6 +599,9 @@ export async function classifyAndExtractOnePdf(
     corporateFormationResult,
     foreignCorporateResult,
     imagePhotoResult,
+    customerContractResult,
+    realEstatePurchaseResult,
+    incentiveDocumentResult,
   ] = await Promise.all([
     CONTRACT_FLAVORED_DOC_TYPES.has(facts.doc_type)
       ? extractContract(richInput)
@@ -610,6 +666,18 @@ export async function classifyAndExtractOnePdf(
           buffer: input.buffer,
           pageCount: parsed.pageCount,
         })
+      : Promise.resolve(null),
+    CUSTOMER_CONTRACT_FLAVORED_DOC_TYPES.has(facts.doc_type) &&
+    customerContractMatch
+      ? extractCustomerContract(richInput)
+      : Promise.resolve(null),
+    REAL_ESTATE_PURCHASE_FLAVORED_DOC_TYPES.has(facts.doc_type) &&
+    realEstatePurchaseMatch
+      ? extractRealEstatePurchase(richInput)
+      : Promise.resolve(null),
+    INCENTIVE_DOCUMENT_FLAVORED_DOC_TYPES.has(facts.doc_type) &&
+    incentiveDocumentMatch
+      ? extractIncentiveDocument(richInput)
       : Promise.resolve(null),
   ]);
 
@@ -784,6 +852,33 @@ export async function classifyAndExtractOnePdf(
     );
   }
 
+  let customerContract;
+  if (customerContractResult?.facts) {
+    customerContract = customerContractResult.facts;
+  } else if (customerContractResult?.error) {
+    console.warn(
+      `[customer-contract-extract] ${input.filename}: ${customerContractResult.error.code} — ${customerContractResult.error.message}`,
+    );
+  }
+
+  let realEstatePurchase;
+  if (realEstatePurchaseResult?.facts) {
+    realEstatePurchase = realEstatePurchaseResult.facts;
+  } else if (realEstatePurchaseResult?.error) {
+    console.warn(
+      `[real-estate-purchase-extract] ${input.filename}: ${realEstatePurchaseResult.error.code} — ${realEstatePurchaseResult.error.message}`,
+    );
+  }
+
+  let incentiveDocument;
+  if (incentiveDocumentResult?.facts) {
+    incentiveDocument = incentiveDocumentResult.facts;
+  } else if (incentiveDocumentResult?.error) {
+    console.warn(
+      `[incentive-document-extract] ${input.filename}: ${incentiveDocumentResult.error.code} — ${incentiveDocumentResult.error.message}`,
+    );
+  }
+
   const entry = {
     pageCount: parsed.pageCount,
     facts,
@@ -806,6 +901,9 @@ export async function classifyAndExtractOnePdf(
     corporateFormation,
     foreignCorporate,
     imagePhoto,
+    customerContract,
+    realEstatePurchase,
+    incentiveDocument,
   };
   writePdfCache(hash, entry);
   return { filename: input.filename, ...entry };
