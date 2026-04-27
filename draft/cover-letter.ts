@@ -213,7 +213,7 @@ export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResul
       {
         type: 'text',
         text: SYSTEM_PROMPTS[caseFacts.case_type],
-        cache_control: { type: 'ephemeral' },
+        cache_control: { type: 'ephemeral', ttl: '1h' },
       },
     ],
     messages: [{ role: 'user', content: userMessage }],

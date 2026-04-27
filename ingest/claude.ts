@@ -222,7 +222,7 @@ export async function extractFactsByCaseType(
       {
         type: 'text',
         text: SYSTEM_PROMPTS[case_type],
-        cache_control: { type: 'ephemeral' },
+        cache_control: { type: 'ephemeral', ttl: '1h' },
       },
     ],
     messages: [

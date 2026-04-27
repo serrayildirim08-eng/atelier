@@ -195,7 +195,7 @@ export async function checkDraft(
       {
         type: 'text',
         text: SYSTEM_PROMPTS[caseFacts.case_type],
-        cache_control: { type: 'ephemeral' },
+        cache_control: { type: 'ephemeral', ttl: '1h' },
       },
     ],
     messages: [
