@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { recordGeneration } from './audit';
 
 const COST_LOG_PATH = process.env.COST_LOG_PATH ?? 'db/cost.jsonl';
 
@@ -110,4 +111,15 @@ export function logAnthropicUsage(args: {
       e instanceof Error ? e.message : String(e),
     );
   }
+
+  // Mirror to Langfuse audit log — fire-and-forget, no-op if LANGFUSE_*
+  // env vars are absent. The audit log is the substrate every state-bar
+  // and compliance gate reduces to ("show me the log").
+  recordGeneration({
+    stage: args.stage,
+    model: args.model,
+    case_type: args.case_type,
+    usage: args.usage,
+    estimated_cost_usd: cost_usd,
+  });
 }
