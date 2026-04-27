@@ -43,3 +43,9 @@ next-env.d.ts
 
 # usage telemetry (lib/usage-log.ts append-only JSONL)
 db/cost.jsonl
+
+# claude code session state
+.claude/
+
+# electron build output
+dist-electron/
