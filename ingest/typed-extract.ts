@@ -34,6 +34,11 @@ import { extractVitalRecords } from './extractors/vital-records';
 import { extractPayroll } from './extractors/payroll';
 import { extractTaxReturn } from './extractors/tax-return';
 import { extractFinancialStatement } from './extractors/financial-statement';
+import { extractJobOffer } from './extractors/job-offer';
+import { extractServiceRecord } from './extractors/service-record';
+import { extractCv } from './extractors/cv';
+import { extractCredential } from './extractors/credential';
+import { extractRecommendationLetter } from './extractors/recommendation-letter';
 
 /**
  * Doc types that route through the rich contract extractor as a second
@@ -113,6 +118,58 @@ const VISA_STAMP_FILENAME_RE = /(visa|stamp|i-?797)/i;
 const VITAL_RECORDS_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
   new Set<DocType>(['source_of_funds', 'other']);
 
+/* ---------------------------------------------------------------------- */
+/* Subtype-4 employee extractors (manual MANUAL-SUBTYPE-4 §3.3 / §3.7)     */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Job-offer letters route on doc_type='cover_letter' AND a filename
+ * hint — the thin classifier puts both attorney cover letters and
+ * Petitioner offer letters in the cover_letter bucket.
+ */
+const JOB_OFFER_FLAVORED_DOC_TYPES: ReadonlySet<DocType> = new Set<DocType>([
+  'cover_letter',
+]);
+const JOB_OFFER_FILENAME_RE = /(job[-_\s]?offer|offer[-_\s]?letter)/i;
+
+/**
+ * Service records (foreign government / former-employer employment
+ * records). The thin taxonomy has no slot for these — they land in
+ * `other`. Filename hint disambiguates from generic "other" PDFs.
+ */
+const SERVICE_RECORD_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
+  new Set<DocType>(['other']);
+const SERVICE_RECORD_FILENAME_RE =
+  /(service[-_\s]?record|sicil|hizmet|employment[-_\s]?cert)/i;
+
+/**
+ * CVs / résumés. The thin classifier has no cv_or_resume slot — fall
+ * through on filename. The router still includes 'other' so a CV that
+ * Haiku categorized into the catch-all gets re-extracted.
+ */
+const CV_FLAVORED_DOC_TYPES: ReadonlySet<DocType> = new Set<DocType>(['other']);
+const CV_FILENAME_RE = /(\bcv\b|resume|özgeçmiş|ozgecmis|curriculum)/i;
+
+/**
+ * Credentials (diplomas, certifications, licenses, transcripts). Same
+ * routing pattern as CVs — `other` plus a filename hint.
+ */
+const CREDENTIAL_FLAVORED_DOC_TYPES: ReadonlySet<DocType> = new Set<DocType>([
+  'other',
+]);
+const CREDENTIAL_FILENAME_RE =
+  /(diploma|certificate|license|transcript|sertifika|lisans|belge)/i;
+
+/**
+ * Recommendation / reference letters. Land in `other` since the thin
+ * taxonomy lumps them outside cover_letter (which is the firm's
+ * attorney letter to USCIS, not a third-party endorsement).
+ */
+const RECOMMENDATION_LETTER_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
+  new Set<DocType>(['other']);
+const RECOMMENDATION_LETTER_FILENAME_RE =
+  /(recommendation|reference|letter[-_\s]?of[-_\s]?rec|tavsiye)/i;
+
 function extractFirstJsonObject(text: string): string {
   const start = text.indexOf('{');
   if (start < 0) throw new Error('No JSON object found in response');
@@ -145,28 +202,61 @@ function extractFirstJsonObject(text: string): string {
 
 const SYSTEM_PROMPT = `You are an immigration paralegal performing per-document fact extraction on a single PDF from an E-2 Treaty Investor case folder. Your output goes into a typed memory the case-level aggregator will reason over later.
 
-Your job is two-fold for each document:
+Your job is THREE-FOLD for each document: classify, extract, and suggest a canonical filename.
 
-1. CLASSIFY the document into exactly ONE doc_type from this taxonomy:
-   - passport — passport bio page or photo page identifying the investor
-   - status_doc — I-94 record, visa stamp, change-of-status approval, ESTA, EAD card, etc.
-   - bank_statement — periodic statement from a bank or brokerage
-   - tax_doc — tax return (1040, 1040-NR, foreign equivalents), W-2, 1099
-   - money_movement — wire confirmation, bank transfer receipt, cashier's check, payment stub showing money moved
-   - source_of_funds — deed of sale, gift letter, inheritance documentation, loan agreement, sale-of-business contract
-   - formation_doc — articles of incorporation/organization, EIN letter, operating agreement, bylaws, amendments
-   - ownership_evidence — cap table, share certificate, operating-agreement exhibit B, ledger of ownership
-   - lease_or_property — commercial lease, premises sublease, deed for the enterprise's premises
-   - business_plan — formal business plan, projections, market analysis
-   - invoice_or_receipt — vendor invoice, equipment purchase receipt, build-out cost, professional-fee invoice
-   - business_contract — customer contract, vendor contract, franchise agreement, distribution agreement, OR a Membership Interest Transfer Agreement / Bill of Sale of LLC interest (these route to the rich contract extractor downstream)
-   - payroll_doc — payroll register, employee list, W-2 summary for the enterprise
-   - uscis_or_dos_form — Form I-129 (and E supplement), Form DS-160 confirmation, Form DS-156E, Form G-28
-   - cover_letter — attorney cover letter or petition memorandum addressed to USCIS or a US consulate
-   - expert_letter — opinion / advisory / industry expert letter supporting the petition
-   - other — does not fit any of the above; use sparingly
+1. CLASSIFY the document into exactly ONE doc_type from this taxonomy. Pick by the document's CONTENT, not by the input filename — the input filename is often opaque scan output (e.g., \`1709245687.pdf\`). Each entry shows 3 canonical-filename examples; suggested_filename should aim for that shape.
+
+   - passport — passport bio page / photo page / Turkish "Pasaport" page. Examples: kacar-salih-passport-bio-page.pdf · onur-camural-passport-bio-page.pdf · ozlem-demir-passport-bio-page.pdf
+   - status_doc — visa stamp, EAD card, ESTA, change-of-status approval (I-797). Examples: kacar-salih-prior-e2-visa-stamp-2023.pdf · onur-camural-i-797-approval-notice-2024.pdf · ozlem-demir-ead-card-2025.pdf
+   - i94 — CBP I-94 arrival/departure record. Recognize by "I-94", "Admission Number", "Class of Admission", "Admit Until Date". Examples: kacar-salih-i94-2025-08-12.pdf · onur-camural-i94-arrival-2024-02-01.pdf · gokmen-erdogan-i94-record.pdf
+   - bank_statement — multi-month account statement. Examples: kacar-salih-akbank-statement-2025-q4.pdf · pomega-energy-isbank-statement-2024-jan.pdf · wise-guys-deli-citi-statement-2025-h2.pdf
+   - tax_doc — tax return (1040, 1120, 1120S, 1065, foreign equivalent), W-2, 1099, 941. Examples: wise-guys-deli-form-1120s-tax-year-2024.pdf · kacar-salih-w2-2024.pdf · pomega-energy-foreign-tax-return-2023.pdf
+   - money_movement — wire / SWIFT confirmation, bank transfer slip, cashier's check, FX conversion receipt. Examples: akbank-wire-confirmation-eur-to-usd-2025-08-15.pdf · pomega-energy-parent-to-us-wire-2024-01-30.pdf · kacar-salih-fx-conversion-try-to-usd-2025-11-25.pdf
+   - source_of_funds — deed of sale (non-real-property), gift letter, inheritance documentation, loan agreement, sale-of-business contract. Examples: kacar-salih-property-sale-deed-istanbul-besiktas-2019.pdf · demir-family-gift-letter-usd-50k-2024.pdf · pomega-loan-agreement-eur-2-million-2023.pdf
+   - title_deed — government land-registry title deed (Turkish Tapu, US recorded deed, foreign equivalent). Recognize by "Title Deed", "Tapu", "Land Registry", parcel/plot identifiers. Examples: tapu-deed-istanbul-besiktas-1024-7-2019.pdf · kacar-salih-prior-title-deed-istanbul-2019.pdf · current-title-deed-buyer-arda-yilmaz-2025-11-22.pdf
+   - formation_doc — articles of incorporation / organization, EIN letter, operating agreement, bylaws, amendments. Examples: wise-guys-deli-articles-of-organization-rhode-island-2021.pdf · pomega-energy-foreign-articles-of-incorporation-2018.pdf · wise-guys-deli-ein-letter-2021.pdf
+   - ownership_evidence — cap table, share certificate, ownership ledger, member resolution recording ownership. Examples: pomega-energy-shareholder-register-2024-q1.pdf · wise-guys-deli-cap-table-2025-12-05.pdf · pomega-energy-share-certificate-001-2018.pdf
+   - lease_or_property — commercial premises lease, sublease, residential lease used as SOF rental income. Examples: wise-guys-deli-commercial-lease-providence-ri-2022.pdf · kacar-salih-residential-lease-istanbul-tufe-escalation-2023.pdf · pomega-energy-us-warehouse-lease-2024.pdf
+   - business_plan — formal multi-year plan, projections, market analysis. Examples: wise-guys-deli-business-plan-2026-2030.pdf · pomega-energy-five-year-business-plan-2024-2028.pdf · onur-camural-pomega-medium-voltage-business-plan-2024.pdf
+   - invoice_or_receipt — vendor invoice, equipment purchase, build-out, professional-fee invoice. Examples: wise-guys-deli-equipment-invoice-restaurant-depot-2022.pdf · pomega-energy-assembly-line-vendor-invoice-2024-q1.pdf · akalan-immigration-legal-fee-invoice-2026.pdf
+   - business_contract — customer / vendor contract, franchise / distribution agreement, OR a Membership Interest Transfer Agreement / Bill of Sale of LLC interest (these route to the rich contract extractor downstream). Examples: wise-guys-deli-membership-interest-transfer-agreement-2025-12-05.pdf · wise-guys-deli-operating-agreement-2021.pdf · pomega-energy-customer-offtake-agreement-2024.pdf
+   - payroll_doc — payroll register, employee list, W-2 summary, Form 941. Examples: wise-guys-deli-payroll-register-2025-q4.pdf · pomega-energy-us-employee-list-2024-q4.pdf · wise-guys-deli-form-941-2025-q3.pdf
+   - financial_statement — balance sheet, profit & loss, cash flow, combined statements. Examples: wise-guys-deli-profit-and-loss-2024.pdf · pomega-energy-balance-sheet-2024-q1.pdf · wise-guys-deli-balance-sheet-as-of-2025-12-31.pdf
+   - uscis_or_dos_form — I-129 (and E supplement), DS-160, DS-156E, G-28, G-1145, G-1650, I-539, I-539A. Examples: kacar-salih-form-i-129-2026-01-07.pdf · kacar-salih-form-i-129e-supplement-2026-01-07.pdf · ozlem-kacar-form-i-539-spouse-2026.pdf
+   - cover_letter — cover letter / petition memorandum addressed to USCIS or a US consulate. Examples: akalan-cover-letter-kacar-salih-e2-renewal-2026-01-07.pdf · pomega-energy-cover-letter-camural-e2-specialized-2024-02-08.pdf · akalan-petition-memo-eb1c-2026.pdf
+   - expert_letter — independent opinion / advisory / industry expert letter supporting the petition. Examples: prof-ahmet-yilmaz-expert-letter-pomega-2024.pdf · industry-advisory-letter-medium-voltage-energy-2024.pdf · expert-opinion-restaurant-industry-marginality-2026.pdf
+   - employer_letter — employer-issued letter of recommendation / verification of employment / service record describing the beneficiary's tenure and duties. Examples: pomega-energy-letter-of-recommendation-camural-2024.pdf · siemens-turkey-service-record-camural-2018-2023.pdf · prior-employer-verification-of-employment-erdogan-2022.pdf
+   - cv_or_resume — beneficiary's CV / resume / Turkish "ozgecmis". Examples: onur-camural-cv-medium-voltage-specialist.pdf · kacar-salih-resume-executive-chef.pdf · gokmen-erdogan-curriculum-vitae-2026.pdf
+   - credential — diploma, professional certification, training certificate, license, transcript. Examples: onur-camural-diploma-electrical-engineering-itu-2008.pdf · kacar-salih-culinary-arts-certificate-le-cordon-bleu.pdf · siemens-mv-product-certification-camural-2020.pdf
+   - vital_record — birth / marriage / divorce / death certificate (with or without certified translation). Examples: kacar-ozlem-marriage-certificate-istanbul-2008.pdf · zeynep-kacar-birth-certificate-2014.pdf · arda-yilmaz-divorce-decree-2020.pdf
+   - government_id — national ID, driver's license, foreign residency card, SSN card. Examples: kacar-salih-rhode-island-drivers-license-2024.pdf · onur-camural-turkish-national-id-2022.pdf · zeynep-kacar-social-security-card.pdf
+   - translation_certification — standalone certified translator's declaration (separate from the underlying foreign document). Recognize by translator name + competency statement + signature/date. Examples: certified-translation-declaration-tapu-istanbul-2025.pdf · translator-cert-marriage-certificate-kacar-2024.pdf · translator-affidavit-pomega-board-resolution-2024.pdf
+   - other — does NOT fit ANY category above with confidence ≥ 0.5. Use ONLY as a last resort.
+
+   CLASSIFICATION DISCIPLINE — important:
+   - For every document, evaluate ALL 24 non-other categories. Only return 'other' if you have evaluated every category and ZERO category fits with confidence ≥ 0.5. "Other" is a confession the classifier could not decide; in production this is too common and degrades downstream typed memory. Prefer the closest category and reflect uncertainty in the field-level confidence values.
+   - When a document straddles two categories (e.g., a Bill of Sale that transfers real property — both source_of_funds and title_deed), pick by the document's PRIMARY legal effect: government registry record → title_deed; sale contract → source_of_funds.
+   - When a document is a foreign-language original, classify by content (use the translation if attached) and append a "-tr" / "-de" / "-fr" language suffix in suggested_filename.
 
 2. EXTRACT the type-specific fields per the schema for the chosen doc_type. Only the schema variant matching your chosen doc_type is valid in your JSON output.
+
+3. SUGGEST a canonical filename in the suggested_filename field. This is a soft suggestion an attorney can accept or reject. Naming convention (mandatory):
+   - Pattern: <party-or-entity>-<doc-type>-<distinguishing-detail>-<date-if-relevant>.pdf
+   - Lowercase, kebab-case (hyphen-separated), ASCII only.
+   - Transliterate Turkish characters: ç→c, ğ→g, ı→i, İ→i, ö→o, ş→s, ü→u (and uppercase counterparts).
+   - Maximum 80 characters including the .pdf extension.
+   - Always end with .pdf.
+   - Distinguishing-detail examples: bio-page (passport), signature-page (contract last page), istanbul-besiktas (location), usd-120k (amount), 2024-q1 (period), 2025-08-15 (specific date).
+   - Party preference order: (a) Beneficiary's name when the doc identifies the beneficiary (passport, CV, employer letter, vital record); (b) Petitioner / enterprise name when the doc identifies the enterprise (Articles, lease, bank statements, payroll, financial statements); (c) bank or institution when neither party is the focus (e.g., "akbank-wire-confirmation-..."); (d) the doc category itself when no party is identifiable ("expert-opinion-...").
+   - If beneficiary name is absent, use entity name; if both absent, use doc category + date.
+   - Worked examples:
+     · Kacar-Salih's passport bio page → "kacar-salih-passport-bio-page.pdf"
+     · Wise Guys Deli LLC Articles of Organization → "wise-guys-deli-articles-of-organization.pdf"
+     · Turkish Tapu deed for Istanbul Besiktas property → "tapu-deed-istanbul-besiktas-2019.pdf"
+     · Pomega Energy board resolution from January 2024 → "pomega-energy-board-resolution-2024-01.pdf"
+     · Akbank wire confirmation EUR-to-USD on 2025-08-15 → "akbank-wire-confirmation-eur-to-usd-2025-08-15.pdf"
+
+   suggested_filename is a Field<string>: populate value with the kebab-case name; source_page=null and source_quote="[derived from document content]" with confidence reflecting how clearly you could identify party + doc-type + detail (1.0 unambiguous, ~0.7 confident, ~0.5 best-effort).
 
 Provenance rules — non-negotiable on every leaf field:
 - NEVER invent. If a field is not present in this document, return value=null AND source_page=null AND source_quote=null AND confidence=null.
@@ -224,6 +314,12 @@ export async function classifyAndExtractOnePdf(
       pageCount: parsed.pageCount,
       facts: {
         doc_type: 'other',
+        suggested_filename: {
+          value: null,
+          source_page: null,
+          source_quote: null,
+          confidence: null,
+        },
         one_line_summary: {
           value: 'Scanned document — text extraction returned sparse content; OCR/vision required.',
           source_page: null,
@@ -329,6 +425,13 @@ export async function classifyAndExtractOnePdf(
   };
 
   const filenameSuggestsVisaStamp = VISA_STAMP_FILENAME_RE.test(input.filename);
+  const filenameSuggestsJobOffer = JOB_OFFER_FILENAME_RE.test(input.filename);
+  const filenameSuggestsServiceRecord = SERVICE_RECORD_FILENAME_RE.test(input.filename);
+  const filenameSuggestsCv = CV_FILENAME_RE.test(input.filename);
+  const filenameSuggestsCredential = CREDENTIAL_FILENAME_RE.test(input.filename);
+  const filenameSuggestsRecommendationLetter = RECOMMENDATION_LETTER_FILENAME_RE.test(
+    input.filename,
+  );
 
   const [
     contractResult,
@@ -339,6 +442,11 @@ export async function classifyAndExtractOnePdf(
     i94Result,
     visaStampResult,
     vitalRecordsResult,
+    jobOfferResult,
+    serviceRecordResult,
+    cvResult,
+    credentialResult,
+    recommendationLetterResult,
   ] = await Promise.all([
     CONTRACT_FLAVORED_DOC_TYPES.has(facts.doc_type)
       ? extractContract(richInput)
@@ -363,6 +471,23 @@ export async function classifyAndExtractOnePdf(
       : Promise.resolve(null),
     VITAL_RECORDS_FLAVORED_DOC_TYPES.has(facts.doc_type)
       ? extractVitalRecords(richInput)
+      : Promise.resolve(null),
+    JOB_OFFER_FLAVORED_DOC_TYPES.has(facts.doc_type) && filenameSuggestsJobOffer
+      ? extractJobOffer(richInput)
+      : Promise.resolve(null),
+    SERVICE_RECORD_FLAVORED_DOC_TYPES.has(facts.doc_type) &&
+    filenameSuggestsServiceRecord
+      ? extractServiceRecord(richInput)
+      : Promise.resolve(null),
+    CV_FLAVORED_DOC_TYPES.has(facts.doc_type) && filenameSuggestsCv
+      ? extractCv(richInput)
+      : Promise.resolve(null),
+    CREDENTIAL_FLAVORED_DOC_TYPES.has(facts.doc_type) && filenameSuggestsCredential
+      ? extractCredential(richInput)
+      : Promise.resolve(null),
+    RECOMMENDATION_LETTER_FLAVORED_DOC_TYPES.has(facts.doc_type) &&
+    filenameSuggestsRecommendationLetter
+      ? extractRecommendationLetter(richInput)
       : Promise.resolve(null),
   ]);
 
@@ -438,6 +563,51 @@ export async function classifyAndExtractOnePdf(
     );
   }
 
+  let jobOffer;
+  if (jobOfferResult?.facts) {
+    jobOffer = jobOfferResult.facts;
+  } else if (jobOfferResult?.error) {
+    console.warn(
+      `[job-offer-extract] ${input.filename}: ${jobOfferResult.error.code} — ${jobOfferResult.error.message}`,
+    );
+  }
+
+  let serviceRecord;
+  if (serviceRecordResult?.facts) {
+    serviceRecord = serviceRecordResult.facts;
+  } else if (serviceRecordResult?.error) {
+    console.warn(
+      `[service-record-extract] ${input.filename}: ${serviceRecordResult.error.code} — ${serviceRecordResult.error.message}`,
+    );
+  }
+
+  let cv;
+  if (cvResult?.facts) {
+    cv = cvResult.facts;
+  } else if (cvResult?.error) {
+    console.warn(
+      `[cv-extract] ${input.filename}: ${cvResult.error.code} — ${cvResult.error.message}`,
+    );
+  }
+
+  let credential;
+  if (credentialResult?.facts) {
+    credential = credentialResult.facts;
+  } else if (credentialResult?.error) {
+    console.warn(
+      `[credential-extract] ${input.filename}: ${credentialResult.error.code} — ${credentialResult.error.message}`,
+    );
+  }
+
+  let recommendationLetter;
+  if (recommendationLetterResult?.facts) {
+    recommendationLetter = recommendationLetterResult.facts;
+  } else if (recommendationLetterResult?.error) {
+    console.warn(
+      `[recommendation-letter-extract] ${input.filename}: ${recommendationLetterResult.error.code} — ${recommendationLetterResult.error.message}`,
+    );
+  }
+
   const entry = {
     pageCount: parsed.pageCount,
     facts,
@@ -449,6 +619,11 @@ export async function classifyAndExtractOnePdf(
     i94,
     visaStamp,
     vitalRecords,
+    jobOffer,
+    serviceRecord,
+    cv,
+    credential,
+    recommendationLetter,
   };
   writePdfCache(hash, entry);
   return { filename: input.filename, ...entry };

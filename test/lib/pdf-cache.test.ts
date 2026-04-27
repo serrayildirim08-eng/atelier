@@ -55,6 +55,12 @@ describe('readPdfCache / writePdfCache', () => {
       pageCount: 3,
       facts: {
         doc_type: 'other' as const,
+        suggested_filename: {
+          value: null,
+          source_page: null,
+          source_quote: null,
+          confidence: null,
+        },
         one_line_summary: {
           value: 'A test document.',
           source_page: 1,

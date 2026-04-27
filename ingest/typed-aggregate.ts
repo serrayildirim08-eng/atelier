@@ -41,12 +41,23 @@ import {
   VITAL_RECORDS_SUBTYPE_LABELS,
   type VitalRecordsFacts,
 } from './extractors/vital-records.schema';
+import type { JobOfferFacts } from './extractors/job-offer.schema';
+import type { ServiceRecordFacts } from './extractors/service-record.schema';
+import type { CvFacts } from './extractors/cv.schema';
+import {
+  CREDENTIAL_SUBTYPE_LABELS,
+  type CredentialFacts,
+} from './extractors/credential.schema';
+import type { RecommendationLetterFacts } from './extractors/recommendation-letter.schema';
 
 /** Tolerance for the manual §4.5 quality gate (USD). */
 const CONSIDERATION_GATE_TOLERANCE_USD = 100;
 
 /** Manual §3.1 — passport must be valid for ≥ 6 months from filing. */
 const PASSPORT_VALIDITY_MIN_DAYS = 180;
+
+/** Manual MANUAL-SUBTYPE-4 — Jaccard threshold for cv ↔ job-offer title drift. */
+const CV_TITLE_JACCARD_THRESHOLD = 0.3;
 
 /** Iterate every PerPdfResult in the typed memory regardless of grouping. */
 function* iterMemoryEntries(memory: TypedMemory): Generator<PerPdfResult> {
@@ -157,6 +168,11 @@ function memoryToPromptText(memory: TypedMemory): string {
   const i94Entries: { filename: string; pageCount: number; i94: I94Facts }[] = [];
   const visaStampEntries: { filename: string; pageCount: number; visaStamp: VisaStampFacts }[] = [];
   const vitalRecordsEntries: { filename: string; pageCount: number; vitalRecords: VitalRecordsFacts }[] = [];
+  const jobOfferEntries: { filename: string; pageCount: number; jobOffer: JobOfferFacts }[] = [];
+  const serviceRecordEntries: { filename: string; pageCount: number; serviceRecord: ServiceRecordFacts }[] = [];
+  const cvEntries: { filename: string; pageCount: number; cv: CvFacts }[] = [];
+  const credentialEntries: { filename: string; pageCount: number; credential: CredentialFacts }[] = [];
+  const recommendationLetterEntries: { filename: string; pageCount: number; recommendationLetter: RecommendationLetterFacts }[] = [];
 
   for (const entry of iterMemoryEntries(memory)) {
     if (entry.contract) {
@@ -213,6 +229,41 @@ function memoryToPromptText(memory: TypedMemory): string {
         filename: entry.filename,
         pageCount: entry.pageCount,
         vitalRecords: entry.vitalRecords,
+      });
+    }
+    if (entry.jobOffer) {
+      jobOfferEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        jobOffer: entry.jobOffer,
+      });
+    }
+    if (entry.serviceRecord) {
+      serviceRecordEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        serviceRecord: entry.serviceRecord,
+      });
+    }
+    if (entry.cv) {
+      cvEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        cv: entry.cv,
+      });
+    }
+    if (entry.credential) {
+      credentialEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        credential: entry.credential,
+      });
+    }
+    if (entry.recommendationLetter) {
+      recommendationLetterEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        recommendationLetter: entry.recommendationLetter,
       });
     }
   }
@@ -301,6 +352,54 @@ function memoryToPromptText(memory: TypedMemory): string {
       .join('\n\n');
     sections.push(
       `## VITAL RECORDS (rich extraction) — ${vitalRecordsEntries.length} entr${vitalRecordsEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (jobOfferEntries.length > 0) {
+    const body = jobOfferEntries
+      .map((e) => `### ${e.filename} (page count: ${e.pageCount})\n${JSON.stringify(e.jobOffer, null, 2)}`)
+      .join('\n\n');
+    sections.push(
+      `## JOB OFFER (rich extraction) — ${jobOfferEntries.length} entr${jobOfferEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (serviceRecordEntries.length > 0) {
+    const body = serviceRecordEntries
+      .map((e) => `### ${e.filename} (page count: ${e.pageCount})\n${JSON.stringify(e.serviceRecord, null, 2)}`)
+      .join('\n\n');
+    sections.push(
+      `## SERVICE RECORDS (rich extraction) — ${serviceRecordEntries.length} entr${serviceRecordEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (cvEntries.length > 0) {
+    const body = cvEntries
+      .map((e) => `### ${e.filename} (page count: ${e.pageCount})\n${JSON.stringify(e.cv, null, 2)}`)
+      .join('\n\n');
+    sections.push(
+      `## CV (rich extraction) — ${cvEntries.length} entr${cvEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (credentialEntries.length > 0) {
+    const body = credentialEntries
+      .map((e) => {
+        const label = CREDENTIAL_SUBTYPE_LABELS[e.credential.credential_subtype];
+        return `### ${e.filename} — ${label} (page count: ${e.pageCount})\n${JSON.stringify(e.credential, null, 2)}`;
+      })
+      .join('\n\n');
+    sections.push(
+      `## CREDENTIALS (rich extraction) — ${credentialEntries.length} entr${credentialEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (recommendationLetterEntries.length > 0) {
+    const body = recommendationLetterEntries
+      .map((e) => `### ${e.filename} (page count: ${e.pageCount})\n${JSON.stringify(e.recommendationLetter, null, 2)}`)
+      .join('\n\n');
+    sections.push(
+      `## RECOMMENDATION LETTERS (rich extraction) — ${recommendationLetterEntries.length} entr${recommendationLetterEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
     );
   }
 
@@ -664,6 +763,228 @@ export function runTranslationGate(memory: TypedMemory): TranslationGateAuditRow
   return rows;
 }
 
+/* ---------------------------------------------------------------------- */
+/* Subtype-4 employee gates                                                */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Manual MANUAL-SUBTYPE-4 §3.7 (salary-vs-benchmark gate). Compares the
+ * job-offer's annual salary (USD) against a position+geography industry
+ * benchmark.
+ *
+ * TODO: a salary-benchmark column / lookup is not yet wired into the
+ * code base — we have no occupational-salary table, no BLS / OEWS feed,
+ * and the service-record extractor's optional benchmark field is rare.
+ * For now the gate plumbing is in place but the comparison short-
+ * circuits to ok=true with reason='benchmark_not_yet_wired'. When the
+ * benchmark feed is added, swap that branch for the real comparison.
+ */
+export interface SalaryBenchmarkAuditRow {
+  filename: string;
+  ok: boolean;
+  reason: 'benchmark_not_yet_wired' | 'below_benchmark' | 'no_salary' | 'ok';
+  annual_salary_usd: number | null;
+  annual_salary_currency: string | null;
+  benchmark_usd: number | null;
+  source_page: number | null;
+  source_quote: string | null;
+}
+
+export function runSalaryBenchmarkGate(
+  memory: TypedMemory,
+): SalaryBenchmarkAuditRow[] {
+  const rows: SalaryBenchmarkAuditRow[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.jobOffer) continue;
+    const salary = entry.jobOffer.annual_salary_amount.value;
+    const currency = entry.jobOffer.annual_salary_currency.value;
+    const sourcePage = entry.jobOffer.annual_salary_amount.source_page;
+    const sourceQuote = entry.jobOffer.annual_salary_amount.source_quote;
+    if (salary == null) {
+      rows.push({
+        filename: entry.filename,
+        ok: true,
+        reason: 'no_salary',
+        annual_salary_usd: null,
+        annual_salary_currency: currency,
+        benchmark_usd: null,
+        source_page: sourcePage,
+        source_quote: sourceQuote,
+      });
+      continue;
+    }
+    // Benchmark feed not yet wired — see TODO above. Plumb the gate
+    // anyway so the audit row + downstream conflict-register entry
+    // already exist for when the lookup arrives.
+    rows.push({
+      filename: entry.filename,
+      ok: true,
+      reason: 'benchmark_not_yet_wired',
+      annual_salary_usd: currency === 'USD' ? salary : null,
+      annual_salary_currency: currency,
+      benchmark_usd: null,
+      source_page: sourcePage,
+      source_quote: sourceQuote,
+    });
+  }
+  return rows;
+}
+
+/**
+ * Manual MANUAL-SUBTYPE-4 §3.3.2 (cv ↔ job-offer title drift gate).
+ * Tokenizes both titles into lowercase word sets, drops stop-words, and
+ * computes Jaccard. ok=false when |intersection| / |union| < threshold.
+ */
+export interface CvTitleDriftAuditRow {
+  cv_filename: string;
+  job_offer_filename: string;
+  ok: boolean;
+  jaccard: number | null;
+  cv_title: string | null;
+  job_offer_title: string | null;
+  cv_source_page: number | null;
+  cv_source_quote: string | null;
+  job_offer_source_page: number | null;
+  job_offer_source_quote: string | null;
+}
+
+const STOPWORDS = new Set([
+  'the',
+  'and',
+  'of',
+  'a',
+  'an',
+  'in',
+  'for',
+  'to',
+  'at',
+  'by',
+  'with',
+]);
+
+function tokenizeTitle(title: string | null | undefined): Set<string> {
+  if (!title) return new Set();
+  return new Set(
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter((w) => w.length > 1 && !STOPWORDS.has(w)),
+  );
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1;
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const v of a) if (b.has(v)) inter++;
+  const union = a.size + b.size - inter;
+  return union === 0 ? 1 : inter / union;
+}
+
+export function runCvTitleDriftGate(
+  memory: TypedMemory,
+): CvTitleDriftAuditRow[] {
+  const cvs: { filename: string; cv: CvFacts }[] = [];
+  const offers: { filename: string; jobOffer: JobOfferFacts }[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    if (entry.cv) cvs.push({ filename: entry.filename, cv: entry.cv });
+    if (entry.jobOffer) offers.push({ filename: entry.filename, jobOffer: entry.jobOffer });
+  }
+  const rows: CvTitleDriftAuditRow[] = [];
+  for (const cv of cvs) {
+    for (const offer of offers) {
+      const cvTitle = cv.cv.current_position_title.value;
+      const offerTitle = offer.jobOffer.position_title.value;
+      const cvTokens = tokenizeTitle(cvTitle);
+      const offerTokens = tokenizeTitle(offerTitle);
+      const j =
+        cvTokens.size === 0 && offerTokens.size === 0 ? null : jaccard(cvTokens, offerTokens);
+      rows.push({
+        cv_filename: cv.filename,
+        job_offer_filename: offer.filename,
+        ok: j == null ? true : j >= CV_TITLE_JACCARD_THRESHOLD,
+        jaccard: j,
+        cv_title: cvTitle,
+        job_offer_title: offerTitle,
+        cv_source_page: cv.cv.current_position_title.source_page,
+        cv_source_quote: cv.cv.current_position_title.source_quote,
+        job_offer_source_page: offer.jobOffer.position_title.source_page,
+        job_offer_source_quote: offer.jobOffer.position_title.source_quote,
+      });
+    }
+  }
+  return rows;
+}
+
+/**
+ * Manual MANUAL-SUBTYPE-4 §3.3.6 (personal-reference letter gate).
+ * ok=false when letter_kind === 'personal' (prior-employer / academic
+ * letters carry the firm's evidentiary weight). Flagged severity 3.
+ */
+export interface PersonalReferenceAuditRow {
+  filename: string;
+  ok: boolean;
+  letter_kind: string | null;
+  source_page: number | null;
+  source_quote: string | null;
+}
+
+export function runPersonalReferenceGate(
+  memory: TypedMemory,
+): PersonalReferenceAuditRow[] {
+  const rows: PersonalReferenceAuditRow[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.recommendationLetter) continue;
+    const kind = entry.recommendationLetter.letter_kind.value;
+    rows.push({
+      filename: entry.filename,
+      ok: kind !== 'personal',
+      letter_kind: kind,
+      source_page: entry.recommendationLetter.letter_kind.source_page,
+      source_quote: entry.recommendationLetter.letter_kind.source_quote,
+    });
+  }
+  return rows;
+}
+
+/**
+ * Manual MANUAL-SUBTYPE-4 §3.3.4 / §3.5 (foreign-diploma verifiability
+ * gate). For credential_subtype='diploma' issued by a foreign institution,
+ * apostille_or_legalization_present must be true. ok=false when the
+ * diploma is missing both apostille and consular legalization.
+ */
+export interface CredentialVerifiabilityAuditRow {
+  filename: string;
+  ok: boolean;
+  credential_subtype: string;
+  apostille_or_legalization_present: boolean | null;
+  institution_country: string | null;
+  source_page: number | null;
+  source_quote: string | null;
+}
+
+export function runCredentialVerifiabilityGate(
+  memory: TypedMemory,
+): CredentialVerifiabilityAuditRow[] {
+  const rows: CredentialVerifiabilityAuditRow[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.credential) continue;
+    if (entry.credential.credential_subtype !== 'diploma') continue;
+    const apostille = entry.credential.apostille_or_legalization_present.value;
+    rows.push({
+      filename: entry.filename,
+      ok: apostille !== false,
+      credential_subtype: entry.credential.credential_subtype,
+      apostille_or_legalization_present: apostille,
+      institution_country: entry.credential.institution_country.value,
+      source_page: entry.credential.apostille_or_legalization_present.source_page,
+      source_quote: entry.credential.apostille_or_legalization_present.source_quote,
+    });
+  }
+  return rows;
+}
+
 export async function aggregateTypedMemoryToE2(
   memory: TypedMemory,
   options?: { filingDate?: Date },
@@ -675,6 +996,10 @@ export async function aggregateTypedMemoryToE2(
   passport_validity_results: PassportValidityAuditRow[];
   i94_status_results: I94StatusAuditRow[];
   translation_gate_results: TranslationGateAuditRow[];
+  salary_benchmark_results: SalaryBenchmarkAuditRow[];
+  cv_title_drift_results: CvTitleDriftAuditRow[];
+  personal_reference_results: PersonalReferenceAuditRow[];
+  credential_verifiability_results: CredentialVerifiabilityAuditRow[];
 }> {
   const memoryBlock = memoryToPromptText(memory);
   const userMessage = `${USER_INSTRUCTION}\n\n# Typed memory\n\n${memoryBlock}\n\nRespond with ONLY a single JSON object matching the E2FactsSchema. No prose, no markdown fences, no commentary.`;
@@ -1035,6 +1360,236 @@ export async function aggregateTypedMemoryToE2(
     });
   }
 
+  // Manual MANUAL-SUBTYPE-4 §3.7 salary-vs-benchmark gate. The benchmark
+  // feed is not yet wired (see runSalaryBenchmarkGate's TODO); the gate
+  // currently short-circuits to ok=true. The plumbing below already
+  // emits the conflict_register entry on a future ok=false so callers
+  // get the contract today.
+  const salaryRows = runSalaryBenchmarkGate(memory);
+  for (const row of salaryRows) {
+    if (row.ok) continue;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'salary_below_benchmark' &&
+        c.fact_a_doc.value === row.filename,
+    );
+    if (alreadyLogged) continue;
+    parsed.data.conflict_register.push({
+      description: {
+        value: `Job offer salary USD ${row.annual_salary_usd ?? '?'} below industry benchmark USD ${row.benchmark_usd ?? '?'} (manual MANUAL-SUBTYPE-4 §3.7).`,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      conflict_type: {
+        value: 'salary_below_benchmark',
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      severity: {
+        value: 3,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      fact_a_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_a_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+    });
+  }
+
+  // Manual MANUAL-SUBTYPE-4 §3.3.2 cv ↔ job-offer title drift gate.
+  const cvDriftRows = runCvTitleDriftGate(memory);
+  for (const row of cvDriftRows) {
+    if (row.ok) continue;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'cv_title_vs_offer_drift' &&
+        c.fact_a_doc.value === row.cv_filename &&
+        c.fact_b_doc.value === row.job_offer_filename,
+    );
+    if (alreadyLogged) continue;
+    const j = row.jaccard != null ? row.jaccard.toFixed(2) : 'n/a';
+    parsed.data.conflict_register.push({
+      description: {
+        value: `CV current_position_title "${row.cv_title ?? '?'}" diverges from job-offer position_title "${row.job_offer_title ?? '?'}" (Jaccard ${j} < ${CV_TITLE_JACCARD_THRESHOLD}).`,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      conflict_type: {
+        value: 'cv_title_vs_offer_drift',
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      severity: {
+        value: 2,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      fact_a_doc: {
+        value: row.cv_filename,
+        source_page: row.cv_source_page,
+        source_quote: row.cv_source_quote,
+        confidence: 1,
+      },
+      fact_a_page: {
+        value: row.cv_source_page,
+        source_page: row.cv_source_page,
+        source_quote: row.cv_source_quote,
+        confidence: 1,
+      },
+      fact_b_doc: {
+        value: row.job_offer_filename,
+        source_page: row.job_offer_source_page,
+        source_quote: row.job_offer_source_quote,
+        confidence: 1,
+      },
+      fact_b_page: {
+        value: row.job_offer_source_page,
+        source_page: row.job_offer_source_page,
+        source_quote: row.job_offer_source_quote,
+        confidence: 1,
+      },
+    });
+  }
+
+  // Manual MANUAL-SUBTYPE-4 §3.3.6 personal-reference gate.
+  const personalRefRows = runPersonalReferenceGate(memory);
+  for (const row of personalRefRows) {
+    if (row.ok) continue;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'personal_reference_letter' &&
+        c.fact_a_doc.value === row.filename,
+    );
+    if (alreadyLogged) continue;
+    parsed.data.conflict_register.push({
+      description: {
+        value: `Recommendation letter classified as letter_kind='personal' — Subtype 4 specialized-knowledge requires prior-employer / academic letters (manual §3.3.6).`,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      conflict_type: {
+        value: 'personal_reference_letter',
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      severity: {
+        value: 3,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      fact_a_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_a_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+    });
+  }
+
+  // Manual MANUAL-SUBTYPE-4 §3.3.4 / §3.5 credential-verifiability gate.
+  const credentialRows = runCredentialVerifiabilityGate(memory);
+  for (const row of credentialRows) {
+    if (row.ok) continue;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'credential_unverifiable' &&
+        c.fact_a_doc.value === row.filename,
+    );
+    if (alreadyLogged) continue;
+    parsed.data.conflict_register.push({
+      description: {
+        value: `Foreign diploma (${row.institution_country ?? 'country unknown'}) lacks apostille / consular legalization — manual §3.5 verifiability gate failed.`,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      conflict_type: {
+        value: 'credential_unverifiable',
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      severity: {
+        value: 3,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      fact_a_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_a_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+    });
+  }
+
   return {
     caseFacts: parsed.data,
     usage: {
@@ -1046,5 +1601,9 @@ export async function aggregateTypedMemoryToE2(
     passport_validity_results: passportRows,
     i94_status_results: i94Rows,
     translation_gate_results: translationRows,
+    salary_benchmark_results: salaryRows,
+    cv_title_drift_results: cvDriftRows,
+    personal_reference_results: personalRefRows,
+    credential_verifiability_results: credentialRows,
   };
 }

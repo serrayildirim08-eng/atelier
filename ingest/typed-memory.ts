@@ -27,6 +27,11 @@ import type { VitalRecordsFacts } from './extractors/vital-records.schema';
 import type { PayrollFacts } from './extractors/payroll.schema';
 import type { TaxReturnFacts } from './extractors/tax-return.schema';
 import type { FinancialStatementFacts } from './extractors/financial-statement.schema';
+import type { JobOfferFacts } from './extractors/job-offer.schema';
+import type { ServiceRecordFacts } from './extractors/service-record.schema';
+import type { CvFacts } from './extractors/cv.schema';
+import type { CredentialFacts } from './extractors/credential.schema';
+import type { RecommendationLetterFacts } from './extractors/recommendation-letter.schema';
 
 const Field = <T extends z.ZodTypeAny>(value: T) =>
   z.preprocess(
@@ -68,6 +73,14 @@ export const DocTypeEnum = z.enum([
   'uscis_or_dos_form',
   'cover_letter',
   'expert_letter',
+  'employer_letter',
+  'cv_or_resume',
+  'financial_statement',
+  'credential',
+  'vital_record',
+  'title_deed',
+  'government_id',
+  'translation_certification',
   'other',
 ]);
 export type DocType = z.infer<typeof DocTypeEnum>;
@@ -89,6 +102,14 @@ export const DOC_TYPE_LABELS: Record<DocType, string> = {
   uscis_or_dos_form: 'USCIS / DOS form (I-129, DS-160, DS-156E, G-28)',
   cover_letter: 'Cover letter / petition memo',
   expert_letter: 'Expert / advisory letter',
+  employer_letter: 'Employer letter / verification of employment / service record',
+  cv_or_resume: 'CV / resume',
+  financial_statement: 'Balance sheet / P&L / cash flow',
+  credential: 'Diploma / professional certification / license',
+  vital_record: 'Birth / marriage / divorce / death certificate',
+  title_deed: 'Title deed / land registry / Tapu',
+  government_id: 'National ID / driver’s license / SSN card',
+  translation_certification: 'Certified translator’s declaration',
   other: 'Other',
 };
 
@@ -96,8 +117,28 @@ export const DOC_TYPE_LABELS: Record<DocType, string> = {
 /* Per-type micro-schemas                                                 */
 /* ---------------------------------------------------------------------- */
 
+/**
+ * Common fields every micro-schema carries. Currently just the
+ * document-classifier-renamer's `suggested_filename` — kebab-case ASCII
+ * canonical filename derived from the document's content. Spread into
+ * each variant of the discriminated union so the field is required on
+ * every PerPdfFacts shape (and the classifier prompt always emits it).
+ */
+const COMMON_FIELDS = {
+  /**
+   * Canonical filename suggestion. Kebab-case, lowercase, ASCII-only,
+   * ≤80 chars, ends in `.pdf`. Pattern:
+   *   <party-or-entity>-<doc-type>-<distinguishing-detail>-<date>.pdf
+   * The aggregator and the rename API treat this as a soft suggestion;
+   * applied aliases live in db/filename-aliases.json (no source-file
+   * mutation).
+   */
+  suggested_filename: Field(z.string()),
+};
+
 const PassportFactsSchema = z.object({
   doc_type: z.literal('passport'),
+  ...COMMON_FIELDS,
   full_name: Field(z.string()),
   dob: Field(z.string()),
   nationality: Field(z.string()),
@@ -109,6 +150,7 @@ const PassportFactsSchema = z.object({
 
 const StatusDocFactsSchema = z.object({
   doc_type: z.literal('status_doc'),
+  ...COMMON_FIELDS,
   full_name: Field(z.string()),
   status_class: Field(z.string()),
   i94_admission_number: Field(z.string()),
@@ -126,6 +168,7 @@ const BankTransferEntrySchema = z.object({
 
 const BankStatementFactsSchema = z.object({
   doc_type: z.literal('bank_statement'),
+  ...COMMON_FIELDS,
   account_holder: Field(z.string()),
   bank_name: Field(z.string()),
   account_last4: Field(z.string()),
@@ -136,6 +179,7 @@ const BankStatementFactsSchema = z.object({
 
 const TaxDocFactsSchema = z.object({
   doc_type: z.literal('tax_doc'),
+  ...COMMON_FIELDS,
   filer_name: Field(z.string()),
   tax_year: Field(z.string()),
   form_type: Field(z.string()),
@@ -145,6 +189,7 @@ const TaxDocFactsSchema = z.object({
 
 const MoneyMovementFactsSchema = z.object({
   doc_type: z.literal('money_movement'),
+  ...COMMON_FIELDS,
   amount_usd: Field(z.number()),
   amount_origin: Field(z.number()),
   origin_currency_code: Field(z.string()),
@@ -159,6 +204,7 @@ const MoneyMovementFactsSchema = z.object({
 
 const SourceOfFundsFactsSchema = z.object({
   doc_type: z.literal('source_of_funds'),
+  ...COMMON_FIELDS,
   category: Field(
     z.enum([
       'deed_of_sale',
@@ -181,6 +227,7 @@ const SourceOfFundsFactsSchema = z.object({
 
 const FormationDocFactsSchema = z.object({
   doc_type: z.literal('formation_doc'),
+  ...COMMON_FIELDS,
   kind: Field(
     z.enum([
       'articles_of_incorporation',
@@ -207,6 +254,7 @@ const OwnershipEntryDocSchema = z.object({
 
 const OwnershipEvidenceFactsSchema = z.object({
   doc_type: z.literal('ownership_evidence'),
+  ...COMMON_FIELDS,
   kind: Field(
     z.enum(['cap_table', 'share_certificate', 'operating_agreement_exhibit', 'other']),
   ),
@@ -218,6 +266,7 @@ const OwnershipEvidenceFactsSchema = z.object({
 
 const LeaseOrPropertyFactsSchema = z.object({
   doc_type: z.literal('lease_or_property'),
+  ...COMMON_FIELDS,
   address: Field(z.string()),
   lessor: Field(z.string()),
   lessee: Field(z.string()),
@@ -230,6 +279,7 @@ const LeaseOrPropertyFactsSchema = z.object({
 
 const BusinessPlanFactsSchema = z.object({
   doc_type: z.literal('business_plan'),
+  ...COMMON_FIELDS,
   enterprise_name: Field(z.string()),
   industry: Field(z.string()),
   naics_code: Field(z.string()),
@@ -242,6 +292,7 @@ const BusinessPlanFactsSchema = z.object({
 
 const InvoiceOrReceiptFactsSchema = z.object({
   doc_type: z.literal('invoice_or_receipt'),
+  ...COMMON_FIELDS,
   vendor: Field(z.string()),
   item_description: Field(z.string()),
   amount_usd: Field(z.number()),
@@ -264,6 +315,7 @@ const InvoiceOrReceiptFactsSchema = z.object({
 
 const BusinessContractFactsSchema = z.object({
   doc_type: z.literal('business_contract'),
+  ...COMMON_FIELDS,
   counterparty_name: Field(z.string()),
   role: Field(z.enum(['customer', 'vendor', 'service_provider', 'partner', 'other'])),
   contract_value_usd: Field(z.number()),
@@ -273,6 +325,7 @@ const BusinessContractFactsSchema = z.object({
 
 const PayrollDocFactsSchema = z.object({
   doc_type: z.literal('payroll_doc'),
+  ...COMMON_FIELDS,
   employer_name: Field(z.string()),
   employee_count: Field(z.number()),
   pay_period: Field(z.string()),
@@ -282,6 +335,7 @@ const PayrollDocFactsSchema = z.object({
 
 const UscisOrDosFormFactsSchema = z.object({
   doc_type: z.literal('uscis_or_dos_form'),
+  ...COMMON_FIELDS,
   form_id: Field(z.string()),
   form_edition: Field(z.string()),
   beneficiary_name: Field(z.string()),
@@ -298,6 +352,7 @@ const UscisOrDosFormFactsSchema = z.object({
 
 const CoverLetterFactsSchema = z.object({
   doc_type: z.literal('cover_letter'),
+  ...COMMON_FIELDS,
   visa_type_argued: Field(z.string()),
   addressee: Field(z.string()),
   attorney_name: Field(z.string()),
@@ -308,6 +363,7 @@ const CoverLetterFactsSchema = z.object({
 
 const ExpertLetterFactsSchema = z.object({
   doc_type: z.literal('expert_letter'),
+  ...COMMON_FIELDS,
   writer_name: Field(z.string()),
   writer_title: Field(z.string()),
   writer_institution: Field(z.string()),
@@ -317,8 +373,137 @@ const ExpertLetterFactsSchema = z.object({
   strongest_sentence: Field(z.string()),
 });
 
+const EmployerLetterFactsSchema = z.object({
+  doc_type: z.literal('employer_letter'),
+  ...COMMON_FIELDS,
+  letter_kind: Field(
+    z.enum([
+      'letter_of_recommendation',
+      'verification_of_employment',
+      'service_record',
+      'reference_letter',
+      'other',
+    ]),
+  ),
+  employer_name: Field(z.string()),
+  beneficiary_name: Field(z.string()),
+  position_title: Field(z.string()),
+  employment_start_date: Field(z.string()),
+  employment_end_date: Field(z.string()),
+  letter_date: Field(z.string()),
+});
+
+const CvOrResumeFactsSchema = z.object({
+  doc_type: z.literal('cv_or_resume'),
+  ...COMMON_FIELDS,
+  beneficiary_name: Field(z.string()),
+  current_title: Field(z.string()),
+  current_employer: Field(z.string()),
+  total_years_experience: Field(z.number()),
+  highest_degree: Field(z.string()),
+  prior_executive_titles_count: Field(z.number()),
+  specialized_skills_summary: Field(z.string()),
+});
+
+const FinancialStatementThinFactsSchema = z.object({
+  doc_type: z.literal('financial_statement'),
+  ...COMMON_FIELDS,
+  statement_kind: Field(
+    z.enum(['balance_sheet', 'profit_and_loss', 'cash_flow', 'combined', 'other']),
+  ),
+  entity_name: Field(z.string()),
+  period_or_as_of_date: Field(z.string()),
+  total_assets_usd: Field(z.number()),
+  total_revenue_usd: Field(z.number()),
+  net_income_usd: Field(z.number()),
+});
+
+const CredentialFactsSchema = z.object({
+  doc_type: z.literal('credential'),
+  ...COMMON_FIELDS,
+  credential_kind: Field(
+    z.enum([
+      'diploma',
+      'professional_certification',
+      'training_certificate',
+      'license',
+      'transcript',
+      'other',
+    ]),
+  ),
+  holder_name: Field(z.string()),
+  issuing_institution: Field(z.string()),
+  field_of_study_or_subject: Field(z.string()),
+  date_issued: Field(z.string()),
+  identifier_or_certificate_number: Field(z.string()),
+});
+
+const VitalRecordFactsSchema = z.object({
+  doc_type: z.literal('vital_record'),
+  ...COMMON_FIELDS,
+  record_kind: Field(
+    z.enum([
+      'birth_certificate',
+      'marriage_certificate',
+      'divorce_decree',
+      'death_certificate',
+      'other',
+    ]),
+  ),
+  primary_party_name: Field(z.string()),
+  secondary_party_name: Field(z.string()),
+  event_date: Field(z.string()),
+  registry_office: Field(z.string()),
+  registry_country: Field(z.string()),
+  has_certified_translation: Field(z.boolean()),
+});
+
+const TitleDeedFactsSchema = z.object({
+  doc_type: z.literal('title_deed'),
+  ...COMMON_FIELDS,
+  property_address: Field(z.string()),
+  registered_owner_name: Field(z.string()),
+  parcel_or_registry_number: Field(z.string()),
+  registration_date: Field(z.string()),
+  transfer_date: Field(z.string()),
+  registry_office: Field(z.string()),
+  registry_country: Field(z.string()),
+});
+
+const GovernmentIdFactsSchema = z.object({
+  doc_type: z.literal('government_id'),
+  ...COMMON_FIELDS,
+  id_kind: Field(
+    z.enum([
+      'national_id',
+      'drivers_license',
+      'state_id',
+      'foreign_residency_card',
+      'social_security_card',
+      'other',
+    ]),
+  ),
+  holder_name: Field(z.string()),
+  id_number: Field(z.string()),
+  issue_country: Field(z.string()),
+  issue_date: Field(z.string()),
+  expiry_date: Field(z.string()),
+});
+
+const TranslationCertificationFactsSchema = z.object({
+  doc_type: z.literal('translation_certification'),
+  ...COMMON_FIELDS,
+  translator_name: Field(z.string()),
+  source_language: Field(z.string()),
+  target_language: Field(z.string()),
+  document_translated_summary: Field(z.string()),
+  date_signed: Field(z.string()),
+  competency_statement_present: Field(z.boolean()),
+});
+
 const OtherFactsSchema = z.object({
   doc_type: z.literal('other'),
+  ...COMMON_FIELDS,
   one_line_summary: Field(z.string()),
   key_facts: z.array(
     z.object({
@@ -349,6 +534,14 @@ export const PerPdfFactsSchema = z.discriminatedUnion('doc_type', [
   UscisOrDosFormFactsSchema,
   CoverLetterFactsSchema,
   ExpertLetterFactsSchema,
+  EmployerLetterFactsSchema,
+  CvOrResumeFactsSchema,
+  FinancialStatementThinFactsSchema,
+  CredentialFactsSchema,
+  VitalRecordFactsSchema,
+  TitleDeedFactsSchema,
+  GovernmentIdFactsSchema,
+  TranslationCertificationFactsSchema,
   OtherFactsSchema,
 ]);
 
@@ -441,6 +634,36 @@ export interface PerPdfResult {
    * tax-return for the same tax year.
    */
   financialStatement?: FinancialStatementFacts;
+  /**
+   * Rich job-offer-letter extraction (manual MANUAL-SUBTYPE-4 §3.3 / §3.7).
+   * Drives the salary_below_benchmark and cv_title_vs_offer_drift gates.
+   */
+  jobOffer?: JobOfferFacts;
+  /**
+   * Rich service-record extraction (manual MANUAL-SUBTYPE-4 §3.3.3).
+   * Foreign-government / former-employer record establishing the
+   * Beneficiary's prior tenure + salary for the salary-differential
+   * argument under 9 FAM 402.9-7(2)(b).
+   */
+  serviceRecord?: ServiceRecordFacts;
+  /**
+   * Rich CV / résumé extraction (manual MANUAL-SUBTYPE-4 §3.3.2).
+   * current_position_title feeds the cv_title_vs_offer_drift gate.
+   */
+  cv?: CvFacts;
+  /**
+   * Rich credential extraction (manual MANUAL-SUBTYPE-4 §3.3.4 / §3.3.5).
+   * Discriminated by credential_subtype; the diploma variant's
+   * apostille_or_legalization_present field drives the
+   * credential_unverifiable gate.
+   */
+  credential?: CredentialFacts;
+  /**
+   * Rich recommendation-letter extraction (manual MANUAL-SUBTYPE-4 §3.3.6).
+   * letter_kind drives the personal_reference_letter gate (severity 3
+   * for kind='personal' since prior-employer letters are required).
+   */
+  recommendationLetter?: RecommendationLetterFacts;
   error?: { code: string; message: string };
 }
 

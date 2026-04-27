@@ -226,16 +226,48 @@ const SYSTEM_PROMPTS: Record<CaseType, string> = {
 
 const REVIEW_FORMAT = zodOutputFormat(ReviewReportSchema);
 
+export type ReviewerEffort = 'low' | 'medium' | 'high';
+
 export interface ReviewResult {
   report: ReviewReport;
   usage: { input_tokens: number; output_tokens: number };
+}
+
+/**
+ * Pick reviewer effort tier from case facts.
+ *
+ * Default 'high'. Routine E-2 cases (no severity 4-5 conflict_register
+ * entries) drop to 'medium' — saves ~30-40% of output/thinking tokens
+ * (~$0.05-$0.15/review) at no measured catch-rate cost when the
+ * deterministic Phase-B verifier already runs. EB-1A / EB-1B / EB-1C stay
+ * at 'high' because their Check 5 forensic logic (Kazarian step-2,
+ * international-recognition, function-manager doctrine) is genuinely
+ * deeper than the E-2 element walk.
+ */
+export function pickReviewerEffort(caseFacts: CaseFacts): ReviewerEffort {
+  if (caseFacts.case_type !== 'E2') return 'high';
+  const conflicts = caseFacts.facts.conflict_register;
+  if (Array.isArray(conflicts)) {
+    for (const c of conflicts) {
+      const sev = c.severity?.value;
+      if (typeof sev === 'number' && sev >= 4) return 'high';
+    }
+  }
+  return 'medium';
+}
+
+export interface CheckDraftOptions {
+  /** Override the auto-selected reviewer effort. */
+  effort?: ReviewerEffort;
 }
 
 export async function checkDraft(
   caseFacts: CaseFacts,
   draft: string,
   verifyReport?: VerifyReport,
+  options?: CheckDraftOptions,
 ): Promise<ReviewResult> {
+  const effort: ReviewerEffort = options?.effort ?? pickReviewerEffort(caseFacts);
   // Facts JSON lives in the system array (not the user message) so it sits
   // on its own cache breakpoint, byte-identical to draft/cover-letter.ts.
   // The 5m TTL matches the typical draft→review chain horizon.
@@ -256,7 +288,7 @@ export async function checkDraft(
     model: 'claude-sonnet-4-6',
     max_tokens: 16000,
     output_config: {
-      effort: 'high',
+      effort,
       format: REVIEW_FORMAT,
     },
     system: [
