@@ -44,6 +44,9 @@ next-env.d.ts
 # usage telemetry (lib/usage-log.ts append-only JSONL)
 db/cost.jsonl
 
+# per-PDF extraction cache (lib/pdf-cache.ts content-hash dedup)
+db/pdf-cache/
+
 # claude code session state — ignore everything in .claude/ except shared skills
 .claude/*
 !.claude/skills

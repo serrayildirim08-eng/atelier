@@ -15,6 +15,7 @@
 
 import { getAnthropic } from '@/lib/anthropic';
 import { logAnthropicUsage } from '@/lib/usage-log';
+import { pdfContentHash, readPdfCache, writePdfCache } from '@/lib/pdf-cache';
 import { extractPdfText } from './pdf';
 import {
   PerPdfFactsSchema,
@@ -148,6 +149,16 @@ const MAX_TEXT_CHARS = 60_000;
 export async function classifyAndExtractOnePdf(
   input: TypedExtractInput,
 ): Promise<PerPdfResult> {
+  // Content-hash dedup: byte-identical PDFs (translation pairs left as
+  // originals, email-attachment forwards, sync copies) skip the Haiku call
+  // and the rich extractors. Errors are not cached upstream so we don't
+  // need a negative-cache check here.
+  const hash = pdfContentHash(input.buffer);
+  const cached = readPdfCache(hash);
+  if (cached) {
+    return { filename: input.filename, ...cached };
+  }
+
   let parsed;
   try {
     parsed = await extractPdfText(input.buffer);
@@ -163,8 +174,7 @@ export async function classifyAndExtractOnePdf(
   }
 
   if (parsed.looksLikeScan) {
-    return {
-      filename: input.filename,
+    const scanEntry: Omit<PerPdfResult, 'filename' | 'error'> = {
       pageCount: parsed.pageCount,
       facts: {
         doc_type: 'other',
@@ -177,6 +187,8 @@ export async function classifyAndExtractOnePdf(
         key_facts: [],
       },
     };
+    writePdfCache(hash, scanEntry);
+    return { filename: input.filename, ...scanEntry };
   }
 
   const text = parsed.text.length > MAX_TEXT_CHARS
@@ -322,8 +334,7 @@ export async function classifyAndExtractOnePdf(
     );
   }
 
-  return {
-    filename: input.filename,
+  const entry = {
     pageCount: parsed.pageCount,
     facts,
     contract,
@@ -331,6 +342,8 @@ export async function classifyAndExtractOnePdf(
     wireConfirmation,
     governmentDoc,
   };
+  writePdfCache(hash, entry);
+  return { filename: input.filename, ...entry };
 }
 
 /**
