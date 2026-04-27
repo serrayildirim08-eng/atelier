@@ -207,13 +207,27 @@ export const SYSTEM_PROMPTS: Record<CaseType, string> = {
 /**
  * Per-case-type Zod schema formats. Exported alongside SYSTEM_PROMPTS so
  * vision.ts can construct a structured-output extraction call without
- * rebuilding the map.
+ * rebuilding the map. The text path uses Citations API and cannot use
+ * Structured Outputs (the two are incompatible per Anthropic docs), so
+ * the text path validates with Zod manually after JSON.parse — see
+ * SCHEMAS below.
  */
 export const FORMATS = {
   E2: zodOutputFormat(E2FactsSchema),
   EB1A: zodOutputFormat(EB1AFactsSchema),
   EB1B: zodOutputFormat(EB1BFactsSchema),
   EB1C: zodOutputFormat(EB1CFactsSchema),
+} as const;
+
+/**
+ * Per-case-type Zod schemas (raw, not zodOutputFormat-wrapped). Used by
+ * the text path's manual-validation flow under the Citations API.
+ */
+const SCHEMAS = {
+  E2: E2FactsSchema,
+  EB1A: EB1AFactsSchema,
+  EB1B: EB1BFactsSchema,
+  EB1C: EB1CFactsSchema,
 } as const;
 
 export interface ExtractionUsage {
@@ -225,7 +239,13 @@ export async function extractFactsByCaseType(
   case_type: CaseType,
   pdfText: string,
 ): Promise<{ caseFacts: CaseFacts; usage: ExtractionUsage }> {
-  const response = await getAnthropic().messages.parse({
+  // Citations API binds the model's quoted spans to actual document
+  // characters — eliminates the "model fabricates a verbatim quote"
+  // failure mode that hand-rolled provenance prompts can't prevent
+  // (Endex case study: 10% → 0% hallucinated cites after this migration).
+  // Citations is incompatible with output_config.format, so we hand-roll
+  // JSON parse + Zod validation after the call.
+  const response = await getAnthropic().messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 16000,
     thinking: { type: 'adaptive' },
@@ -239,17 +259,60 @@ export async function extractFactsByCaseType(
     messages: [
       {
         role: 'user',
-        content: `Extract ${case_type} case facts from the following document text. Pages are delimited by [page N] markers.\n\n---\n${pdfText}\n---`,
+        content: [
+          {
+            type: 'document',
+            source: {
+              type: 'text',
+              media_type: 'text/plain',
+              data: pdfText,
+            },
+            title: `${case_type} case document`,
+            citations: { enabled: true },
+            cache_control: { type: 'ephemeral', ttl: '1h' },
+          },
+          {
+            type: 'text',
+            text: `Extract ${case_type} case facts and respond with ONLY a single JSON object matching the schema. No prose, no markdown code fences, no commentary — just the JSON object. The provenance fields source_page, source_quote, and confidence on each leaf must be populated for every populated value.`,
+          },
+        ],
       },
     ],
-    output_config: {
-      format: FORMATS[case_type],
-    },
   });
 
-  if (!response.parsed_output) {
-    throw new Error(`Extractor for ${case_type} did not match the schema`);
+  // Concatenate all text blocks. Citation blocks split text spans, so the
+  // emitted JSON straddles multiple text blocks; concatenation reassembles
+  // it in emission order. Citations metadata is preserved on response.content
+  // for downstream UI use but not structurally remapped onto the schema.
+  let jsonText = '';
+  for (const block of response.content) {
+    if (block.type === 'text') {
+      jsonText += block.text;
+    }
   }
+
+  // Defensive JSON extraction: locate the outermost {...} span. Sonnet
+  // typically returns clean JSON given the explicit instruction above, but
+  // markdown fences or stray prose are still possible.
+  const firstBrace = jsonText.indexOf('{');
+  const lastBrace = jsonText.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    throw new Error(`Extractor for ${case_type}: no JSON object found in response`);
+  }
+  const jsonCandidate = jsonText.slice(firstBrace, lastBrace + 1);
+
+  let parsedRaw: unknown;
+  try {
+    parsedRaw = JSON.parse(jsonCandidate);
+  } catch (e: unknown) {
+    throw new Error(
+      `Extractor for ${case_type}: JSON.parse failed — ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+
+  // Zod validates the shape. Failure here means Sonnet drifted off-schema —
+  // surfaced as a clear error to the route handler.
+  const facts = SCHEMAS[case_type].parse(parsedRaw);
 
   logAnthropicUsage({
     stage: 'extract',
@@ -258,7 +321,7 @@ export async function extractFactsByCaseType(
     usage: response.usage,
   });
 
-  const caseFacts = { case_type, facts: response.parsed_output } as CaseFacts;
+  const caseFacts = { case_type, facts } as CaseFacts;
   return {
     caseFacts,
     usage: {
