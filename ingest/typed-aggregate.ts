@@ -16,7 +16,13 @@ import { getAnthropic } from '@/lib/anthropic';
 import { logAnthropicUsage } from '@/lib/usage-log';
 import { countMessageTokens } from '@/lib/token-count';
 import { E2FactsSchema, type E2Facts } from './schema';
-import { DOC_TYPE_LABELS, type PerPdfResult, type TypedMemory } from './typed-memory';
+import {
+  DOC_TYPE_LABELS,
+  type PerPdfResult,
+  type TypedMemory,
+  type SubstantialityReconResult,
+  type SubstantialityReconEvidence,
+} from './typed-memory';
 import {
   CONTRACT_SUBTYPE_LABELS,
   type ContractFacts,
@@ -856,6 +862,237 @@ export function findConsiderationGateInputs(
   };
 }
 
+/* ---------------------------------------------------------------------- */
+/* Tab F substantiality reconciliation (deterministic gate)                */
+/* ---------------------------------------------------------------------- */
+
+const SUBSTANTIALITY_LOWER_RATIO = 0.85;
+const SUBSTANTIALITY_UPPER_RATIO = 1.15;
+const SUBSTANTIALITY_DATE_WINDOW_DAYS = 90;
+
+/** Normalize a name for fuzzy "is this the investor / enterprise" check. */
+function normalizeName(s: string | null | undefined): string {
+  if (!s) return '';
+  return s
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Substring-tolerant name match: either side contains the other (after normalize). */
+function nameMatches(candidate: string | null | undefined, target: string | null | undefined): boolean {
+  const a = normalizeName(candidate);
+  const b = normalizeName(target);
+  if (!a || !b) return false;
+  return a.includes(b) || b.includes(a);
+}
+
+function parseIsoDate(s: string | null | undefined): Date | null {
+  if (!s || typeof s !== 'string') return null;
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const d = new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00Z`);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function withinDateWindow(eventDate: Date | null, anchor: Date | null, days: number): boolean {
+  if (!eventDate || !anchor) return true; // no anchor → don't filter on date
+  const deltaMs = Math.abs(eventDate.getTime() - anchor.getTime());
+  return deltaMs <= days * 24 * 60 * 60 * 1000;
+}
+
+/** Pull the investor's full_name from any per-doc-type entry that carries one. */
+function findInvestorName(memory: TypedMemory): string | null {
+  for (const entry of iterMemoryEntries(memory)) {
+    const facts = entry.facts;
+    if (!facts) continue;
+    if (facts.doc_type === 'passport') {
+      const v = facts.full_name?.value;
+      if (v) return v;
+    }
+    if (facts.doc_type === 'uscis_or_dos_form') {
+      const v = facts.beneficiary_name?.value;
+      if (v) return v;
+    }
+  }
+  return null;
+}
+
+/** Pull the enterprise's legal_name from any entry that carries one. */
+function findEnterpriseName(memory: TypedMemory): string | null {
+  for (const entry of iterMemoryEntries(memory)) {
+    const facts = entry.facts;
+    if (!facts) continue;
+    if (facts.doc_type === 'formation_doc') {
+      // formation_doc variant in this codebase uses `kind` not `legal_name`;
+      // entity_legal_name lives on the rich `corporateFormation` extractor
+      // attached to the same PerPdfResult.
+      const cf = entry.corporateFormation;
+      if (cf?.entity_legal_name?.value) return cf.entity_legal_name.value;
+    }
+    if (facts.doc_type === 'uscis_or_dos_form') {
+      const v = facts.petitioner_name?.value;
+      if (v) return v;
+    }
+  }
+  return null;
+}
+
+/**
+ * Reconcile Tab F substantiality: prove the committed-investment number
+ * with actual money-out evidence.
+ *
+ * total_committed_usd ← MITA contract.total_consideration_amount (USD)
+ *                       ↳ fallback I-129E.investment_amount_usd
+ * sum_outflows ← Σ money_movement.amount_usd where from_holder matches
+ *                 investor or enterprise, within ±90d of contract effective
+ * sum_invoices ← Σ invoice_or_receipt.amount_usd where vendor != investor
+ * sum_equipment ← Σ contract.bill_of_sale.total_consideration_amount
+ *                 + Σ business_contract.contract_value_usd where role='vendor'
+ *
+ * coverage_ratio = (outflows + invoices + equipment) / total_committed_usd
+ *
+ * Verdicts:
+ *   < 0.85 → 'under_documented' (severity 3 — committed but un-proved)
+ *   > 1.15 → 'over_documented'  (severity 2 — likely double-counting)
+ *   else   → 'within_tolerance' (audit row only)
+ *   total_committed null/0 → 'no_committed_amount' (no-op)
+ */
+export function reconcileSubstantiality(memory: TypedMemory): SubstantialityReconResult {
+  // 1) Locate total_committed_usd.
+  let total_committed_usd: number | null = null;
+  let contract_filename: string | null = null;
+  let contract_effective_date: string | null = null;
+
+  for (const entry of iterMemoryEntries(memory)) {
+    const c = entry.contract;
+    if (
+      c?.contract_subtype === 'membership_interest_transfer_agreement' &&
+      c.total_consideration_currency.value === 'USD' &&
+      typeof c.total_consideration_amount.value === 'number'
+    ) {
+      total_committed_usd = c.total_consideration_amount.value;
+      contract_filename = entry.filename;
+      contract_effective_date = c.effective_date.value ?? null;
+      break;
+    }
+  }
+  if (total_committed_usd === null) {
+    for (const entry of iterMemoryEntries(memory)) {
+      const f = entry.facts;
+      if (f?.doc_type === 'uscis_or_dos_form') {
+        const formId = f.form_id?.value ?? '';
+        const isI129E = /i[-\s]?129\s*e/i.test(formId);
+        const amt = f.investment_amount_usd?.value;
+        if (isI129E && typeof amt === 'number') {
+          total_committed_usd = amt;
+          break;
+        }
+      }
+    }
+  }
+
+  if (total_committed_usd === null || total_committed_usd === 0) {
+    return {
+      total_committed_usd,
+      sum_outflows_usd: 0,
+      sum_invoices_usd: 0,
+      sum_equipment_usd: 0,
+      coverage_ratio: null,
+      verdict: 'no_committed_amount',
+      evidence_doc: [],
+      contract_filename,
+      contract_effective_date,
+    };
+  }
+
+  const investorName = findInvestorName(memory);
+  const enterpriseName = findEnterpriseName(memory);
+  const anchor = parseIsoDate(contract_effective_date);
+
+  const evidence: SubstantialityReconEvidence[] = [];
+  let sum_outflows_usd = 0;
+  let sum_invoices_usd = 0;
+  let sum_equipment_usd = 0;
+
+  // 2) Outflows from money_movement.
+  const mmEntries = memory.money_movement ?? [];
+  for (const entry of mmEntries) {
+    if (!entry.facts || entry.facts.doc_type !== 'money_movement') continue;
+    const f = entry.facts;
+    const amount = f.amount_usd?.value;
+    if (typeof amount !== 'number' || amount <= 0) continue;
+    const fromHolder = f.from_holder?.value;
+    const isOutbound =
+      nameMatches(fromHolder, investorName) ||
+      nameMatches(fromHolder, enterpriseName);
+    if (!isOutbound) continue;
+    const moveDate = parseIsoDate(f.date?.value);
+    if (!withinDateWindow(moveDate, anchor, SUBSTANTIALITY_DATE_WINDOW_DAYS)) continue;
+    sum_outflows_usd += amount;
+    evidence.push({ filename: entry.filename, amount_usd: amount, category: 'outflow' });
+  }
+
+  // 3) Invoices/receipts (exclude refunds where vendor is the investor).
+  const invEntries = memory.invoice_or_receipt ?? [];
+  for (const entry of invEntries) {
+    if (!entry.facts || entry.facts.doc_type !== 'invoice_or_receipt') continue;
+    const f = entry.facts;
+    const amount = f.amount_usd?.value;
+    if (typeof amount !== 'number' || amount <= 0) continue;
+    const vendor = f.vendor?.value;
+    if (nameMatches(vendor, investorName)) continue; // refund / self-pay
+    sum_invoices_usd += amount;
+    evidence.push({ filename: entry.filename, amount_usd: amount, category: 'invoice' });
+  }
+
+  // 4) Equipment / bills of sale.
+  for (const entry of iterMemoryEntries(memory)) {
+    const c = entry.contract;
+    if (
+      c?.contract_subtype === 'bill_of_sale' &&
+      c.consideration_currency.value === 'USD' &&
+      typeof c.consideration_amount.value === 'number'
+    ) {
+      const amt = c.consideration_amount.value;
+      sum_equipment_usd += amt;
+      evidence.push({ filename: entry.filename, amount_usd: amt, category: 'equipment' });
+    }
+    if (
+      entry.facts?.doc_type === 'business_contract' &&
+      entry.facts.role?.value === 'vendor' &&
+      typeof entry.facts.contract_value_usd?.value === 'number'
+    ) {
+      const amt = entry.facts.contract_value_usd.value;
+      sum_equipment_usd += amt;
+      evidence.push({ filename: entry.filename, amount_usd: amt, category: 'equipment' });
+    }
+  }
+
+  const documented = sum_outflows_usd + sum_invoices_usd + sum_equipment_usd;
+  const coverage_ratio = documented / total_committed_usd;
+  const verdict: SubstantialityReconResult['verdict'] =
+    coverage_ratio < SUBSTANTIALITY_LOWER_RATIO
+      ? 'under_documented'
+      : coverage_ratio > SUBSTANTIALITY_UPPER_RATIO
+        ? 'over_documented'
+        : 'within_tolerance';
+
+  return {
+    total_committed_usd,
+    sum_outflows_usd,
+    sum_invoices_usd,
+    sum_equipment_usd,
+    coverage_ratio,
+    verdict,
+    evidence_doc: evidence,
+    contract_filename,
+    contract_effective_date,
+  };
+}
+
 /**
  * Compute the drafter's defensive-paragraph cues from the typed memory.
  * Pure / deterministic — exported for tests.
@@ -1672,6 +1909,7 @@ export async function aggregateTypedMemoryToE2(
   pl_tax_net_income_results: PlTaxNetIncomeAuditRow[];
   real_estate_buyer_mismatch_results: RealEstateBuyerMismatchAuditRow[];
   incentive_recipient_mismatch_results: IncentiveRecipientMismatchAuditRow[];
+  substantiality_recon_results: SubstantialityReconResult[];
 }> {
   const memoryBlock = memoryToPromptText(memory);
   const inventoryBlock = buildDocInventoryWithAliases(memory, options?.aliases);
@@ -1820,6 +2058,91 @@ export async function aggregateTypedMemoryToE2(
           },
         });
       }
+    }
+  }
+
+  // Tab F substantiality reconciliation: prove the committed-investment
+  // figure with money-out evidence (outflows + invoices + equipment).
+  // Idempotent: only one substantiality_under_documented or
+  // substantiality_over_documented finding per matter — keyed on
+  // conflict_type alone, not document pair, since the gate aggregates
+  // many docs into a single ratio.
+  const substantialityRecon = reconcileSubstantiality(memory);
+  if (
+    substantialityRecon.verdict === 'under_documented' ||
+    substantialityRecon.verdict === 'over_documented'
+  ) {
+    const conflictType =
+      substantialityRecon.verdict === 'under_documented'
+        ? 'substantiality_under_documented'
+        : 'substantiality_over_documented';
+    const severity = substantialityRecon.verdict === 'under_documented' ? 3 : 2;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) => c.conflict_type.value === conflictType,
+    );
+    if (!alreadyLogged) {
+      const ratioPct =
+        substantialityRecon.coverage_ratio !== null
+          ? (substantialityRecon.coverage_ratio * 100).toFixed(1)
+          : 'n/a';
+      const documented =
+        substantialityRecon.sum_outflows_usd +
+        substantialityRecon.sum_invoices_usd +
+        substantialityRecon.sum_equipment_usd;
+      const evidenceList = substantialityRecon.evidence_doc
+        .map((e) => `${e.filename} (${e.category}, USD ${e.amount_usd.toFixed(2)})`)
+        .join('; ');
+      parsed.data.conflict_register.push({
+        description: {
+          value: `Tab F substantiality coverage = ${ratioPct}% (committed USD ${
+            substantialityRecon.total_committed_usd?.toFixed(2) ?? 'n/a'
+          }; documented USD ${documented.toFixed(2)} = outflows ${substantialityRecon.sum_outflows_usd.toFixed(
+            2,
+          )} + invoices ${substantialityRecon.sum_invoices_usd.toFixed(
+            2,
+          )} + equipment ${substantialityRecon.sum_equipment_usd.toFixed(2)}). Evidence: ${evidenceList}`,
+          source_page: null,
+          source_quote: '[deterministic Tab F reconciliation gate]',
+          confidence: 1,
+        },
+        conflict_type: {
+          value: conflictType,
+          source_page: null,
+          source_quote: '[deterministic Tab F reconciliation gate]',
+          confidence: 1,
+        },
+        severity: {
+          value: severity,
+          source_page: null,
+          source_quote: '[deterministic Tab F reconciliation gate]',
+          confidence: 1,
+        },
+        fact_a_doc: {
+          value: substantialityRecon.contract_filename,
+          source_page: null,
+          source_quote: null,
+          confidence: 1,
+        },
+        fact_a_page: {
+          value: null,
+          source_page: null,
+          source_quote: null,
+          confidence: 1,
+        },
+        fact_b_doc: {
+          value:
+            substantialityRecon.evidence_doc[0]?.filename ?? null,
+          source_page: null,
+          source_quote: null,
+          confidence: 1,
+        },
+        fact_b_page: {
+          value: null,
+          source_page: null,
+          source_quote: null,
+          confidence: 1,
+        },
+      });
     }
   }
 
@@ -2706,5 +3029,6 @@ export async function aggregateTypedMemoryToE2(
     pl_tax_net_income_results: plTaxNetIncomeRows,
     real_estate_buyer_mismatch_results: realEstateBuyerRows,
     incentive_recipient_mismatch_results: incentiveRecipientRows,
+    substantiality_recon_results: [substantialityRecon],
   };
 }

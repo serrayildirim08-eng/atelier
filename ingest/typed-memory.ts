@@ -746,6 +746,43 @@ export interface PerPdfResult {
  */
 export type TypedMemory = Partial<Record<DocType, PerPdfResult[]>>;
 
+/* ---------------------------------------------------------------------- */
+/* Audit-row interfaces — Tab F substantiality reconciliation             */
+/* ---------------------------------------------------------------------- */
+
+export interface SubstantialityReconEvidence {
+  filename: string;
+  amount_usd: number;
+  category: 'outflow' | 'invoice' | 'equipment';
+}
+
+/**
+ * Tab F substantiality reconciliation result. Computed deterministically
+ * from the typed memory by ingest/typed-aggregate.ts. Verdicts:
+ *   - 'within_tolerance'      — coverage_ratio ∈ [0.85, 1.15]
+ *   - 'under_documented'      — coverage_ratio < 0.85, severity 3
+ *   - 'over_documented'       — coverage_ratio > 1.15, severity 2
+ *   - 'no_committed_amount'   — neither contract nor I-129E supplied a
+ *                                committed figure; gate is a no-op
+ */
+export interface SubstantialityReconResult {
+  total_committed_usd: number | null;
+  sum_outflows_usd: number;
+  sum_invoices_usd: number;
+  sum_equipment_usd: number;
+  coverage_ratio: number | null;
+  verdict:
+    | 'within_tolerance'
+    | 'under_documented'
+    | 'over_documented'
+    | 'no_committed_amount';
+  evidence_doc: SubstantialityReconEvidence[];
+  /** Filename of the contract that supplied total_committed_usd, if any. */
+  contract_filename: string | null;
+  /** Contract effective_date (ISO YYYY-MM-DD) used for the ±90d window. */
+  contract_effective_date: string | null;
+}
+
 export function groupByDocType(results: PerPdfResult[]): TypedMemory {
   const out: TypedMemory = {};
   for (const r of results) {
