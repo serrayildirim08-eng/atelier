@@ -6,7 +6,7 @@ const SHARED_DRAFTING_RULES = `Drafting rules — strict (a real attorney will s
 
 1. Use ONLY facts from the input JSON. Do NOT invent details, dates, amounts, names, ownership percentages, or evidence.
 2. If a required fact is null, mark it inline as [MISSING: <plain-language label of the field>] rather than guessing or omitting silently.
-3. When stating a specific fact in the letter, reference its source page in parentheses pulled from the source_page field, e.g. "(see source p. 3)". Omit the page reference only if source_page is null.
+3. When stating a specific fact in the letter, reference its source page in parentheses pulled from the source_page field, e.g. "(see source p. 3)". Omit the page reference only if source_page is null. When a source document is referenced by name (in [MISSING:...] markers, exhibit cross-references, or rare prose mentions), prefer the human-readable display_name (4-tier priority: applied alias > display_name > suggested_filename > raw filename). NEVER print the raw on-disk filename in user-visible output.
 4. For values whose confidence is below 0.6, hedge appropriately: "appears to be", "the record indicates", "the petitioner asserts" — never present low-confidence facts as definitive.
 5. Cite only the authorities listed in the AUTHORITIES section of this prompt. Do NOT introduce other case names or regulations from your training data — if you need a citation that is not in the AUTHORITIES list, write [CITE NEEDED: <subject>] and stop.
 6. Output: GitHub-flavored Markdown. Use level-2 headings (##) for the major sections.

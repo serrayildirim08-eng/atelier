@@ -62,7 +62,7 @@ const SHARED_RULES = `Drafting rules — strict (a real attorney will sign or ha
 
 1. Use ONLY facts from the input JSON. Do NOT invent details, dates, amounts, addresses, or relationships.
 2. If a required fact is null, mark it inline as [MISSING: <plain-language label>] rather than guessing or omitting silently.
-3. Reference source pages parenthetically only when the field's source_page is non-null, e.g. "(see source p. 3)".
+3. Reference source pages parenthetically only when the field's source_page is non-null, e.g. "(see source p. 3)". When a source document is referenced by name, prefer the human-readable display_name (4-tier priority: applied alias > display_name > suggested_filename > raw filename). NEVER print the raw on-disk filename in user-visible output.
 4. Hedge low-confidence facts (confidence < 0.6): "the declarant believes", "the records indicate".
 5. The verification_paragraph MUST include the under-penalty-of-perjury formula: "I declare under penalty of perjury under the laws of the United States of America that the foregoing is true and correct." (28 U.S.C. § 1746). Add the executed-on-date placeholder afterward.
 6. Substance paragraphs in first-person ("I", "my"); the verification paragraph also first-person.
