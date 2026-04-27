@@ -31,6 +31,9 @@ import type { JobOfferFacts } from './extractors/job-offer.schema';
 import type { ServiceRecordFacts } from './extractors/service-record.schema';
 import type { CvFacts } from './extractors/cv.schema';
 import type { CredentialFacts } from './extractors/credential.schema';
+import type { CorporateFormationFacts } from './extractors/corporate-formation.schema';
+import type { ForeignCorporateFacts } from './extractors/foreign-corporate.schema';
+import type { ImagePhotoFacts } from './extractors/image-photo.schema';
 import type { RecommendationLetterFacts } from './extractors/recommendation-letter.schema';
 
 const Field = <T extends z.ZodTypeAny>(value: T) =>
@@ -59,6 +62,7 @@ const Field = <T extends z.ZodTypeAny>(value: T) =>
 export const DocTypeEnum = z.enum([
   'passport',
   'status_doc',
+  'i94',
   'bank_statement',
   'tax_doc',
   'money_movement',
@@ -87,7 +91,8 @@ export type DocType = z.infer<typeof DocTypeEnum>;
 
 export const DOC_TYPE_LABELS: Record<DocType, string> = {
   passport: 'Passport',
-  status_doc: 'US status / I-94 / visa stamp',
+  status_doc: 'US status / visa stamp / I-797 / EAD',
+  i94: 'CBP I-94 arrival/departure record',
   bank_statement: 'Bank statement',
   tax_doc: 'Tax return / W-2',
   money_movement: 'Wire / transfer / check',
@@ -157,6 +162,17 @@ const StatusDocFactsSchema = z.object({
   admission_date: Field(z.string()),
   authorized_until: Field(z.string()),
   issuing_office: Field(z.string()),
+});
+
+const I94ThinFactsSchema = z.object({
+  doc_type: z.literal('i94'),
+  ...COMMON_FIELDS,
+  full_name: Field(z.string()),
+  admission_number: Field(z.string()),
+  class_of_admission: Field(z.string()),
+  admission_date: Field(z.string()),
+  admit_until_date: Field(z.string()),
+  port_of_entry: Field(z.string()),
 });
 
 const BankTransferEntrySchema = z.object({
@@ -520,6 +536,7 @@ const OtherFactsSchema = z.object({
 export const PerPdfFactsSchema = z.discriminatedUnion('doc_type', [
   PassportFactsSchema,
   StatusDocFactsSchema,
+  I94ThinFactsSchema,
   BankStatementFactsSchema,
   TaxDocFactsSchema,
   MoneyMovementFactsSchema,
@@ -664,6 +681,33 @@ export interface PerPdfResult {
    * for kind='personal' since prior-employer letters are required).
    */
   recommendationLetter?: RecommendationLetterFacts;
+  /**
+   * Rich corporate-formation extraction (Articles of Organization /
+   * Incorporation, Operating Agreement amendments, EIN assignment letter,
+   * Certificate of Good Standing, state registrations). Attached when
+   * the first-pass classifier returns doc_type='formation_doc'. Renderers
+   * MUST mask all but the last 4 digits of any captured EIN per the
+   * firm's PII rule.
+   */
+  corporateFormation?: CorporateFormationFacts;
+  /**
+   * Rich foreign-corporate extraction (Esas Sözleşme, board resolutions,
+   * shareholder registers, audited financials, foreign tax certificates).
+   * Attached when the first-pass classifier returns an ownership /
+   * financial / other-flavored doc_type AND the filename matches the
+   * foreign-corporate pattern (typed-extract.ts router). The
+   * shareholder_register variant feeds the manual §3.2 deterministic
+   * gate (treaty_national_ownership_percent ≥ 50).
+   */
+  foreignCorporate?: ForeignCorporateFacts;
+  /**
+   * Rich image-bearing extraction — passport photos, signature pages,
+   * apostille stamps, consular seals, other image artifacts. Stacks with
+   * passport / i94 / government-doc when the same PDF carries both text
+   * and an image-bearing rendering. Routes when looksLikeScan=true OR
+   * the filename hints at an image artifact (typed-extract.ts router).
+   */
+  imagePhoto?: ImagePhotoFacts;
   error?: { code: string; message: string };
 }
 

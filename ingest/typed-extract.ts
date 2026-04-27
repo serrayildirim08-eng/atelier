@@ -40,6 +40,9 @@ import { extractServiceRecord } from './extractors/service-record';
 import { extractCv } from './extractors/cv';
 import { extractCredential } from './extractors/credential';
 import { extractRecommendationLetter } from './extractors/recommendation-letter';
+import { extractCorporateFormation } from './extractors/corporate-formation';
+import { extractForeignCorporate } from './extractors/foreign-corporate';
+import { extractImagePhoto } from './extractors/image-photo';
 
 /**
  * Doc types that route through the rich contract extractor as a second
@@ -119,6 +122,34 @@ const VISA_STAMP_FILENAME_RE = /(visa|stamp|i-?797)/i;
 const VITAL_RECORDS_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
   new Set<DocType>(['source_of_funds', 'other']);
 
+/**
+ * Doc types that route through the rich payroll extractor (manual §9
+ * marginality / 9 FAM 402.9-6(D)). The thin classifier has a dedicated
+ * payroll_doc slot.
+ */
+const PAYROLL_FLAVORED_DOC_TYPES: ReadonlySet<DocType> = new Set<DocType>([
+  'payroll_doc',
+]);
+
+/**
+ * Doc types that route through the rich tax-return extractor (manual §9
+ * + investment-vs-balance-sheet gate). The thin classifier uses tax_doc
+ * for both tax returns and W-2s; the rich extractor itself disambiguates
+ * via tax_return_subtype.
+ */
+const TAX_RETURN_FLAVORED_DOC_TYPES: ReadonlySet<DocType> = new Set<DocType>([
+  'tax_doc',
+]);
+
+/**
+ * Doc types that route through the rich financial-statement extractor
+ * (manual §9 + P&L-vs-tax-return net-income gate). financial_statement
+ * is the canonical slot; business_plan often bundles statements as
+ * exhibits, so it routes here too.
+ */
+const FINANCIAL_STATEMENT_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
+  new Set<DocType>(['financial_statement', 'business_plan']);
+
 /* ---------------------------------------------------------------------- */
 /* Subtype-4 employee extractors (manual MANUAL-SUBTYPE-4 §3.3 / §3.7)     */
 /* ---------------------------------------------------------------------- */
@@ -170,6 +201,41 @@ const RECOMMENDATION_LETTER_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
   new Set<DocType>(['other']);
 const RECOMMENDATION_LETTER_FILENAME_RE =
   /(recommendation|reference|letter[-_\s]?of[-_\s]?rec|tavsiye)/i;
+
+/* ---------------------------------------------------------------------- */
+/* Batch 5 — Corporate / Foreign / Image extractors                        */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Corporate formation documents (Articles, EIN, Good Standing, state
+ * registrations, OA amendments). Domestic-jurisdiction formation only —
+ * foreign-corporate Articles route through the foreign-corporate
+ * extractor below.
+ */
+const CORPORATE_FORMATION_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
+  new Set<DocType>(['formation_doc']);
+
+/**
+ * Foreign-jurisdiction corporate documents (Esas Sözleşme, board
+ * resolutions, shareholder registers, audited financials, tax
+ * certificates). Lands in ownership_evidence / financial_statement /
+ * other in the thin taxonomy; the filename hint disambiguates from
+ * domestic counterparts.
+ */
+const FOREIGN_CORPORATE_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
+  new Set<DocType>(['ownership_evidence', 'financial_statement', 'other']);
+const FOREIGN_CORPORATE_FILENAME_RE =
+  /(foreign[-_\s]?articles|board[-_\s]?resolution|shareholder[-_\s]?register|audit|esas[-_\s]?sözleşme|ana[-_\s]?sözleşme|yönetim[-_\s]?kurulu|denetim)/i;
+
+/**
+ * Image-bearing PDF pages (signature pages, apostille stamps, consular
+ * seals, passport photos, other). Routes when the PDF is a pure scan
+ * (looksLikeScan=true) OR the filename hints at an image artifact. The
+ * router handles both signals; the filename pattern below is one of two
+ * triggers checked at fan-out time.
+ */
+const IMAGE_PHOTO_FILENAME_RE =
+  /(photo|signature|stamp|apostille|seal|imza|fotoğraf|fotograf|mühür|muhur)/i;
 
 function extractFirstJsonObject(text: string): string {
   const start = text.indexOf('{');
@@ -311,6 +377,25 @@ export async function classifyAndExtractOnePdf(
   }
 
   if (parsed.looksLikeScan) {
+    // Pure scan: text extraction returned sparse content. We still run
+    // the image-photo extractor (vision pass) so the dashboard surfaces
+    // signature pages / apostille stamps / consular seals / passport
+    // photos that would otherwise be invisible to the text pipeline.
+    // Failure is non-fatal — the placeholder thin facts ship regardless.
+    let scanImagePhoto;
+    const scanImagePhotoResult = await extractImagePhoto({
+      filename: input.filename,
+      buffer: input.buffer,
+      pageCount: parsed.pageCount,
+    });
+    if (scanImagePhotoResult.facts) {
+      scanImagePhoto = scanImagePhotoResult.facts;
+    } else if (scanImagePhotoResult.error) {
+      console.warn(
+        `[image-photo-extract] ${input.filename}: ${scanImagePhotoResult.error.code} — ${scanImagePhotoResult.error.message}`,
+      );
+    }
+
     const scanEntry: Omit<PerPdfResult, 'filename' | 'error'> = {
       pageCount: parsed.pageCount,
       facts: {
@@ -329,6 +414,7 @@ export async function classifyAndExtractOnePdf(
         },
         key_facts: [],
       },
+      imagePhoto: scanImagePhoto,
     };
     writePdfCache(hash, scanEntry);
     return { filename: input.filename, ...scanEntry };
@@ -436,6 +522,9 @@ export async function classifyAndExtractOnePdf(
   const filenameSuggestsRecommendationLetter = RECOMMENDATION_LETTER_FILENAME_RE.test(
     input.filename,
   );
+  const filenameSuggestsForeignCorporate =
+    FOREIGN_CORPORATE_FILENAME_RE.test(input.filename);
+  const filenameSuggestsImagePhoto = IMAGE_PHOTO_FILENAME_RE.test(input.filename);
 
   const [
     contractResult,
@@ -451,6 +540,12 @@ export async function classifyAndExtractOnePdf(
     cvResult,
     credentialResult,
     recommendationLetterResult,
+    payrollResult,
+    taxReturnResult,
+    financialStatementResult,
+    corporateFormationResult,
+    foreignCorporateResult,
+    imagePhotoResult,
   ] = await Promise.all([
     CONTRACT_FLAVORED_DOC_TYPES.has(facts.doc_type)
       ? extractContract(richInput)
@@ -492,6 +587,29 @@ export async function classifyAndExtractOnePdf(
     RECOMMENDATION_LETTER_FLAVORED_DOC_TYPES.has(facts.doc_type) &&
     filenameSuggestsRecommendationLetter
       ? extractRecommendationLetter(richInput)
+      : Promise.resolve(null),
+    PAYROLL_FLAVORED_DOC_TYPES.has(facts.doc_type)
+      ? extractPayroll(richInput)
+      : Promise.resolve(null),
+    TAX_RETURN_FLAVORED_DOC_TYPES.has(facts.doc_type)
+      ? extractTaxReturn(richInput)
+      : Promise.resolve(null),
+    FINANCIAL_STATEMENT_FLAVORED_DOC_TYPES.has(facts.doc_type)
+      ? extractFinancialStatement(richInput)
+      : Promise.resolve(null),
+    CORPORATE_FORMATION_FLAVORED_DOC_TYPES.has(facts.doc_type)
+      ? extractCorporateFormation(richInput)
+      : Promise.resolve(null),
+    FOREIGN_CORPORATE_FLAVORED_DOC_TYPES.has(facts.doc_type) &&
+    filenameSuggestsForeignCorporate
+      ? extractForeignCorporate(richInput)
+      : Promise.resolve(null),
+    parsed.looksLikeScan || filenameSuggestsImagePhoto
+      ? extractImagePhoto({
+          filename: input.filename,
+          buffer: input.buffer,
+          pageCount: parsed.pageCount,
+        })
       : Promise.resolve(null),
   ]);
 
@@ -612,6 +730,60 @@ export async function classifyAndExtractOnePdf(
     );
   }
 
+  let payroll;
+  if (payrollResult?.facts) {
+    payroll = payrollResult.facts;
+  } else if (payrollResult?.error) {
+    console.warn(
+      `[payroll-extract] ${input.filename}: ${payrollResult.error.code} — ${payrollResult.error.message}`,
+    );
+  }
+
+  let taxReturn;
+  if (taxReturnResult?.facts) {
+    taxReturn = taxReturnResult.facts;
+  } else if (taxReturnResult?.error) {
+    console.warn(
+      `[tax-return-extract] ${input.filename}: ${taxReturnResult.error.code} — ${taxReturnResult.error.message}`,
+    );
+  }
+
+  let financialStatement;
+  if (financialStatementResult?.facts) {
+    financialStatement = financialStatementResult.facts;
+  } else if (financialStatementResult?.error) {
+    console.warn(
+      `[financial-statement-extract] ${input.filename}: ${financialStatementResult.error.code} — ${financialStatementResult.error.message}`,
+    );
+  }
+
+  let corporateFormation;
+  if (corporateFormationResult?.facts) {
+    corporateFormation = corporateFormationResult.facts;
+  } else if (corporateFormationResult?.error) {
+    console.warn(
+      `[corporate-formation-extract] ${input.filename}: ${corporateFormationResult.error.code} — ${corporateFormationResult.error.message}`,
+    );
+  }
+
+  let foreignCorporate;
+  if (foreignCorporateResult?.facts) {
+    foreignCorporate = foreignCorporateResult.facts;
+  } else if (foreignCorporateResult?.error) {
+    console.warn(
+      `[foreign-corporate-extract] ${input.filename}: ${foreignCorporateResult.error.code} — ${foreignCorporateResult.error.message}`,
+    );
+  }
+
+  let imagePhoto;
+  if (imagePhotoResult?.facts) {
+    imagePhoto = imagePhotoResult.facts;
+  } else if (imagePhotoResult?.error) {
+    console.warn(
+      `[image-photo-extract] ${input.filename}: ${imagePhotoResult.error.code} — ${imagePhotoResult.error.message}`,
+    );
+  }
+
   const entry = {
     pageCount: parsed.pageCount,
     facts,
@@ -628,6 +800,12 @@ export async function classifyAndExtractOnePdf(
     cv,
     credential,
     recommendationLetter,
+    payroll,
+    taxReturn,
+    financialStatement,
+    corporateFormation,
+    foreignCorporate,
+    imagePhoto,
   };
   writePdfCache(hash, entry);
   return { filename: input.filename, ...entry };

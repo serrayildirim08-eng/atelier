@@ -66,9 +66,29 @@ import {
   hasPlNetIncome,
   type FinancialStatementFacts,
 } from './extractors/financial-statement.schema';
+import {
+  CORPORATE_FORMATION_SUBTYPE_LABELS,
+  type CorporateFormationFacts,
+} from './extractors/corporate-formation.schema';
+import {
+  FOREIGN_CORPORATE_SUBTYPE_LABELS,
+  TREATY_OWNERSHIP_THRESHOLD,
+  type ForeignCorporateFacts,
+} from './extractors/foreign-corporate.schema';
+import {
+  IMAGE_PHOTO_SUBTYPE_LABELS,
+  type ImagePhotoFacts,
+} from './extractors/image-photo.schema';
 
 /** Tolerance for the manual §4.5 quality gate (USD). */
 const CONSIDERATION_GATE_TOLERANCE_USD = 100;
+
+/**
+ * Manual §6 board-resolution gate: |authorized_amount_usd −
+ * I-129E investment_amount_usd| / I-129E_amount must be ≤ 10%. Drift
+ * beyond 10% = severity 4 (factual_material, attorney escalation).
+ */
+const BOARD_RESOLUTION_DRIFT_TOLERANCE = 0.1;
 
 /** Manual §3.1 — passport must be valid for ≥ 6 months from filing. */
 const PASSPORT_VALIDITY_MIN_DAYS = 180;
@@ -135,6 +155,8 @@ Cross-document gates (in addition to the per-element rules above):
 - Manual §9 / §4 (Tax balance sheet vs investment gate). When the typed memory contains a tax-return with tax_return_subtype ∈ {form_1120, form_1120s, form_1065} AND the I-129 E Supplement's investment_amount_usd is known, |schedule_l_total_assets_end − I-129E investment_amount_usd| / I-129E investment_amount_usd MUST be ≤ 25% (0.25). Mismatch = severity 3 conflict_register entry with conflict_type='tax_balance_sheet_drift'. Populate fact_a_doc with the tax-return filename and fact_b_doc with the I-129E filename. The infrastructure runs this gate deterministically.
 - Manual §9 (P&L vs tax-return net-income gate). When the typed memory contains a P&L (or combined_statements) AND a tax-return for the same tax_year, the P&L net_income_amount and the tax-return net_income_or_loss_amount MUST agree within $1,000. Mismatch = severity 3 conflict_register entry with conflict_type='pl_tax_net_income_drift'. Populate fact_a_doc with the P&L filename and fact_b_doc with the tax-return filename. The infrastructure runs this gate deterministically.
 - Manual §9 (Marginality evidence). When the typed memory contains a payroll_register or employee_list with employee_count_excluding_beneficiary ≥ 1, the Petitioner is presumed to employ ≥1 U.S. worker beyond the Beneficiary — the §9 marginality narrative is supportable. The infrastructure surfaces this as marginality_evidence_present.us_workers_employed=true alongside the case facts; populate elements_evidence.more_than_marginal_basis accordingly. When no payroll evidence is present AND the enterprise is a solo Beneficiary investor, log a severity 3-4 'marginality_unsupported' conflict.
+- Manual §3.2 (Treaty-national ownership gate). When the typed memory contains a foreign-corporate shareholder_register, treaty_national_ownership_percent MUST be ≥ 50 (9 FAM 402.9-4(B)). Below 50 = severity 5 conflict_register entry with conflict_type='treaty_ownership_below_50'. Populate fact_a_doc with the shareholder-register filename. The infrastructure runs this gate deterministically.
+- Manual §6 (Board-resolution authorized-amount drift gate). When the typed memory contains a foreign-corporate board_resolution with authorized_amount_usd populated AND the I-129 E Supplement's investment_amount_usd is known, |authorized_amount_usd − I-129E investment_amount_usd| / I-129E investment_amount_usd MUST be ≤ 10%. Drift beyond 10% = severity 4 conflict_register entry with conflict_type='board_resolution_amount_drift'. Populate fact_a_doc with the board-resolution filename and fact_b_doc with the I-129E filename. The infrastructure runs this gate deterministically.
 
 Provenance carry-over:
 - Every leaf field in the output schema carries source_page, source_quote, confidence.
@@ -270,6 +292,9 @@ function memoryToPromptText(memory: TypedMemory): string {
   const payrollEntries: { filename: string; pageCount: number; payroll: PayrollFacts }[] = [];
   const taxReturnEntries: { filename: string; pageCount: number; taxReturn: TaxReturnFacts }[] = [];
   const financialStatementEntries: { filename: string; pageCount: number; financialStatement: FinancialStatementFacts }[] = [];
+  const corporateFormationEntries: { filename: string; pageCount: number; corporateFormation: CorporateFormationFacts }[] = [];
+  const foreignCorporateEntries: { filename: string; pageCount: number; foreignCorporate: ForeignCorporateFacts }[] = [];
+  const imagePhotoEntries: { filename: string; pageCount: number; imagePhoto: ImagePhotoFacts }[] = [];
 
   for (const entry of iterMemoryEntries(memory)) {
     if (entry.contract) {
@@ -382,6 +407,27 @@ function memoryToPromptText(memory: TypedMemory): string {
         filename: entry.filename,
         pageCount: entry.pageCount,
         financialStatement: entry.financialStatement,
+      });
+    }
+    if (entry.corporateFormation) {
+      corporateFormationEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        corporateFormation: entry.corporateFormation,
+      });
+    }
+    if (entry.foreignCorporate) {
+      foreignCorporateEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        foreignCorporate: entry.foreignCorporate,
+      });
+    }
+    if (entry.imagePhoto) {
+      imagePhotoEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        imagePhoto: entry.imagePhoto,
       });
     }
   }
@@ -554,6 +600,51 @@ function memoryToPromptText(memory: TypedMemory): string {
       .join('\n\n');
     sections.push(
       `## FINANCIAL STATEMENTS (rich extraction) — ${financialStatementEntries.length} entr${financialStatementEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (corporateFormationEntries.length > 0) {
+    const body = corporateFormationEntries
+      .map((e) => {
+        const label =
+          CORPORATE_FORMATION_SUBTYPE_LABELS[
+            e.corporateFormation.formation_doc_subtype
+          ];
+        return `### ${e.filename} — ${label} (page count: ${e.pageCount})\n${JSON.stringify(e.corporateFormation, null, 2)}`;
+      })
+      .join('\n\n');
+    sections.push(
+      `## CORPORATE FORMATION (rich extraction) — ${corporateFormationEntries.length} entr${corporateFormationEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (foreignCorporateEntries.length > 0) {
+    const body = foreignCorporateEntries
+      .map((e) => {
+        const label =
+          FOREIGN_CORPORATE_SUBTYPE_LABELS[
+            e.foreignCorporate.foreign_doc_subtype
+          ];
+        return `### ${e.filename} — ${label} (page count: ${e.pageCount})\n${JSON.stringify(e.foreignCorporate, null, 2)}`;
+      })
+      .join('\n\n');
+    sections.push(
+      `## FOREIGN CORPORATE (rich extraction) — ${foreignCorporateEntries.length} entr${foreignCorporateEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (imagePhotoEntries.length > 0) {
+    const body = imagePhotoEntries
+      .map((e) => {
+        const subtypeKey = e.imagePhoto.image_subtype.value;
+        const label = subtypeKey
+          ? IMAGE_PHOTO_SUBTYPE_LABELS[subtypeKey]
+          : 'Other Image';
+        return `### ${e.filename} — ${label} (page count: ${e.pageCount})\n${JSON.stringify(e.imagePhoto, null, 2)}`;
+      })
+      .join('\n\n');
+    sections.push(
+      `## IMAGE / PHOTO (rich extraction) — ${imagePhotoEntries.length} entr${imagePhotoEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
     );
   }
 
@@ -2098,6 +2189,157 @@ export async function aggregateTypedMemoryToE2(
         confidence: 1,
       },
     });
+  }
+
+  // Manual §3.2 treaty-ownership gate: deterministic backstop. For every
+  // foreign-corporate shareholder_register with a populated
+  // treaty_national_ownership_percent below TREATY_OWNERSHIP_THRESHOLD,
+  // append a severity-5 conflict. Idempotent on
+  // (conflict_type, fact_a_doc).
+  for (const entry of iterMemoryEntries(memory)) {
+    const fc = entry.foreignCorporate;
+    if (!fc || fc.foreign_doc_subtype !== 'shareholder_register') continue;
+    const pct = fc.treaty_national_ownership_percent.value;
+    if (pct == null) continue;
+    if (pct >= TREATY_OWNERSHIP_THRESHOLD) continue;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'treaty_ownership_below_50' &&
+        c.fact_a_doc.value === entry.filename,
+    );
+    if (alreadyLogged) continue;
+    parsed.data.conflict_register.push({
+      description: {
+        value: `Foreign-corporate shareholder register reports treaty-national ownership ${pct.toFixed(2)}% (threshold ${TREATY_OWNERSHIP_THRESHOLD}%). Manual §3.2 / 9 FAM 402.9-4(B) gate failed — entity does not qualify as a treaty enterprise.`,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      conflict_type: {
+        value: 'treaty_ownership_below_50',
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      severity: {
+        value: 5,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      fact_a_doc: {
+        value: entry.filename,
+        source_page: fc.treaty_national_ownership_percent.source_page,
+        source_quote: fc.treaty_national_ownership_percent.source_quote,
+        confidence: 1,
+      },
+      fact_a_page: {
+        value: fc.treaty_national_ownership_percent.source_page,
+        source_page: fc.treaty_national_ownership_percent.source_page,
+        source_quote: fc.treaty_national_ownership_percent.source_quote,
+        confidence: 1,
+      },
+      fact_b_doc: {
+        value: null,
+        source_page: null,
+        source_quote: null,
+        confidence: 1,
+      },
+      fact_b_page: {
+        value: null,
+        source_page: null,
+        source_quote: null,
+        confidence: 1,
+      },
+    });
+  }
+
+  // Manual §6 board-resolution authorized-amount drift gate: deterministic
+  // backstop. For every foreign-corporate board_resolution with
+  // authorized_amount_usd populated AND the I-129E investment_amount_usd
+  // known, drift beyond BOARD_RESOLUTION_DRIFT_TOLERANCE (10%) → severity-4
+  // conflict. Idempotent on (conflict_type, fact_a_doc, fact_b_doc).
+  let i129eAmountForBoardGate: number | null = null;
+  let i129eFilenameForBoardGate: string | null = null;
+  let i129ePageForBoardGate: number | null = null;
+  let i129eQuoteForBoardGate: string | null = null;
+  for (const entry of iterMemoryEntries(memory)) {
+    if (entry.facts?.doc_type !== 'uscis_or_dos_form') continue;
+    const formId = entry.facts.form_id.value ?? '';
+    if (!/i[-\s]?129\s*e/i.test(formId)) continue;
+    const amount = entry.facts.investment_amount_usd.value;
+    if (amount == null) continue;
+    i129eAmountForBoardGate = amount;
+    i129eFilenameForBoardGate = entry.filename;
+    i129ePageForBoardGate = entry.facts.investment_amount_usd.source_page;
+    i129eQuoteForBoardGate = entry.facts.investment_amount_usd.source_quote;
+    break;
+  }
+  if (
+    i129eAmountForBoardGate != null &&
+    i129eAmountForBoardGate > 0 &&
+    i129eFilenameForBoardGate != null
+  ) {
+    for (const entry of iterMemoryEntries(memory)) {
+      const fc = entry.foreignCorporate;
+      if (!fc || fc.foreign_doc_subtype !== 'board_resolution') continue;
+      const authorized = fc.authorized_amount_usd.value;
+      if (authorized == null) continue;
+      const drift = Math.abs(authorized - i129eAmountForBoardGate);
+      const driftRatio = drift / i129eAmountForBoardGate;
+      if (driftRatio <= BOARD_RESOLUTION_DRIFT_TOLERANCE) continue;
+      const alreadyLogged = parsed.data.conflict_register.some(
+        (c) =>
+          c.conflict_type.value === 'board_resolution_amount_drift' &&
+          c.fact_a_doc.value === entry.filename &&
+          c.fact_b_doc.value === i129eFilenameForBoardGate,
+      );
+      if (alreadyLogged) continue;
+      parsed.data.conflict_register.push({
+        description: {
+          value: `Board-resolution authorized amount USD ${authorized.toFixed(2)} disagrees with I-129 E Supplement investment amount USD ${i129eAmountForBoardGate.toFixed(2)} (drift USD ${drift.toFixed(2)}, ${(driftRatio * 100).toFixed(1)}%; tolerance ${(BOARD_RESOLUTION_DRIFT_TOLERANCE * 100).toFixed(0)}%). Manual §6 gate failed.`,
+          source_page: null,
+          source_quote: '[deterministic post-aggregation gate]',
+          confidence: 1,
+        },
+        conflict_type: {
+          value: 'board_resolution_amount_drift',
+          source_page: null,
+          source_quote: '[deterministic post-aggregation gate]',
+          confidence: 1,
+        },
+        severity: {
+          value: 4,
+          source_page: null,
+          source_quote: '[deterministic post-aggregation gate]',
+          confidence: 1,
+        },
+        fact_a_doc: {
+          value: entry.filename,
+          source_page: fc.authorized_amount_usd.source_page,
+          source_quote: fc.authorized_amount_usd.source_quote,
+          confidence: 1,
+        },
+        fact_a_page: {
+          value: fc.authorized_amount_usd.source_page,
+          source_page: fc.authorized_amount_usd.source_page,
+          source_quote: fc.authorized_amount_usd.source_quote,
+          confidence: 1,
+        },
+        fact_b_doc: {
+          value: i129eFilenameForBoardGate,
+          source_page: i129ePageForBoardGate,
+          source_quote: i129eQuoteForBoardGate,
+          confidence: 1,
+        },
+        fact_b_page: {
+          value: i129ePageForBoardGate,
+          source_page: i129ePageForBoardGate,
+          source_quote: i129eQuoteForBoardGate,
+          confidence: 1,
+        },
+      });
+    }
   }
 
   return {
