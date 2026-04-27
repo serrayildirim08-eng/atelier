@@ -1,4 +1,5 @@
 import { ingestPdf, type IngestResult } from '@/ingest';
+import { draftCoverLetter } from '@/draft';
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -41,8 +42,9 @@ export async function POST(request: Request): Promise<Response> {
         };
       }
       const buffer = Buffer.from(await file.arrayBuffer());
+      let result: IngestResult;
       try {
-        return await ingestPdf(buffer, file.name);
+        result = await ingestPdf(buffer, file.name);
       } catch (e: unknown) {
         return {
           filename: file.name,
@@ -53,6 +55,22 @@ export async function POST(request: Request): Promise<Response> {
           },
         };
       }
+
+      if ('facts' in result) {
+        try {
+          const { letter } = await draftCoverLetter(result.facts);
+          return { ...result, draft: letter };
+        } catch (e: unknown) {
+          return {
+            ...result,
+            draftError: {
+              code: 'draft_failed',
+              message: e instanceof Error ? e.message : String(e),
+            },
+          };
+        }
+      }
+      return result;
     }),
   );
 

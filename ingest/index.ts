@@ -8,6 +8,8 @@ export interface IngestSuccess {
   filename: string;
   pageCount: number;
   facts: E2Facts;
+  draft?: string;
+  draftError?: { code: string; message: string };
 }
 
 export interface IngestFailure {

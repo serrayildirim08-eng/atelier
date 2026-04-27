@@ -26,6 +26,8 @@ interface IngestResult {
   filename: string;
   pageCount: number;
   facts?: E2FactsLike;
+  draft?: string;
+  draftError?: { code: string; message: string };
   error?: { code: string; message: string };
 }
 
@@ -259,6 +261,48 @@ function ResultCard({ result }: { result: IngestResult }) {
           ))}
         </tbody>
       </table>
+      <DraftSection result={result} />
+    </div>
+  );
+}
+
+function DraftSection({ result }: { result: IngestResult }) {
+  const [copied, setCopied] = useState(false);
+
+  if (result.draftError) {
+    return (
+      <div className="mt-4 border border-red-200 bg-red-50 rounded p-3 text-sm text-red-700">
+        Draft failed [{result.draftError.code}]: {result.draftError.message}
+      </div>
+    );
+  }
+  if (!result.draft) return null;
+
+  const draft = result.draft;
+  const onCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(draft);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  return (
+    <div className="mt-6 border-t pt-4">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-medium text-gray-700">Draft cover letter</h3>
+        <button
+          onClick={onCopy}
+          className="text-xs px-2 py-1 border rounded hover:bg-gray-100"
+        >
+          {copied ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+      <div className="text-sm whitespace-pre-wrap font-sans bg-gray-50 p-4 rounded border max-h-[600px] overflow-y-auto leading-relaxed">
+        {draft}
+      </div>
     </div>
   );
 }
