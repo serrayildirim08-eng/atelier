@@ -4,7 +4,7 @@ import { logAnthropicUsage } from '@/lib/usage-log';
 import type { CaseFacts, CaseType } from '@/ingest/schema';
 import { ReviewReportSchema, type ReviewReport } from './schema';
 
-const SHARED_REVIEW_FRAMEWORK = `Conduct four checks and produce a structured review report.
+const SHARED_REVIEW_FRAMEWORK = `Conduct five checks and produce a structured review report.
 
 ## Check 1: Grounding (no hallucination)
 
@@ -28,6 +28,29 @@ For every dollar amount, date, name, address, ownership percentage, or other rep
 ## Check 4: USCIS RFE risk
 
 (See per-case-type section below for the specific RFE patterns to screen.) Each weak_spots entry: severity, element label, description, the specific rfe_risk, and a concrete suggestion to strengthen.
+
+## Check 5: Structured forensic fields — leverage and address
+
+The Facts JSON includes structured forensic fields. The draft is responsible for confronting them, not hiding them. Apply these rules:
+
+### conflict_register (all case types)
+- Severity 5 (dispositive) entries: the draft MUST disclose, address, or pause for attorney sign-off. A draft that proceeds as if a severity-5 conflict does not exist = severity=critical, category=contradicts_facts.
+- Severity 4 (factual_material) entries: the draft should address or contextualize. Silently ignored severity-4 entry = severity=major, category=internal_inconsistency or contradicts_facts (whichever fits).
+- Severity 1-3: acceptable to omit from the letter; do NOT flag the omission.
+
+### evidence_aps (EB-1A, EB-1B only)
+- For each criterion the draft argues, check whether the supporting evidence_aps rows are predominantly APS 3-5 (HIGH rfe_risk). A criterion argued solely on APS 3-5 evidence = weak_spots entry, severity=major, with concrete suggestion to substitute or supplement with APS ≥6 evidence (if any exists in facts) or pivot to a different criterion (if 3+ already meet).
+- A draft that ignores the strongest available evidence (APS 8-9 items present in facts but unreferenced in the letter) = weak_spots entry, severity=major, "lead with the APS 8-9 evidence in [criterion]".
+
+### kazarian_step_two and international_recognition (EB-1A and EB-1B respectively)
+- top_of_field_evidence: items present in facts but absent from the draft's Section V (EB-1A) / Section VI (EB-1B) = missing_arguments entry.
+- peer_benchmarking: rows with real benchmark_source in facts but no benchmarking paragraph in the draft = missing_arguments. If the draft asserts the beneficiary is "at the top" or "internationally recognized" without any benchmarking and the facts have no peer_benchmarking rows either, = weak_spots, severity=major.
+- narrative_stress_test: if populated in facts but not addressed in the draft = missing_arguments. Do NOT flag if the field is null.
+
+### subordinate_tier_table (EB-1C only)
+- All side="us" rows tier="non-professional" AND draft does not pivot to function-manager doctrine: severity=critical, category="contradicts_facts" or weak_spots major depending on whether the draft hides this fact. Cite INA 101(a)(44)(A)(ii).
+- side="us" rows present in facts but draft's Section VI does not reference the tier classification = missing_arguments.
+- UNCLEAR rows: do NOT flag the draft for omitting them; UNCLEAR is a data-quality issue upstream, not a draft defect.
 
 ## Severity rubric
 
@@ -73,7 +96,12 @@ ${SHARED_REVIEW_FRAMEWORK}
 - Develop and direct: ownership <50% AND no documented operational control via governance.
 - Treaty nationality of enterprise: cap-table not pinned to ≥50% treaty-national ownership.
 - Date bracket: incorporation → EIN → bank account → wires → lease → buildout → first hire → operating start → filing — flag any out-of-order events (especially lease commencing AFTER filing, EIN issued AFTER lease signed, first payroll AFTER extension RFE).
-- 2025-2026 trend: PA-2025-16 discretionary factors not addressed; 1099-only hiring plans; absentee franchise structures.`;
+- 2025-2026 trend: PA-2025-16 discretionary factors not addressed; 1099-only hiring plans; absentee franchise structures.
+
+## E-2 Check 5 anchors:
+- Source-of-funds gap entries in conflict_register at severity 4-5 MUST be addressed in Section VII; silent omission = critical.
+- Date-bracket inversions logged at severity 3-4 should be acknowledged or corrected in the letter.
+- Loan-secured-by-enterprise-assets conflict (severity 4) must be addressed under 9 FAM 402.9-6(C); silently treating such a loan as part of the substantial investment = critical.`;
 
 // EB-1A reviewer — Authority cascade: INA § 203(b)(1)(A); 8 CFR § 204.5(h);
 // Kazarian v. USCIS, 596 F.3d 1115 (9th Cir. 2010); USCIS Policy Manual Vol. 6 Part F Ch. 2.
@@ -107,7 +135,16 @@ ${SHARED_REVIEW_FRAMEWORK}
 - Final merits (Kazarian step 2): "even assuming the beneficiary meets three criteria, the totality does not establish sustained acclaim" — flag if the draft does not explicitly invoke the two-step framework, define the comparison cohort, or address recent (within 3 years) acclaim.
 - Expert letters: templated/boilerplate phrasing across letters (e.g. "without question one of the foremost", "rare combination of brilliance and dedication"); circular letters (writer cites only what beneficiary said about the writer); AI-drafted patterns (em-dashes, triadic structures, "moreover/furthermore" overuse); over-reliance on collaborator letters with no arms-length voices.
 - Citation counts: claimed totals not reconciled to Google Scholar / Web of Science; ex-self-citation not addressed when USCIS demands it; co-authorship dilution on 100+-author papers.
-- High salary (Criterion 9): comparison group not appropriate (e.g., comparing to all software engineers when claim is computer-vision specialist).`;
+- High salary (Criterion 9): comparison group not appropriate (e.g., comparing to all software engineers when claim is computer-vision specialist).
+
+## EB-1A Check 5 anchors:
+- evidence_aps: any claimed criterion supported only by APS 3-5 rows (HIGH rfe_risk) and the draft argues it as a confident "yes" without hedging = weak_spots major.
+- evidence_aps: APS 8-9 items in facts that the draft does not reference at all = weak_spots major (wasted strongest evidence).
+- kazarian_step_two.peer_benchmarking: rows present in facts but no benchmarking paragraph or table in Section V = missing_arguments.
+- kazarian_step_two.peer_benchmarking: empty in facts AND draft asserts "very top of field" without a defined comparison cohort = weak_spots major; the [WEAK: ...] flag from the drafter should be present, and if not, surface it.
+- kazarian_step_two.top_of_field_evidence: items in facts but absent from Section V = missing_arguments.
+- kazarian_step_two.narrative_stress_test: populated in facts but draft skips the counter-argument = missing_arguments.
+- conflict_register severity 4-5 entries flagging templated/AI-drafted/circular expert letters: draft should not cite the flagged letters as primary evidence in Section IV without addressing the issue.`;
 
 // EB-1B reviewer — Authority cascade: INA § 203(b)(1)(B); 8 CFR § 204.5(i);
 // USCIS Policy Manual Vol. 6 Part F Ch. 3.
@@ -136,7 +173,14 @@ ${SHARED_REVIEW_FRAMEWORK}
 - Qualifying employer (private): if petitioner is private, did the draft document 3+ full-time researchers AND major institutional achievements?
 - Three years of experience: relies on doctoral coursework rather than post-doctoral teaching/research; positions arrayed as Field<string> entries should reference exact dates and titles.
 - Criteria support: USCIS uses 8 CFR 204.5(i)(3)(i) standards similar to (h)(3) — same red flags as EB-1A on awards / membership / published material / contributions / authorship / judging.
-- Expert letters: same patterns as EB-1A; particular weight on arms-length senior faculty at OTHER institutions; flag if all letters come from current institution / dissertation supervisors.`;
+- Expert letters: same patterns as EB-1A; particular weight on arms-length senior faculty at OTHER institutions; flag if all letters come from current institution / dissertation supervisors.
+
+## EB-1B Check 5 anchors:
+- evidence_aps: same rules as EB-1A — APS 3-5 evidence argued without hedging = weak_spots major; APS 8-9 evidence ignored = weak_spots major.
+- international_recognition: rows populated in facts (collaborators, talks abroad, foreign grants) but no international-recognition section in the draft = missing_arguments. International recognition is the overarching standard for EB-1B (8 CFR 204.5(i)(2)) — silent omission is a category=missing_arguments major finding.
+- international_recognition.peer_benchmarking and top_of_field_evidence: same rules as EB-1A's kazarian_step_two equivalents.
+- international_recognition.narrative_stress_test: populated but skipped = missing_arguments.
+- A draft that argues only national (not international) recognition when international_recognition fields are mostly null = weak_spots major; the draft should surface the gap with [WEAK: ...] rather than gloss over it.`;
 
 // EB-1C reviewer — Authority cascade: INA § 203(b)(1)(C); INA § 101(a)(44); 8 CFR § 204.5(j);
 // USCIS Policy Manual Vol. 6 Part F Ch. 5.
@@ -162,7 +206,14 @@ ${SHARED_REVIEW_FRAMEWORK}
 - Managerial / executive capacity (foreign or U.S. role): "the role described is not primarily managerial or executive" — flag aggregate percent_time_managerial+executive below 50%, role descriptions heavy on hands-on tasks, span_of_control too narrow (fewer than 3 levels), only contractor / 1099 reports.
 - Function manager: claim made without concrete evidence the function is "essential" and managed at a senior level; failure to distinguish from personnel manager doctrine.
 - Calendar gaps: 1-year-abroad window is calculated incorrectly (e.g., excluding L-1 admission window).
-- 2025–2026 trend: USCIS has been particularly aggressive on EB-1C qualifying-capacity narratives; flag any role description that reads as "first-line supervisor" or where the beneficiary supervises mostly contractors.`;
+- 2025–2026 trend: USCIS has been particularly aggressive on EB-1C qualifying-capacity narratives; flag any role description that reads as "first-line supervisor" or where the beneficiary supervises mostly contractors.
+
+## EB-1C Check 5 anchors:
+- subordinate_tier_table side="us": if all rows are tier="non-professional" AND the draft's Section VI argues personnel-manager doctrine (rather than function-manager), this is the textbook first-line-supervisor failure under INA 101(a)(44)(A)(ii) — severity=critical, category=contradicts_facts. Cite the statute.
+- subordinate_tier_table populated but no tier analysis in Section V (foreign role) or Section VI (U.S. role) = missing_arguments.
+- subordinate_tier_table contains contractor / 1099 rows being argued as direct reports for managerial-capacity purposes = weak_spots major.
+- conflict_register severity 4 entry "first-line supervisor problem" present in facts but draft's Section VI omits the function-manager pivot = severity=major, category=missing_arguments.
+- conflict_register severity 5 entries on the qualifying-relationship element (e.g., ownership chain not pinned to primary source) MUST be addressed in Section II; silent omission = critical.`;
 
 const SYSTEM_PROMPTS: Record<CaseType, string> = {
   E2: E2_SYSTEM_PROMPT,
