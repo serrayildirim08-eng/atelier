@@ -7,6 +7,7 @@
  */
 
 import type { IngestSuccess } from '@/ingest';
+import type { TypedMemory } from '@/ingest/typed-memory';
 
 type Provenance<T> = {
   value: T | null;
@@ -212,5 +213,96 @@ export function getMockMatter(id: string): IngestSuccess {
       reasoning:
         'Single TR national investing personally; no prior US visa status; consular new filing posture.',
     },
+  };
+}
+
+/**
+ * Mock typed memory for the dashboard's exhibit-list view. Six sample
+ * PerPdfResults across enough doc_types to exercise the A-L tab map.
+ * Replace with the real per-matter typed-memory store once persisted.
+ *
+ * Facts shapes here are partial — only the fields the exhibit-list
+ * generator actually reads (doc_type + suggested_filename + form_id
+ * for uscis_or_dos_form). The cast via `unknown` is intentional:
+ * exhaustive-shape fixtures live in the per-extractor mocks.
+ */
+export function getMockTypedMemory(_id: string): TypedMemory {
+  const tinyField = <T,>(value: T) => ({
+    value,
+    source_page: 1 as number | null,
+    source_quote: null as string | null,
+    confidence: 0.95 as number | null,
+  });
+
+  const partial = (facts: Record<string, unknown>) =>
+    facts as unknown as import('@/ingest/typed-memory').PerPdfFacts;
+
+  return {
+    uscis_or_dos_form: [
+      {
+        filename: 'A. Forms/I-129.pdf',
+        pageCount: 8,
+        facts: partial({
+          doc_type: 'uscis_or_dos_form',
+          suggested_filename: tinyField('aegean-atelier-i-129-petition.pdf'),
+          form_id: tinyField('I-129'),
+        }),
+      },
+      {
+        filename: 'A. Forms/I-129E.pdf',
+        pageCount: 4,
+        facts: partial({
+          doc_type: 'uscis_or_dos_form',
+          suggested_filename: tinyField('aegean-atelier-i-129e-supplement.pdf'),
+          form_id: tinyField('I-129E'),
+        }),
+      },
+    ],
+    passport: [
+      {
+        filename: 'C. Treaty Country/Beneficiary-Passport.pdf',
+        pageCount: 2,
+        facts: partial({
+          doc_type: 'passport',
+          suggested_filename: tinyField('demir-mehmet-tr-passport-bio-page.pdf'),
+        }),
+      },
+    ],
+    formation_doc: [
+      {
+        filename: 'D. Ownership/Articles-of-Organization.pdf',
+        pageCount: 3,
+        facts: partial({
+          doc_type: 'formation_doc',
+          suggested_filename: tinyField(
+            'aegean-atelier-articles-of-organization.pdf',
+          ),
+        }),
+      },
+    ],
+    money_movement: [
+      {
+        filename: 'E. Investment/Wire-Confirmation-2024-12-18.pdf',
+        pageCount: 1,
+        facts: partial({
+          doc_type: 'money_movement',
+          suggested_filename: tinyField(
+            'demir-to-aegean-atelier-wire-2024-12-18.pdf',
+          ),
+        }),
+      },
+    ],
+    cover_letter: [
+      {
+        filename: 'B. Cover Letter/Akalan-Cover-Letter-2026-01-04.pdf',
+        pageCount: 12,
+        facts: partial({
+          doc_type: 'cover_letter',
+          suggested_filename: tinyField(
+            'akalan-cover-letter-aegean-atelier-2026-01-04.pdf',
+          ),
+        }),
+      },
+    ],
   };
 }
