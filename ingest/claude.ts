@@ -16,10 +16,19 @@ const SHARED_PROVENANCE_RULES = `Provenance rules — non-negotiable for every l
 2. For every populated value, source_page MUST be the 1-indexed page number from the document text (taken from the [page N] markers).
 3. source_quote MUST be a short verbatim phrase (5–25 words) copied from the source that contains or directly evidences the value.
 4. confidence is a number in [0, 1]: 1.0 = explicit and unambiguous in the source; ~0.7 = clearly inferred from immediate context; ~0.5 = inferred but the source is ambiguous; do not emit values below 0.3.
-5. Currency values are numbers in USD with symbols and commas stripped. If the source gives a foreign-currency amount, convert at the rate stated in the source (and note in source_quote); if no rate is stated, leave value=null and explain in red_flags.
-6. Dates: prefer ISO YYYY-MM-DD. If the source uses MM/DD/YYYY vs DD/MM/YYYY ambiguously and you cannot resolve, leave value=null and add the ambiguity to red_flags.
+5. Currency values are numbers in USD with symbols and commas stripped. If the source gives a foreign-currency amount, convert at the rate stated in the source (and note in source_quote); if no rate is stated, leave value=null and log a conflict_register entry.
+6. Dates: prefer ISO YYYY-MM-DD. If the source uses MM/DD/YYYY vs DD/MM/YYYY ambiguously and you cannot resolve, leave value=null and log a conflict_register entry.
 7. Arrays: include every distinct entry the source supports. Empty arrays are fine when the source has nothing.
-8. red_flags: a free-form list of forensic concerns you noticed during extraction (date order issues, name spelling variants, unresolved currency, suspicious gaps, etc.). Each entry is a short sentence with source_page+source_quote when applicable.`;
+8. conflict_register: structured log of forensic conflicts and ambiguities. Each entry has:
+   - description: one short sentence stating what the conflict is.
+   - conflict_type: short tag (e.g., "name_spelling_variant", "dob_format_ambiguity", "investment_amount_drift", "address_mismatch", "date_out_of_bracket_order", "currency_unresolved", "citation_count_discrepancy", "org_chart_vs_role_mismatch", "defective_translation", "g28_signature_mismatch", "ownership_below_treaty_threshold", "marginality_risk", "irrevocable_commitment_failure").
+   - severity (1-5, calibrated rubric):
+     1 cosmetic       — diacritic / punctuation / capitalization difference (e.g., "Çağlar" vs "Caglar"). Log only.
+     2 clerical       — single-digit DOB or number collision resolvable from primary ID. Log + QC flag.
+     3 factual_minor  — salary / amount mismatch under $1K; minor address variant. Reconcile in cover letter.
+     4 factual_material — investment drift > $5K; org chart vs role description mismatch; defective translation (8 CFR 103.2(b)(3)); G-28 signer mismatch; loan secured by enterprise's own assets. Attorney escalate.
+     5 dispositive    — DOB unresolvable from primary ID; investment leg with no source documentation; expert letter relationship contradicts CV; > $10K source-of-funds gap. HALT extract; attorney review required.
+   - fact_a_doc / fact_a_page / fact_b_doc / fact_b_page: locate both sides of the conflict where possible. For single-source ambiguities (e.g., currency unresolved on one page), populate fact_a_* and leave fact_b_* null.`;
 
 // E-2 — Authority cascade: INA § 101(a)(15)(E)(ii); 8 CFR § 214.2(e); 9 FAM 402.9;
 // USCIS Policy Manual Vol. 2 Part G; Matter of Walsh and Pollard (BIA 1988); Matter of Ho by analogy.
@@ -40,23 +49,24 @@ Extract facts that map to the FIVE E-2 ELEMENTS (conjunctive — failure of any 
 4. More than marginal — present or future capacity to generate more than minimal living, OR significant economic contribution. Five-year horizon.
 5. Develop and direct — investor must develop and direct, demonstrated by ≥50% ownership OR operational control via governance/voting/management.
 
-Source of funds: extract every funding chain. Origin must be lawful and traceable — categorize as one of: salary, savings, sale_of_property, sale_of_business, inheritance, gift, loan, business_proceeds, crypto, mixed, unknown. Loans secured by the U.S. enterprise's own assets do NOT count toward investment per 9 FAM 402.9-6(C); flag such loans in red_flags.
+Source of funds: extract every funding chain. Origin must be lawful and traceable — categorize as one of: salary, savings, sale_of_property, sale_of_business, inheritance, gift, loan, business_proceeds, crypto, mixed, unknown. Loans secured by the U.S. enterprise's own assets do NOT count toward investment per 9 FAM 402.9-6(C); log such loans in conflict_register at severity 4.
 
 Investment items: each line item with category (equipment, lease_deposit, build_out, inventory, payroll_committed, marketing, working_capital, professional_fees, franchise_fee, other), USD amount, and date.
 
 Proportionality: capture both the total committed (numerator) and the total cost of enterprise (denominator). Compute proportionality_percent = total_committed / total_cost_of_enterprise × 100 ONLY if both numbers are clearly in the source; otherwise leave null.
 
-Forensic red_flags to surface (list each in red_flags array with page+quote):
-- Funds sitting in personal account labeled "for the business" but not deployed (Walsh and Pollard "irrevocably committed" failure).
-- Loan collateralized by the U.S. enterprise's own assets.
-- Cap table showing <50% treaty-country ownership.
-- Investor still abroad with no U.S. lease, school, or driver's license.
-- Solo/home-based business with no W-2 hire plan (marginality risk).
-- Dates out of bracket order (incorporation → EIN → bank account → first wire → lease → first hire → operating start → filing).
-- Currency conversion using filing-date rate instead of value-date rate.
-- Loans that appear to be debt of the enterprise rather than the investor.
-- Gifts without a notarized gift letter or without donor source-of-funds.
-- Buy-and-hold real estate or other passive structures.
+Forensic conflicts to surface in conflict_register (with severity per the rubric in SHARED_PROVENANCE_RULES rule 8):
+- Funds sitting in personal account labeled "for the business" but not deployed — Walsh and Pollard "irrevocably committed" failure. Severity 4-5 depending on dollar amount.
+- Loan collateralized by the U.S. enterprise's own assets — 9 FAM 402.9-6(C) violation. Severity 4.
+- Cap table showing <50% treaty-country ownership. Severity 5 (dispositive — fails the treaty-nationality element).
+- Investor still abroad with no U.S. lease, school, or driver's license. Severity 3.
+- Solo/home-based business with no W-2 hire plan — marginality risk under 9 FAM 402.9-6(E). Severity 3-4.
+- Dates out of bracket order (incorporation → EIN → bank account → first wire → lease → first hire → operating start → filing). Severity 3-4 depending on inversion (e.g., lease commencing AFTER filing = severity 4).
+- Currency conversion using filing-date rate instead of value-date rate. Severity 2-3.
+- Loans that appear to be debt of the enterprise rather than the investor. Severity 4.
+- Gifts without a notarized gift letter or without donor source-of-funds. Severity 3-4.
+- Buy-and-hold real estate or other passive structures (fails real-and-operating element). Severity 5.
+- Source-of-funds gap > $10,000 unexplained. Severity 5.
 
 ${SHARED_PROVENANCE_RULES}
 
@@ -98,16 +108,17 @@ Kazarian step 2: extract any explicit two-step framework language Akalan invoked
 
 Citation counts: claimed total, Google Scholar total (if cited), ex-self-citation count (USCIS often demands this), h-index claimed.
 
-Forensic red_flags to surface:
-- Templated/boilerplate phrasing across multiple expert letters ("without question one of the foremost", "rare combination of brilliance and dedication", etc.) — adjudicators flag this in 2025+.
-- Letters that read AI-drafted (em-dash overuse, triadic constructions, "moreover/furthermore" overuse).
-- Circular letters: writer cites only what beneficiary said about the writer.
-- Awards that are participation/completion/internal/pay-to-play.
-- Memberships in organizations without published "outstanding achievement" requirements.
-- Published material that discusses the field generally rather than the beneficiary specifically.
-- Patents that are FILED (not granted) used as "original contribution."
-- Citation count discrepancies (claimed vs Google Scholar/Web of Science).
-- Co-authorship dilution (papers with 100+ authors weighted equally).
+Forensic conflicts to surface in conflict_register (severity per rubric in SHARED_PROVENANCE_RULES rule 8):
+- Templated/boilerplate phrasing across multiple expert letters ("without question one of the foremost", "rare combination of brilliance and dedication", etc.) — adjudicators flag this in 2025+. Severity 3-4.
+- Letters that read AI-drafted (em-dash overuse, triadic constructions, "moreover/furthermore" overuse). Severity 3.
+- Circular letters: writer cites only what beneficiary said about the writer. Severity 4.
+- Awards that are participation/completion/internal/pay-to-play used as Criterion 1. Severity 3-4.
+- Memberships in organizations without published "outstanding achievement" requirements used as Criterion 2. Severity 3-4.
+- Published material that discusses the field generally rather than the beneficiary specifically. Severity 3.
+- Patents that are FILED (not granted) used as "original contribution." Severity 4.
+- Citation count discrepancies (claimed vs Google Scholar / Web of Science). Severity 3-4 depending on magnitude.
+- Co-authorship dilution (papers with 100+ authors weighted equally). Severity 3.
+- Expert letter writer's stated relationship contradicts the CV. Severity 5.
 
 ${SHARED_PROVENANCE_RULES}`;
 
@@ -137,13 +148,13 @@ Permanent position type: 'tenure_track', 'tenured', 'permanent_research_faculty'
 
 Expert letters: same shape as EB-1A. EB-1B places particular weight on letters from senior faculty in the field at OTHER institutions (independent confirmation of outstanding stature).
 
-Forensic red_flags to surface:
-- Petitioner is a private employer but the record does not document 3+ full-time researchers or major achievements.
-- Position offered is "visiting", "post-doctoral", or term-limited — not permanent.
-- Three-years-of-experience evidence relies on doctoral coursework rather than post-doctoral teaching/research.
-- Templated/boilerplate or AI-drafted expert letters.
-- Letters only from current colleagues / dissertation supervisors (no arms-length voices).
-- Beneficiary's institution_type (tenure-track vs adjunct vs visiting) inconsistent across exhibits.
+Forensic conflicts to surface in conflict_register (severity per rubric in SHARED_PROVENANCE_RULES rule 8):
+- Petitioner is a private employer but the record does not document 3+ full-time researchers or major achievements. Severity 4-5.
+- Position offered is "visiting", "post-doctoral", or term-limited — not permanent. Severity 5 (dispositive on permanent-position element).
+- Three-years-of-experience evidence relies on doctoral coursework rather than post-doctoral teaching/research. Severity 4.
+- Templated/boilerplate or AI-drafted expert letters. Severity 3.
+- Letters only from current colleagues / dissertation supervisors (no arms-length voices). Severity 3-4.
+- Beneficiary's institution_type (tenure-track vs adjunct vs visiting) inconsistent across exhibits. Severity 3.
 
 ${SHARED_PROVENANCE_RULES}`;
 
@@ -180,15 +191,15 @@ One year abroad: extract start_date, end_date, employer (foreign entity), and a 
 
 functional_or_personnel_manager: if the role is managerial, classify whether the case argues function-manager doctrine, personnel-manager, or both. If executive only, write 'n_a_executive'.
 
-Forensic red_flags to surface:
-- Time-percentage breakdown not populated or doesn't sum to 100.
-- Role description heavy on operational tasks (selling, providing services, building products) versus management — a "first-line supervisor" risk.
-- Qualifying relationship not pinned to a primary-source document (audited financials, share certificates, articles).
-- U.S. entity formed or began operating <1 year before petition filing.
-- Beneficiary's foreign employment within the 3-year window is split across multiple entities or includes non-qualifying-entity gaps.
-- Org chart shows fewer than 3 levels of supervision under the beneficiary (personnel-manager weakness).
-- Functional-manager claim without concrete evidence the function is "essential" and managed at a senior level.
-- Beneficiary supervises only contractors / 1099s, not employees.
+Forensic conflicts to surface in conflict_register (severity per rubric in SHARED_PROVENANCE_RULES rule 8):
+- Time-percentage breakdown not populated or doesn't sum to 100. Severity 3.
+- Role description heavy on operational tasks (selling, providing services, building products) vs management — "first-line supervisor" risk. Severity 4.
+- Qualifying relationship not pinned to a primary-source document (audited financials, share certificates, articles). Severity 4-5.
+- U.S. entity formed or began operating <1 year before petition filing. Severity 5 (dispositive on doing-business element).
+- Beneficiary's foreign employment within the 3-year window split across multiple entities or includes non-qualifying-entity gaps. Severity 4.
+- Org chart shows fewer than 3 levels of supervision under the beneficiary (personnel-manager weakness; first-line supervisor problem under INA 101(a)(44)(A)(ii)). Severity 4.
+- Functional-manager claim without concrete evidence the function is "essential" and managed at a senior level. Severity 4.
+- Beneficiary supervises only contractors / 1099s, not employees. Severity 4.
 
 ${SHARED_PROVENANCE_RULES}`;
 

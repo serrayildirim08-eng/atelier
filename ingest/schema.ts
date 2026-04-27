@@ -64,6 +64,43 @@ const RoleAnalysisSchema = z.object({
   description: Field(z.string()),
 });
 
+/**
+ * Conflict register replaces unstructured red_flags arrays. Severity 1-5
+ * with calibrated rubric — see ingest prompts for examples per level.
+ *   1 cosmetic       diacritic difference (Çağlar / Caglar)
+ *   2 clerical       DOB digit collision resolvable from passport
+ *   3 factual_minor  small amount mismatch across paystub / W-2
+ *   4 factual_material investment > $5K drift; defective translation; G-28 mismatch
+ *   5 dispositive    DOB unresolvable from primary ID; investment leg unsupported
+ */
+const ConflictEntrySchema = z.object({
+  description: Field(z.string()),
+  conflict_type: Field(z.string()),
+  severity: Field(z.number().int().min(1).max(5)),
+  fact_a_doc: Field(z.string()),
+  fact_a_page: Field(z.number().int()),
+  fact_b_doc: Field(z.string()),
+  fact_b_page: Field(z.number().int()),
+});
+
+/**
+ * Evidence APS (Adjudicator Persuasiveness Score). Three sub-components,
+ * each scored 1-3, summed into a 3-9 raw score. The rfe_risk derived map:
+ *   APS 8-9 → LOW
+ *   APS 6-7 → MED
+ *   APS 3-5 → HIGH
+ * Used for the strongest evidence items per criterion (typically top 5).
+ */
+const EvidenceAPSSchema = z.object({
+  evidence_item: Field(z.string()),
+  criterion_label: Field(z.string()),
+  probative_value: Field(z.enum(['HIGH', 'MED', 'LOW'])),
+  independence: Field(z.enum(['STRONG', 'MOD', 'WEAK'])),
+  corroboration: Field(z.enum(['CORR', 'PARTIAL', 'NONE'])),
+  aps_score: Field(z.number().int().min(3).max(9)),
+  rfe_risk: Field(z.enum(['LOW', 'MED', 'HIGH'])),
+});
+
 /* ---------------------------------------------------------------------- */
 /* E-2 schema                                                             */
 /* Authority: INA § 101(a)(15)(E)(ii); 8 CFR § 214.2(e); 9 FAM 402.9.    */
@@ -137,7 +174,7 @@ export const E2FactsSchema = z.object({
   investment: E2InvestmentSchema,
   source_of_funds: z.array(SourceOfFundsChainSchema),
   elements_evidence: E2ElementsEvidenceSchema,
-  red_flags: z.array(Field(z.string())),
+  conflict_register: z.array(ConflictEntrySchema),
 });
 
 export type E2Facts = z.infer<typeof E2FactsSchema>;
@@ -170,7 +207,8 @@ export const EB1AFactsSchema = z.object({
   expert_letters: z.array(ExpertLetterSchema),
   kazarian_step_two: KazarianStepTwoSchema,
   citation_counts: CitationCountsSchema,
-  red_flags: z.array(Field(z.string())),
+  evidence_aps: z.array(EvidenceAPSSchema),
+  conflict_register: z.array(ConflictEntrySchema),
 });
 
 export type EB1AFacts = z.infer<typeof EB1AFactsSchema>;
@@ -200,7 +238,8 @@ export const EB1BFactsSchema = z.object({
   permanent_position_type: Field(z.string()),
   claimed_criteria: z.array(ClaimedCriterionSchema),
   expert_letters: z.array(ExpertLetterSchema),
-  red_flags: z.array(Field(z.string())),
+  evidence_aps: z.array(EvidenceAPSSchema),
+  conflict_register: z.array(ConflictEntrySchema),
 });
 
 export type EB1BFacts = z.infer<typeof EB1BFactsSchema>;
@@ -237,7 +276,7 @@ export const EB1CFactsSchema = z.object({
   foreign_role: RoleAnalysisSchema,
   us_role: RoleAnalysisSchema,
   functional_or_personnel_manager: Field(z.string()),
-  red_flags: z.array(Field(z.string())),
+  conflict_register: z.array(ConflictEntrySchema),
 });
 
 export type EB1CFacts = z.infer<typeof EB1CFactsSchema>;
