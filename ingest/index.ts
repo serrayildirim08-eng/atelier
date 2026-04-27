@@ -1,6 +1,7 @@
 import { extractPdfText } from './pdf';
 import { extractFactsWithClaude } from './claude';
 import type { E2Facts } from './schema';
+import type { ReviewReport } from '@/reason';
 
 export type { E2Facts } from './schema';
 
@@ -10,6 +11,8 @@ export interface IngestSuccess {
   facts: E2Facts;
   draft?: string;
   draftError?: { code: string; message: string };
+  review?: ReviewReport;
+  reviewError?: { code: string; message: string };
 }
 
 export interface IngestFailure {

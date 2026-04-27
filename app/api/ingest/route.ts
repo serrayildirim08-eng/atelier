@@ -1,8 +1,9 @@
 import { ingestPdf, type IngestResult } from '@/ingest';
 import { draftCoverLetter } from '@/draft';
+import { checkE2Draft } from '@/reason';
 
 export const runtime = 'nodejs';
-export const maxDuration = 120;
+export const maxDuration = 300;
 
 export async function POST(request: Request): Promise<Response> {
   let formData: FormData;
@@ -56,21 +57,37 @@ export async function POST(request: Request): Promise<Response> {
         };
       }
 
-      if ('facts' in result) {
-        try {
-          const { letter } = await draftCoverLetter(result.facts);
-          return { ...result, draft: letter };
-        } catch (e: unknown) {
-          return {
-            ...result,
-            draftError: {
-              code: 'draft_failed',
-              message: e instanceof Error ? e.message : String(e),
-            },
-          };
-        }
+      if (!('facts' in result)) {
+        return result;
       }
-      return result;
+
+      let letter: string;
+      try {
+        const drafted = await draftCoverLetter(result.facts);
+        letter = drafted.letter;
+        result = { ...result, draft: letter };
+      } catch (e: unknown) {
+        return {
+          ...result,
+          draftError: {
+            code: 'draft_failed',
+            message: e instanceof Error ? e.message : String(e),
+          },
+        };
+      }
+
+      try {
+        const reviewed = await checkE2Draft(result.facts, letter);
+        return { ...result, review: reviewed.report };
+      } catch (e: unknown) {
+        return {
+          ...result,
+          reviewError: {
+            code: 'review_failed',
+            message: e instanceof Error ? e.message : String(e),
+          },
+        };
+      }
     }),
   );
 

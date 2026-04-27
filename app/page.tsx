@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import type { DragEvent, ChangeEvent } from 'react';
+import type { ReviewReport } from '@/reason';
 
 interface FieldProvenance<T> {
   value: T | null;
@@ -28,6 +29,8 @@ interface IngestResult {
   facts?: E2FactsLike;
   draft?: string;
   draftError?: { code: string; message: string };
+  review?: ReviewReport;
+  reviewError?: { code: string; message: string };
   error?: { code: string; message: string };
 }
 
@@ -173,7 +176,7 @@ export default function Page() {
       >
         <p className="text-gray-700 mb-4">
           {loading
-            ? 'Extracting facts…'
+            ? 'Working… extracting facts → drafting letter → reviewing (1–3 min per file)'
             : dragActive
               ? 'Release to upload'
               : 'Drag PDFs or a folder here'}
@@ -262,6 +265,167 @@ function ResultCard({ result }: { result: IngestResult }) {
         </tbody>
       </table>
       <DraftSection result={result} />
+      <ReviewSection result={result} />
+    </div>
+  );
+}
+
+const ELEMENT_LABEL: Record<string, string> = {
+  treaty_country: 'Treaty country',
+  substantial_investment: 'Substantial investment',
+  real_and_operating: 'Real & operating',
+  more_than_marginal: 'More than marginal',
+  develop_and_direct: 'Develop & direct',
+  general: 'General',
+};
+
+const ASSESSMENT_STYLE: Record<string, string> = {
+  ready: 'bg-green-100 text-green-800 border-green-200',
+  minor_revisions: 'bg-amber-100 text-amber-800 border-amber-200',
+  major_revisions: 'bg-orange-100 text-orange-800 border-orange-200',
+  not_ready: 'bg-red-100 text-red-800 border-red-200',
+};
+
+const SEVERITY_STYLE: Record<string, string> = {
+  critical: 'bg-red-100 text-red-800 border-red-200',
+  major: 'bg-orange-100 text-orange-800 border-orange-200',
+  minor: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+};
+
+function SeverityBadge({ severity }: { severity: string }) {
+  return (
+    <span
+      className={
+        'inline-block text-xs px-2 py-0.5 rounded border ' +
+        (SEVERITY_STYLE[severity] ?? 'bg-gray-100 border-gray-200')
+      }
+    >
+      {severity}
+    </span>
+  );
+}
+
+function ReviewSection({ result }: { result: IngestResult }) {
+  if (result.reviewError) {
+    return (
+      <div className="mt-4 border border-red-200 bg-red-50 rounded p-3 text-sm text-red-700">
+        Review failed [{result.reviewError.code}]: {result.reviewError.message}
+      </div>
+    );
+  }
+  if (!result.review) return null;
+  const r = result.review;
+
+  return (
+    <div className="mt-6 border-t pt-4">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-medium text-gray-700">Review report</h3>
+        <span
+          className={
+            'inline-block text-xs px-2 py-0.5 rounded border ' +
+            (ASSESSMENT_STYLE[r.overall_assessment] ?? 'bg-gray-100 border-gray-200')
+          }
+        >
+          {r.overall_assessment.replace('_', ' ')}
+        </span>
+      </div>
+      <p className="text-sm text-gray-700 mb-4">{r.summary}</p>
+
+      <FindingGroup
+        title="Inconsistencies"
+        count={r.inconsistencies.length}
+        emptyText="No inconsistencies found."
+      >
+        {r.inconsistencies.map((f, i) => (
+          <div key={i} className="border rounded p-3 bg-white">
+            <div className="flex items-center gap-2 mb-1">
+              <SeverityBadge severity={f.severity} />
+              <span className="text-xs text-gray-500 uppercase">{f.category.replace('_', ' ')}</span>
+            </div>
+            <div className="text-sm text-gray-800">{f.description}</div>
+            {f.letter_excerpt && (
+              <div className="mt-2 text-xs text-gray-600 italic">
+                Letter: “{f.letter_excerpt}”
+              </div>
+            )}
+            {f.facts_value && (
+              <div className="text-xs text-gray-600">
+                Facts: <span className="font-mono">{f.facts_value}</span>
+              </div>
+            )}
+          </div>
+        ))}
+      </FindingGroup>
+
+      <FindingGroup
+        title="Missing arguments"
+        count={r.missing_arguments.length}
+        emptyText="All five elements appear to be argued."
+      >
+        {r.missing_arguments.map((f, i) => (
+          <div key={i} className="border rounded p-3 bg-white">
+            <div className="text-xs text-gray-500 uppercase mb-1">
+              {ELEMENT_LABEL[f.element] ?? f.element}
+            </div>
+            <div className="text-sm text-gray-800 mb-1">{f.description}</div>
+            <div className="text-xs text-gray-600 mb-1">
+              <span className="font-medium">Missing:</span> {f.what_is_missing}
+            </div>
+            <div className="text-xs text-gray-600">
+              <span className="font-medium">Suggestion:</span> {f.suggestion}
+            </div>
+          </div>
+        ))}
+      </FindingGroup>
+
+      <FindingGroup
+        title="Weak spots & RFE risks"
+        count={r.weak_spots.length}
+        emptyText="No notable RFE risks identified."
+      >
+        {r.weak_spots.map((f, i) => (
+          <div key={i} className="border rounded p-3 bg-white">
+            <div className="flex items-center gap-2 mb-1">
+              <SeverityBadge severity={f.severity} />
+              <span className="text-xs text-gray-500 uppercase">
+                {ELEMENT_LABEL[f.element] ?? f.element}
+              </span>
+            </div>
+            <div className="text-sm text-gray-800 mb-1">{f.description}</div>
+            <div className="text-xs text-gray-600 mb-1">
+              <span className="font-medium">RFE risk:</span> {f.rfe_risk}
+            </div>
+            <div className="text-xs text-gray-600">
+              <span className="font-medium">Suggestion:</span> {f.suggestion}
+            </div>
+          </div>
+        ))}
+      </FindingGroup>
+    </div>
+  );
+}
+
+function FindingGroup({
+  title,
+  count,
+  emptyText,
+  children,
+}: {
+  title: string;
+  count: number;
+  emptyText: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="mb-4">
+      <div className="text-xs font-medium uppercase text-gray-500 mb-2">
+        {title} <span className="text-gray-400">({count})</span>
+      </div>
+      {count === 0 ? (
+        <div className="text-sm text-gray-400 italic">{emptyText}</div>
+      ) : (
+        <div className="space-y-2">{children}</div>
+      )}
     </div>
   );
 }
