@@ -23,6 +23,9 @@ import {
   type PerPdfResult,
 } from './typed-memory';
 import { extractContract } from './extractors/contract';
+import { extractBankReceipt } from './extractors/bank-receipt';
+import { extractWireConfirmation } from './extractors/wire-confirmation';
+import { extractGovernmentDoc } from './extractors/government-doc';
 
 /**
  * Doc types that route through the rich contract extractor as a second
@@ -36,6 +39,32 @@ const CONTRACT_FLAVORED_DOC_TYPES: ReadonlySet<DocType> = new Set<DocType>([
   'ownership_evidence',
   'formation_doc',
 ]);
+
+/**
+ * Doc types that route through the rich bank-receipt extractor (manual
+ * §5.1.3 multi-installment, §5.1.6 recurring rental, §5.2.1 FX receipts).
+ */
+const BANK_RECEIPT_FLAVORED_DOC_TYPES: ReadonlySet<DocType> = new Set<DocType>([
+  'money_movement',
+  'source_of_funds',
+]);
+
+/**
+ * Doc types that route through the rich wire-confirmation extractor
+ * (manual §5.2.1 / §5.2.2 / §5.2.3 + Subtype-4 corporate funding).
+ */
+const WIRE_CONFIRMATION_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
+  new Set<DocType>(['money_movement']);
+
+/**
+ * Doc types that route through the rich government-doc extractor (manual
+ * §5.1.1 / §5.1.2 title deeds, §12.3 / §12.4 vital records, court orders).
+ * source_of_funds carries title deeds in the Akalan structure; vital
+ * records and court orders typically land in `other` since the thin
+ * taxonomy has no slot for them.
+ */
+const GOVERNMENT_DOC_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
+  new Set<DocType>(['source_of_funds', 'other']);
 
 function extractFirstJsonObject(text: string): string {
   const start = text.indexOf('{');
@@ -225,25 +254,72 @@ export async function classifyAndExtractOnePdf(
 
   const facts = validated.data as PerPdfFacts;
 
-  // Second pass: if the document is contract-flavored, run the rich
-  // contract extractor (manual §4 / §5.1.5 / §7.3). Failure here is
-  // non-fatal — we keep the thin first-pass facts and surface the
-  // contract error at telemetry level. The gate against the I-129 E
-  // Supplement runs in the aggregator.
+  // Second pass: route to each rich extractor whose flavor includes the
+  // first-pass doc_type. Multiple extractors may apply to the same PDF
+  // (e.g., a money_movement document is both bank-receipt-flavored and
+  // wire-confirmation-flavored — they capture different facets), so we
+  // run them in parallel rather than picking one.
+  //
+  // Failure inside any rich extractor is non-fatal: we keep the thin
+  // first-pass facts and surface the second-pass error at telemetry
+  // level. The cross-extractor gates (consideration drift, FX validation,
+  // Tapu defensive flag) all run in the aggregator.
+  const richInput = {
+    filename: input.filename,
+    text,
+    pageCount: parsed.pageCount,
+  };
+
+  const [contractResult, bankReceiptResult, wireConfirmationResult, governmentDocResult] =
+    await Promise.all([
+      CONTRACT_FLAVORED_DOC_TYPES.has(facts.doc_type)
+        ? extractContract(richInput)
+        : Promise.resolve(null),
+      BANK_RECEIPT_FLAVORED_DOC_TYPES.has(facts.doc_type)
+        ? extractBankReceipt(richInput)
+        : Promise.resolve(null),
+      WIRE_CONFIRMATION_FLAVORED_DOC_TYPES.has(facts.doc_type)
+        ? extractWireConfirmation(richInput)
+        : Promise.resolve(null),
+      GOVERNMENT_DOC_FLAVORED_DOC_TYPES.has(facts.doc_type)
+        ? extractGovernmentDoc(richInput)
+        : Promise.resolve(null),
+    ]);
+
   let contract;
-  if (CONTRACT_FLAVORED_DOC_TYPES.has(facts.doc_type)) {
-    const contractResult = await extractContract({
-      filename: input.filename,
-      text,
-      pageCount: parsed.pageCount,
-    });
-    if (contractResult.facts) {
-      contract = contractResult.facts;
-    } else if (contractResult.error) {
-      console.warn(
-        `[contract-extract] ${input.filename}: ${contractResult.error.code} — ${contractResult.error.message}`,
-      );
-    }
+  if (contractResult?.facts) {
+    contract = contractResult.facts;
+  } else if (contractResult?.error) {
+    console.warn(
+      `[contract-extract] ${input.filename}: ${contractResult.error.code} — ${contractResult.error.message}`,
+    );
+  }
+
+  let bankReceipt;
+  if (bankReceiptResult?.facts) {
+    bankReceipt = bankReceiptResult.facts;
+  } else if (bankReceiptResult?.error) {
+    console.warn(
+      `[bank-receipt-extract] ${input.filename}: ${bankReceiptResult.error.code} — ${bankReceiptResult.error.message}`,
+    );
+  }
+
+  let wireConfirmation;
+  if (wireConfirmationResult?.facts) {
+    wireConfirmation = wireConfirmationResult.facts;
+  } else if (wireConfirmationResult?.error) {
+    console.warn(
+      `[wire-confirmation-extract] ${input.filename}: ${wireConfirmationResult.error.code} — ${wireConfirmationResult.error.message}`,
+    );
+  }
+
+  let governmentDoc;
+  if (governmentDocResult?.facts) {
+    governmentDoc = governmentDocResult.facts;
+  } else if (governmentDocResult?.error) {
+    console.warn(
+      `[government-doc-extract] ${input.filename}: ${governmentDocResult.error.code} — ${governmentDocResult.error.message}`,
+    );
   }
 
   return {
@@ -251,6 +327,9 @@ export async function classifyAndExtractOnePdf(
     pageCount: parsed.pageCount,
     facts,
     contract,
+    bankReceipt,
+    wireConfirmation,
+    governmentDoc,
   };
 }
 

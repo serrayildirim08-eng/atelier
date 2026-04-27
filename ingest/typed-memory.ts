@@ -17,6 +17,9 @@
 
 import { z } from 'zod';
 import type { ContractFacts } from './extractors/contract.schema';
+import type { BankReceiptFacts } from './extractors/bank-receipt.schema';
+import type { WireConfirmationFacts } from './extractors/wire-confirmation.schema';
+import type { GovernmentDocFacts } from './extractors/government-doc.schema';
 
 const Field = <T extends z.ZodTypeAny>(value: T) =>
   z.preprocess(
@@ -357,6 +360,31 @@ export interface PerPdfResult {
    * downstream consumers that don't know about contracts still work.
    */
   contract?: ContractFacts;
+  /**
+   * Rich bank-receipt extraction (manual §5.1.3 multi-installment property
+   * sale, §5.1.6 recurring rental income, or single FX/transfer receipts).
+   * Attached when the first-pass classifier returns money_movement or
+   * source_of_funds. Discriminated by receipt_subtype (single_event vs
+   * multi_installment).
+   */
+  bankReceipt?: BankReceiptFacts;
+  /**
+   * Rich wire-confirmation extraction (manual §5.2.1 / §5.2.2 / §5.2.3 + the
+   * Subtype-4 corporate-funding pattern). Attached when the first-pass
+   * classifier returns money_movement. Discriminated by wire_subtype
+   * (international_wire_with_fx | usd_only_wire | corporate_funding); the
+   * aggregator runs a deterministic FX-validation gate against the
+   * international_wire_with_fx variant.
+   */
+  wireConfirmation?: WireConfirmationFacts;
+  /**
+   * Rich government-document extraction (manual §5.1.1 / §5.1.2 title deeds,
+   * §12.3 marriage certificates, §12.4 birth certificates, court orders).
+   * Attached when the first-pass classifier returns source_of_funds (title
+   * deeds) or other (vital records, court orders). Detection of a
+   * title_deed sets the drafter's tapu-explanation defensive flag.
+   */
+  governmentDoc?: GovernmentDocFacts;
   error?: { code: string; message: string };
 }
 

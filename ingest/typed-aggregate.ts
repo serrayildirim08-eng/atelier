@@ -20,6 +20,20 @@ import {
   CONTRACT_SUBTYPE_LABELS,
   type ContractFacts,
 } from './extractors/contract.schema';
+import {
+  BANK_RECEIPT_SUBTYPE_LABELS,
+  type BankReceiptFacts,
+} from './extractors/bank-receipt.schema';
+import {
+  WIRE_CONFIRMATION_SUBTYPE_LABELS,
+  checkFxGate,
+  FX_GATE_TOLERANCE,
+  type WireConfirmationFacts,
+} from './extractors/wire-confirmation.schema';
+import {
+  GOVERNMENT_DOC_SUBTYPE_LABELS,
+  type GovernmentDocFacts,
+} from './extractors/government-doc.schema';
 
 /** Tolerance for the manual §4.5 quality gate (USD). */
 const CONSIDERATION_GATE_TOLERANCE_USD = 100;
@@ -73,6 +87,9 @@ Cross-document gates (in addition to the per-element rules above):
 - Manual §4.5 (Membership Interest Transfer Agreement gate). When the typed memory contains a contract with contract_subtype='membership_interest_transfer_agreement', its total_consideration_amount MUST equal the I-129 E Supplement's investment_amount_usd (uscis_or_dos_form with form_id matching "I-129E" or "I-129 E Supplement"). Mismatch beyond $100 = severity 5 conflict_register entry with conflict_type='investment_amount_drift'. Populate fact_a_doc with the contract filename and fact_b_doc with the I-129E filename. The infrastructure also runs a deterministic post-check after your output; logging the conflict here is preferred so the narrative reflects it.
 - Membership-interest-transfer's transferee.ownership_after combined with the Petitioner's other treaty-national owners must reach ≥50% (9 FAM 402.9-4(B)). If it does not, severity 5, conflict_type='ownership_below_treaty_threshold'.
 - Membership-interest-transfer's effective_date_role and the executive_role_granted feed E5 develop-and-direct (manual §8.7); use them to populate elements_evidence.develop_and_direct_basis when present.
+- Manual §5.2.1 (FX validation gate). When the typed memory contains a wire-confirmation with wire_subtype='international_wire_with_fx', |source_amount × exchange_rate − target_amount| / target_amount MUST be ≤ 1% (0.01). Mismatch = severity 3 conflict_register entry with conflict_type='fx_rate_drift'. Populate fact_a_doc with the wire filename. The infrastructure also runs this gate deterministically after your output; logging the conflict here is preferred so the narrative reflects it.
+- Manual §5.4 (SOF chain reconstruction). Use the BANK RECEIPTS, WIRE CONFIRMATIONS, and GOVERNMENT DOCUMENTS blocks to populate source_of_funds chain entries. A multi_installment bank receipt's total_received_amount sums the property-sale proceeds (compare against title_deed if both present); an international_wire_with_fx records the §5.2.1 conversion; a usd_only_wire / corporate_funding records the §5.2.3 close-of-chain deployment.
+- Manual §5.1.2 Tapu defensive paragraph. When a government document with government_doc_subtype='title_deed' appears in the typed memory, the drafter MUST insert the Tapu defensive paragraph BEFORE citing the deed exhibit. The infrastructure surfaces this requirement as a separate `defensive_paragraphs_required.tapu_explanation` flag in the aggregator output; you do not need to log it as a conflict_register entry — populate elements_evidence narratives accordingly so the drafter has the cue.
 
 Provenance carry-over:
 - Every leaf field in the output schema carries source_page, source_quote, confidence.
@@ -114,11 +131,15 @@ function memoryToPromptText(memory: TypedMemory): string {
     sections.push(`## ${label.toUpperCase()} — ${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}\n\n${body}`);
   }
 
-  // Contract facts cross-cut the doc_type taxonomy: a single PDF carries
-  // both its thin doc_type extraction (above) and a rich contract facts
-  // payload (here). Surface them as a dedicated block so the gates in the
-  // system prompt fire reliably.
+  // Rich extractions cross-cut the doc_type taxonomy: a single PDF
+  // carries both its thin doc_type extraction (above) AND a rich facts
+  // payload from one or more rich extractors. Surface each rich block as
+  // its own section so the gates in the system prompt fire reliably.
   const contractEntries: { filename: string; pageCount: number; contract: ContractFacts }[] = [];
+  const bankReceiptEntries: { filename: string; pageCount: number; bankReceipt: BankReceiptFacts }[] = [];
+  const wireEntries: { filename: string; pageCount: number; wireConfirmation: WireConfirmationFacts }[] = [];
+  const govDocEntries: { filename: string; pageCount: number; governmentDoc: GovernmentDocFacts }[] = [];
+
   for (const entry of iterMemoryEntries(memory)) {
     if (entry.contract) {
       contractEntries.push({
@@ -127,7 +148,29 @@ function memoryToPromptText(memory: TypedMemory): string {
         contract: entry.contract,
       });
     }
+    if (entry.bankReceipt) {
+      bankReceiptEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        bankReceipt: entry.bankReceipt,
+      });
+    }
+    if (entry.wireConfirmation) {
+      wireEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        wireConfirmation: entry.wireConfirmation,
+      });
+    }
+    if (entry.governmentDoc) {
+      govDocEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        governmentDoc: entry.governmentDoc,
+      });
+    }
   }
+
   if (contractEntries.length > 0) {
     const body = contractEntries
       .map((e) => {
@@ -137,6 +180,42 @@ function memoryToPromptText(memory: TypedMemory): string {
       .join('\n\n');
     sections.push(
       `## CONTRACTS (rich extraction) — ${contractEntries.length} entr${contractEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (bankReceiptEntries.length > 0) {
+    const body = bankReceiptEntries
+      .map((e) => {
+        const label = BANK_RECEIPT_SUBTYPE_LABELS[e.bankReceipt.receipt_subtype];
+        return `### ${e.filename} — ${label} (page count: ${e.pageCount})\n${JSON.stringify(e.bankReceipt, null, 2)}`;
+      })
+      .join('\n\n');
+    sections.push(
+      `## BANK RECEIPTS (rich extraction) — ${bankReceiptEntries.length} entr${bankReceiptEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (wireEntries.length > 0) {
+    const body = wireEntries
+      .map((e) => {
+        const label = WIRE_CONFIRMATION_SUBTYPE_LABELS[e.wireConfirmation.wire_subtype];
+        return `### ${e.filename} — ${label} (page count: ${e.pageCount})\n${JSON.stringify(e.wireConfirmation, null, 2)}`;
+      })
+      .join('\n\n');
+    sections.push(
+      `## WIRE CONFIRMATIONS (rich extraction) — ${wireEntries.length} entr${wireEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (govDocEntries.length > 0) {
+    const body = govDocEntries
+      .map((e) => {
+        const label = GOVERNMENT_DOC_SUBTYPE_LABELS[e.governmentDoc.government_doc_subtype];
+        return `### ${e.filename} — ${label} (page count: ${e.pageCount})\n${JSON.stringify(e.governmentDoc, null, 2)}`;
+      })
+      .join('\n\n');
+    sections.push(
+      `## GOVERNMENT DOCUMENTS (rich extraction) — ${govDocEntries.length} entr${govDocEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
     );
   }
 
@@ -187,6 +266,39 @@ export interface ConsiderationGateInputs {
   i129ePage: number | null;
   i129eQuote: string | null;
   i129eAmountUsd: number;
+}
+
+/**
+ * Drafter cues derived deterministically from the typed memory. The
+ * drafter consults this object to decide whether to insert defensive
+ * paragraphs before exhibit citations (manual §2 / §5.1.2). Each flag is
+ * orthogonal — multiple may be true on the same matter.
+ */
+export interface DefensiveParagraphsRequired {
+  /**
+   * Manual §5.1.2: when a foreign title-deed exhibit is cited, the cover
+   * letter must explain the Tapu / Land Registry mechanism BEFORE the
+   * exhibit. Set true whenever the typed memory contains any government
+   * document with government_doc_subtype='title_deed'.
+   */
+  tapu_explanation: boolean;
+}
+
+/**
+ * One row in the deterministic FX-gate audit. Surfaced alongside the
+ * aggregator output so callers can show per-wire FX status independent of
+ * the conflict_register narrative. ok=true with relative_drift=null means
+ * the gate could not run (one of source/target/rate was null).
+ */
+export interface FxGateAuditRow {
+  filename: string;
+  ok: boolean;
+  relative_drift: number | null;
+  source_amount: number | null;
+  source_currency: string | null;
+  target_amount: number | null;
+  target_currency: string | null;
+  exchange_rate: number | null;
 }
 
 /** Tolerance the gate applies to the consideration drift (exported for tests). */
@@ -250,9 +362,73 @@ export function findConsiderationGateInputs(
   };
 }
 
+/**
+ * Compute the drafter's defensive-paragraph cues from the typed memory.
+ * Pure / deterministic — exported for tests.
+ */
+export function computeDefensiveParagraphsRequired(
+  memory: TypedMemory,
+): DefensiveParagraphsRequired {
+  let tapu = false;
+  for (const entry of iterMemoryEntries(memory)) {
+    if (entry.governmentDoc?.government_doc_subtype === 'title_deed') {
+      tapu = true;
+      break;
+    }
+  }
+  return { tapu_explanation: tapu };
+}
+
+/**
+ * Run the manual §5.2.1 FX validation gate against every
+ * international_wire_with_fx in the typed memory. Returns one audit row
+ * per wire — the caller appends conflict_register entries for any row
+ * whose ok=false. Pure / deterministic — exported for tests.
+ */
+export function runFxValidationGate(memory: TypedMemory): FxGateAuditRow[] {
+  const rows: FxGateAuditRow[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.wireConfirmation) continue;
+    if (entry.wireConfirmation.wire_subtype !== 'international_wire_with_fx') continue;
+    const result = checkFxGate(entry.wireConfirmation);
+    rows.push({
+      filename: entry.filename,
+      ok: result.ok,
+      relative_drift: result.relative_drift,
+      source_amount: result.source_amount,
+      source_currency: result.source_currency,
+      target_amount: result.target_amount,
+      target_currency: result.target_currency,
+      exchange_rate: result.exchange_rate,
+    });
+  }
+  return rows;
+}
+
+/** Locate the first international_wire_with_fx for a given filename — used to source page/quote provenance for FX-gate conflict entries. */
+function findFxWireProvenance(
+  memory: TypedMemory,
+  filename: string,
+): { page: number | null; quote: string | null } {
+  for (const entry of iterMemoryEntries(memory)) {
+    if (entry.filename !== filename) continue;
+    if (entry.wireConfirmation?.wire_subtype !== 'international_wire_with_fx') continue;
+    return {
+      page: entry.wireConfirmation.exchange_rate.source_page,
+      quote: entry.wireConfirmation.exchange_rate.source_quote,
+    };
+  }
+  return { page: null, quote: null };
+}
+
 export async function aggregateTypedMemoryToE2(
   memory: TypedMemory,
-): Promise<{ caseFacts: E2Facts; usage: AggregateUsage }> {
+): Promise<{
+  caseFacts: E2Facts;
+  usage: AggregateUsage;
+  defensive_paragraphs_required: DefensiveParagraphsRequired;
+  fx_gate_results: FxGateAuditRow[];
+}> {
   const memoryBlock = memoryToPromptText(memory);
   const userMessage = `${USER_INSTRUCTION}\n\n# Typed memory\n\n${memoryBlock}\n\nRespond with ONLY a single JSON object matching the E2FactsSchema. No prose, no markdown fences, no commentary.`;
 

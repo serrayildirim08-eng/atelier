@@ -12,9 +12,10 @@ import {
 
 const SHARED_PROVENANCE_RULES = `Provenance rules — non-negotiable for every leaf field:
 
+0. INPUT FORMAT — multi-document case folder. The user message contains MULTIPLE source documents concatenated together, each delimited by a header line "=== DOCUMENT: <relative/path/to/file.pdf> ===". Within each document, pages are delimited by [page N] markers. When citing source_quote, ALWAYS prefix the quote with the document filename in square brackets so the attorney can locate the exhibit, like "[passport.pdf p.2] John Doe, born 1985-03-10". source_page is the page number WITHIN that named document, not a global running page number.
 1. NEVER invent. If a fact is not present in the source documents, return value=null AND source_page=null AND source_quote=null AND confidence=null.
-2. For every populated value, source_page MUST be the 1-indexed page number from the document text (taken from the [page N] markers).
-3. source_quote MUST be a short verbatim phrase (5–25 words) copied from the source that contains or directly evidences the value.
+2. For every populated value, source_page MUST be the 1-indexed page number from the document text (taken from the [page N] markers, scoped to the document named in source_quote's prefix).
+3. source_quote MUST be a short verbatim phrase (5–25 words) copied from the source that contains or directly evidences the value, prefixed with [<filename> p.<N>] per rule 0.
 4. confidence is a number in [0, 1]: 1.0 = explicit and unambiguous in the source; ~0.7 = clearly inferred from immediate context; ~0.5 = inferred but the source is ambiguous; do not emit values below 0.3.
 5. Currency values are numbers in USD with symbols and commas stripped. If the source gives a foreign-currency amount, convert at the rate stated in the source (and note in source_quote); if no rate is stated, leave value=null and log a conflict_register entry.
 6. Dates: prefer ISO YYYY-MM-DD. If the source uses MM/DD/YYYY vs DD/MM/YYYY ambiguously and you cannot resolve, leave value=null and log a conflict_register entry.
@@ -328,7 +329,7 @@ export async function extractFactsByCaseType(
           },
           {
             type: 'text',
-            text: `Extract ${case_type} case facts and respond with ONLY a single JSON object matching the schema. No prose, no markdown code fences, no commentary — just the JSON object. The provenance fields source_page, source_quote, and confidence on each leaf must be populated for every populated value.`,
+            text: `Extract ${case_type} case facts from the case folder above. The folder may contain a SINGLE document (one [page N] stream) or MULTIPLE documents concatenated with === DOCUMENT: <relpath> === headers. When citing source_quote in multi-document mode, ALWAYS prefix with [<filename> p.<N>] so the attorney can locate the exhibit. Respond with ONLY a single JSON object matching the schema. No prose, no markdown code fences, no commentary — just the JSON object. The provenance fields source_page, source_quote, and confidence on each leaf must be populated for every populated value.`,
           },
         ],
       },

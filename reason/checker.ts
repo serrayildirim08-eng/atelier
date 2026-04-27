@@ -245,7 +245,7 @@ export async function checkDraft(
   const verifySection = verifyReport ? `\n\n${reportToReviewerPrompt(verifyReport)}` : '';
 
   const response = await getAnthropic().messages.parse({
-    model: 'claude-opus-4-7',
+    model: 'claude-sonnet-4-6',
     max_tokens: 16000,
     thinking: { type: 'adaptive' },
     output_config: {
@@ -273,7 +273,7 @@ export async function checkDraft(
 
   logAnthropicUsage({
     stage: 'review',
-    model: 'claude-opus-4-7',
+    model: 'claude-sonnet-4-6',
     case_type: caseFacts.case_type,
     usage: response.usage,
   });

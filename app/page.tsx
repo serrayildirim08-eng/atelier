@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useState, useMemo, useEffect } from 'react';
+import { Fragment, useCallback, useState, useMemo, useEffect } from 'react';
 import type { DragEvent, ChangeEvent } from 'react';
 import type { ReviewReport } from '@/reason';
-import type { CaseType } from '@/ingest';
+import type { CaseType, E2Facts } from '@/ingest';
 
 /* ---------------------------------------------------------------------- */
 /* Types                                                                   */
@@ -35,7 +35,74 @@ interface IngestResult {
   error?: { code: string; message: string };
 }
 
-type DossierTab = 'facts' | 'draft' | 'review' | 'log';
+type DossierTab = 'facts' | 'memory' | 'draft' | 'review' | 'log';
+
+interface IngestProgress {
+  stage: string;
+  label: string;
+  pdfCount: number;
+}
+
+type DocType =
+  | 'passport'
+  | 'status_doc'
+  | 'bank_statement'
+  | 'tax_doc'
+  | 'money_movement'
+  | 'source_of_funds'
+  | 'formation_doc'
+  | 'ownership_evidence'
+  | 'lease_or_property'
+  | 'business_plan'
+  | 'invoice_or_receipt'
+  | 'business_contract'
+  | 'payroll_doc'
+  | 'uscis_or_dos_form'
+  | 'cover_letter'
+  | 'expert_letter'
+  | 'other';
+
+const DOC_TYPE_LABEL: Record<DocType, string> = {
+  passport: 'Passport',
+  status_doc: 'US status / I-94',
+  bank_statement: 'Bank statement',
+  tax_doc: 'Tax document',
+  money_movement: 'Wire / transfer',
+  source_of_funds: 'Source of funds',
+  formation_doc: 'Formation doc',
+  ownership_evidence: 'Ownership',
+  lease_or_property: 'Lease / property',
+  business_plan: 'Business plan',
+  invoice_or_receipt: 'Invoice / receipt',
+  business_contract: 'Contract',
+  payroll_doc: 'Payroll',
+  uscis_or_dos_form: 'USCIS / DOS form',
+  cover_letter: 'Cover letter',
+  expert_letter: 'Expert letter',
+  other: 'Other',
+};
+
+interface PerPdfMemoryEntry {
+  filename: string;
+  pageCount: number;
+  doc_type: DocType | null;
+  facts: Record<string, unknown> | null;
+  error: { code: string; message: string } | null;
+}
+
+type TypedMemory = Partial<Record<DocType, PerPdfMemoryEntry[]>>;
+
+interface AkalanBridge {
+  platform: string;
+  isDesktop: boolean;
+  pickFolder?: () => Promise<string | null>;
+}
+
+declare global {
+  interface Window {
+    akalan?: AkalanBridge;
+  }
+}
 
 const PDF_EXT = /\.pdf$/i;
 
@@ -127,6 +194,31 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [now, setNow] = useState<Date>(() => new Date());
+  const [progress, setProgress] = useState<IngestProgress | null>(null);
+  const [isElectron, setIsElectron] = useState(false);
+  const [typedMemory, setTypedMemory] = useState<TypedMemory>({});
+  const [perPdfCount, setPerPdfCount] = useState<{ done: number; total: number }>({
+    done: 0,
+    total: 0,
+  });
+  const [matterRoot, setMatterRoot] = useState<string | null>(null);
+  const [matterOverlayOpen, setMatterOverlayOpen] = useState(false);
+  const [selectedEntryKey, setSelectedEntryKey] = useState<string | null>(null);
+  const [entryLabels, setEntryLabels] = useState<Record<string, string>>({});
+  const [dashboardOverrides, setDashboardOverrides] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    setIsElectron(typeof window !== 'undefined' && !!window.akalan?.pickFolder);
+  }, []);
+
+  useEffect(() => {
+    if (!matterOverlayOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMatterOverlayOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [matterOverlayOpen]);
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 30_000);
@@ -205,6 +297,117 @@ export default function Page() {
     if (e.target.files) handleFiles(Array.from(e.target.files));
   };
 
+  const handleFolderPath = useCallback(async (rootPath: string) => {
+    setLoading(true);
+    setResults([]);
+    setProgress(null);
+    setTypedMemory({});
+    setPerPdfCount({ done: 0, total: 0 });
+    setMatterRoot(rootPath);
+
+    try {
+      const res = await fetch('/api/ingest-path', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: rootPath }),
+      });
+
+      if (!res.ok || !res.body) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        setResults([
+          {
+            filename: rootPath,
+            pageCount: 0,
+            error: {
+              code: 'http_' + res.status,
+              message: data.error ?? `HTTP ${res.status}`,
+            },
+          },
+        ]);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      const collected: IngestResult[] = [];
+      let pdfCount = 0;
+
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          let evt: { type: string; [k: string]: unknown };
+          try {
+            evt = JSON.parse(line) as { type: string; [k: string]: unknown };
+          } catch {
+            continue;
+          }
+          if (evt.type === 'start') {
+            pdfCount = (evt.total as number) ?? 0;
+            setPerPdfCount({ done: 0, total: pdfCount });
+            setProgress({
+              stage: 'starting',
+              label: `Found ${pdfCount} PDFs`,
+              pdfCount,
+            });
+          } else if (evt.type === 'progress') {
+            setProgress({
+              stage: (evt.stage as string) ?? 'working',
+              label: (evt.label as string) ?? 'Working',
+              pdfCount,
+            });
+          } else if (evt.type === 'pdf_result') {
+            const entry: PerPdfMemoryEntry = {
+              filename: evt.filename as string,
+              pageCount: (evt.pageCount as number) ?? 0,
+              doc_type: (evt.doc_type as DocType | null) ?? null,
+              facts: (evt.facts as Record<string, unknown> | null) ?? null,
+              error: (evt.error as { code: string; message: string } | null) ?? null,
+            };
+            const bucket: DocType = entry.doc_type ?? 'other';
+            setTypedMemory((prev) => {
+              const list = prev[bucket] ?? [];
+              return { ...prev, [bucket]: [...list, entry] };
+            });
+            setPerPdfCount((prev) => ({ done: prev.done + 1, total: prev.total }));
+          } else if (evt.type === 'result') {
+            collected.push(evt.result as IngestResult);
+            setResults([...collected]);
+            if (collected.length === 1) setSelectedIdx(0);
+          } else if (evt.type === 'done') {
+            setProgress(null);
+          }
+        }
+      }
+    } catch (e: unknown) {
+      setResults([
+        {
+          filename: rootPath,
+          pageCount: 0,
+          error: {
+            code: 'network',
+            message: e instanceof Error ? e.message : String(e),
+          },
+        },
+      ]);
+    } finally {
+      setLoading(false);
+      setProgress(null);
+    }
+  }, []);
+
+  const onPickFolderElectron = useCallback(async () => {
+    if (!window.akalan?.pickFolder) return;
+    const picked = await window.akalan.pickFolder();
+    if (!picked) return;
+    handleFolderPath(picked);
+  }, [handleFolderPath]);
+
   return (
     <div
       className="h-screen grid grid-rows-[3.25rem_1fr_1.75rem] paper-grain"
@@ -228,7 +431,11 @@ export default function Page() {
             setTab('facts');
           }}
           loading={loading}
+          progress={progress}
+          perPdfCount={perPdfCount}
+          isElectron={isElectron}
           onPickFolder={onPickFolder}
+          onPickFolderElectron={onPickFolderElectron}
         />
         <Dossier
           result={selected}
@@ -236,6 +443,11 @@ export default function Page() {
           onTab={setTab}
           loading={loading}
           hasAny={results.length > 0}
+          typedMemory={typedMemory}
+          perPdfCount={perPdfCount}
+          matterRoot={matterRoot}
+          entryLabels={entryLabels}
+          onOpenMatter={() => setMatterOverlayOpen(true)}
         />
         <Marginalia result={selected} loading={loading} />
       </main>
@@ -243,6 +455,26 @@ export default function Page() {
       <StatusBar results={results} loading={loading} now={now} />
 
       {dragActive && <DragOverlay />}
+
+      {matterOverlayOpen && (
+        <MatterOverlay
+          matterName={selected?.filename ?? matterRoot ?? 'Matter'}
+          matterRoot={matterRoot}
+          result={selected}
+          typedMemory={typedMemory}
+          selectedEntryKey={selectedEntryKey}
+          onSelectEntry={setSelectedEntryKey}
+          entryLabels={entryLabels}
+          onSetLabel={(key, label) =>
+            setEntryLabels((prev) => ({ ...prev, [key]: label }))
+          }
+          dashboardOverrides={dashboardOverrides}
+          onSetDashboardOverride={(path, val) =>
+            setDashboardOverrides((prev) => ({ ...prev, [path]: val }))
+          }
+          onClose={() => setMatterOverlayOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -298,13 +530,21 @@ function Binder({
   selectedIdx,
   onSelect,
   loading,
+  progress,
+  perPdfCount,
+  isElectron,
   onPickFolder,
+  onPickFolderElectron,
 }: {
   results: IngestResult[];
   selectedIdx: number;
   onSelect: (i: number) => void;
   loading: boolean;
+  progress: IngestProgress | null;
+  perPdfCount: { done: number; total: number };
+  isElectron: boolean;
   onPickFolder: (e: ChangeEvent<HTMLInputElement>) => void;
+  onPickFolderElectron: () => void;
 }) {
   return (
     <aside className="border-r border-rule paper-grain min-h-0 flex flex-col">
@@ -320,7 +560,7 @@ function Binder({
       <div className="brass-rule mx-3" />
 
       <div className="flex-1 overflow-y-auto px-2 py-2 min-h-0">
-        {loading && <BinderLoadingRow />}
+        {loading && <BinderLoadingRow progress={progress} perPdfCount={perPdfCount} />}
         {!loading && results.length === 0 && (
           <div className="px-3 py-6 text-[0.78rem] text-graphite italic font-display">
             Drop a dossier into the dossier pane to begin.
@@ -337,41 +577,73 @@ function Binder({
       </div>
 
       <div className="border-t border-rule px-3 py-3 flex flex-col gap-2">
-        <label className="block">
-          <input
-            type="file"
-            multiple
-            accept="application/pdf"
-            ref={(el) => {
-              if (el) {
-                el.setAttribute('webkitdirectory', '');
-                el.setAttribute('directory', '');
-              }
-            }}
-            className="hidden"
-            onChange={onPickFolder}
-          />
-          <span className="block text-center px-3 py-1.5 border border-ink-2 text-[0.78rem] cursor-pointer hover:bg-ink hover:text-paper transition-colors smcp">
+        {isElectron ? (
+          <button
+            onClick={onPickFolderElectron}
+            className="block text-center px-3 py-1.5 border border-ink-2 text-[0.78rem] cursor-pointer hover:bg-ink hover:text-paper transition-colors smcp"
+          >
             ※ deposit a folder
-          </span>
-        </label>
+          </button>
+        ) : (
+          <label className="block">
+            <input
+              type="file"
+              multiple
+              accept="application/pdf"
+              ref={(el) => {
+                if (el) {
+                  el.setAttribute('webkitdirectory', '');
+                  el.setAttribute('directory', '');
+                }
+              }}
+              className="hidden"
+              onChange={onPickFolder}
+            />
+            <span className="block text-center px-3 py-1.5 border border-ink-2 text-[0.78rem] cursor-pointer hover:bg-ink hover:text-paper transition-colors smcp">
+              ※ deposit a folder
+            </span>
+          </label>
+        )}
         <div className="font-mono text-[0.62rem] text-graphite-soft text-center tracking-widest">
-          PDFs · case files · exhibits
+          {isElectron ? 'native picker · streamed from disk' : 'PDFs · case files · exhibits'}
         </div>
       </div>
     </aside>
   );
 }
 
-function BinderLoadingRow() {
+function BinderLoadingRow({
+  progress,
+  perPdfCount,
+}: {
+  progress: IngestProgress | null;
+  perPdfCount: { done: number; total: number };
+}) {
+  const showCount = perPdfCount.total > 0;
   return (
     <div className="px-3 py-3">
       <div className="smcp text-[0.62rem] text-rubric mb-2">⁂  working</div>
-      <div className="font-display italic text-[0.85rem] text-ink-2 leading-tight">
-        Detecting case type… extracting facts… drafting… reviewing.
-      </div>
+      {progress ? (
+        <>
+          <div className="font-mono text-[0.62rem] text-graphite mb-1 tracking-widest uppercase">
+            {progress.stage}
+          </div>
+          <div className="font-display italic text-[0.85rem] text-ink-2 leading-tight">
+            {progress.label}
+          </div>
+          {showCount && progress.stage === 'classifying' && (
+            <div className="mt-2 font-mono text-[0.7rem] text-ink-2">
+              {perPdfCount.done} / {perPdfCount.total}
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="font-display italic text-[0.85rem] text-ink-2 leading-tight">
+          Detecting case type… extracting facts… drafting… reviewing.
+        </div>
+      )}
       <div className="mt-2 font-mono text-[0.62rem] text-graphite tracking-widest">
-        2–4 MIN PER FILE
+        TYPED MEMORY · PARALLEL HAIKU + SONNET AGGREGATOR
       </div>
     </div>
   );
@@ -447,13 +719,43 @@ function Dossier({
   onTab,
   loading,
   hasAny,
+  typedMemory,
+  perPdfCount,
+  matterRoot,
+  entryLabels,
+  onOpenMatter,
 }: {
   result: IngestResult | undefined;
   tab: DossierTab;
   onTab: (t: DossierTab) => void;
   loading: boolean;
   hasAny: boolean;
+  typedMemory: TypedMemory;
+  perPdfCount: { done: number; total: number };
+  matterRoot: string | null;
+  entryLabels: Record<string, string>;
+  onOpenMatter: () => void;
 }) {
+  const memoryHasEntries = Object.values(typedMemory).some(
+    (list) => Array.isArray(list) && list.length > 0,
+  );
+
+  if (loading && !hasAny && memoryHasEntries) {
+    return (
+      <section className="min-h-0 flex flex-col paper-grain">
+        <DossierLoadingHeader perPdfCount={perPdfCount} />
+        <div className="flex-1 overflow-y-auto min-h-0">
+          <MemoryPane
+            typedMemory={typedMemory}
+            matterRoot={matterRoot}
+            entryLabels={entryLabels}
+            onOpenMatter={onOpenMatter}
+          />
+        </div>
+      </section>
+    );
+  }
+
   if (loading && !hasAny) return <DossierLoading />;
   if (!result) return <DossierEmpty />;
   if (result.error) return <DossierError result={result} />;
@@ -465,11 +767,339 @@ function Dossier({
       <DossierTabs tab={tab} onTab={onTab} result={result} />
       <div className="flex-1 overflow-y-auto min-h-0">
         {tab === 'facts' && <FactsPane facts={result.caseFacts.facts} />}
+        {tab === 'memory' && (
+          <MemoryPane
+            typedMemory={typedMemory}
+            matterRoot={matterRoot}
+            entryLabels={entryLabels}
+            onOpenMatter={onOpenMatter}
+          />
+        )}
         {tab === 'draft' && <DraftPane result={result} />}
         {tab === 'review' && <ReviewPane result={result} />}
         {tab === 'log' && <LogPane result={result} />}
       </div>
     </section>
+  );
+}
+
+function DossierLoadingHeader({
+  perPdfCount,
+}: {
+  perPdfCount: { done: number; total: number };
+}) {
+  return (
+    <header className="px-9 pt-7 pb-5 border-b border-rule">
+      <div className="smcp text-[0.65rem] text-graphite-soft mb-1">⁂  building typed memory</div>
+      <h1 className="font-display text-[1.55rem] leading-tight">
+        Classifying {perPdfCount.done} of {perPdfCount.total} documents
+      </h1>
+      <p className="font-display italic text-[0.95rem] text-graphite mt-1.5">
+        Each PDF is sorted into its document type and its facts read into memory. The
+        aggregator runs once every PDF is in.
+      </p>
+    </header>
+  );
+}
+
+function MemoryPane({
+  typedMemory,
+  matterRoot,
+  entryLabels,
+  onOpenMatter,
+}: {
+  typedMemory: TypedMemory;
+  matterRoot: string | null;
+  entryLabels: Record<string, string>;
+  onOpenMatter: () => void;
+}) {
+  const buckets = (Object.entries(typedMemory) as [DocType, PerPdfMemoryEntry[]][])
+    .filter(([, list]) => Array.isArray(list) && list.length > 0)
+    .sort((a, b) => b[1].length - a[1].length);
+
+  const [collapsedBuckets, setCollapsedBuckets] = useState<Record<string, boolean>>({});
+
+  if (buckets.length === 0) {
+    return (
+      <div className="px-9 py-12 font-display italic text-[0.95rem] text-graphite">
+        Typed memory is empty. PDFs will appear here as they are classified.
+      </div>
+    );
+  }
+
+  const totalEntries = buckets.reduce((acc, [, list]) => acc + list.length, 0);
+
+  return (
+    <div className="px-9 py-7 space-y-7">
+      <button
+        onClick={onOpenMatter}
+        className="w-full flex items-baseline justify-between border border-ink-2 paper-recess px-5 py-3 hover:bg-ink hover:text-paper transition-colors group"
+      >
+        <span className="font-display italic text-[1rem] group-hover:not-italic">
+          Open the matter
+        </span>
+        <span className="font-mono text-[0.7rem] tracking-widest text-graphite group-hover:text-paper-2">
+          {buckets.length} categories · {totalEntries} documents →
+        </span>
+      </button>
+
+      {buckets.map(([docType, entries]) => (
+        <MemoryBucket
+          key={docType}
+          docType={docType}
+          entries={entries}
+          collapsed={!!collapsedBuckets[docType]}
+          onToggle={() =>
+            setCollapsedBuckets((s) => ({ ...s, [docType]: !s[docType] }))
+          }
+          entryLabels={entryLabels}
+          onOpenMatter={onOpenMatter}
+        />
+      ))}
+    </div>
+  );
+}
+
+function MemoryBucket({
+  docType,
+  entries,
+  collapsed,
+  onToggle,
+  entryLabels,
+  onOpenMatter,
+}: {
+  docType: DocType;
+  entries: PerPdfMemoryEntry[];
+  collapsed: boolean;
+  onToggle: () => void;
+  entryLabels: Record<string, string>;
+  onOpenMatter: () => void;
+}) {
+  return (
+    <section>
+      <button
+        onClick={onToggle}
+        className="w-full flex items-baseline justify-between border-b border-rule pb-1.5 mb-3 group hover:border-ink-2 transition-colors text-left"
+      >
+        <div className="flex items-baseline gap-3">
+          <span
+            className="font-mono text-[0.78rem] text-graphite-soft transition-transform group-hover:text-ink-2"
+            style={{
+              display: 'inline-block',
+              transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+              transformOrigin: '50% 55%',
+              width: '0.85rem',
+            }}
+          >
+            ▶
+          </span>
+          <h2 className="font-display text-[1.05rem] group-hover:text-rubric transition-colors">
+            {DOC_TYPE_LABEL[docType]}
+          </h2>
+          <span className="font-mono text-[0.7rem] text-graphite tracking-widest">
+            {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
+          </span>
+        </div>
+        <span className="font-mono text-[0.62rem] text-graphite-soft tracking-widest">
+          {docType}
+        </span>
+      </button>
+      {!collapsed && (
+        <ul className="space-y-1.5">
+          {entries.map((e) => {
+            const key = entryKey(docType, e.filename);
+            const label = entryLabels[key] ?? getSuggestedDocLabel(e);
+            return (
+              <li key={key}>
+                <button
+                  onClick={onOpenMatter}
+                  className="w-full text-left flex items-baseline gap-2 px-3 py-1 border-l-2 border-rule hover:border-rubric hover:bg-paper-2/40 transition-colors group"
+                >
+                  <span className="shrink-0 font-mono text-[0.6rem] text-graphite-soft tracking-widest group-hover:text-rubric">
+                    →
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <div
+                      className="font-display text-[0.92rem] truncate group-hover:text-rubric"
+                      title={label}
+                    >
+                      {label}
+                    </div>
+                    <div
+                      className="font-mono text-[0.65rem] text-graphite-soft truncate"
+                      title={e.filename}
+                    >
+                      {e.filename}
+                    </div>
+                  </div>
+                  {e.error && (
+                    <span className="shrink-0 font-mono text-[0.62rem] text-rubric tracking-widest">
+                      error
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function entryKey(docType: DocType, filename: string): string {
+  return `${docType}::${filename}`;
+}
+
+/**
+ * Auto-suggest a human-readable label for a per-PDF memory entry, derived
+ * from the doc_type and the populated facts. The attorney can override
+ * via entryLabels in the overlay; this helper is the seed.
+ */
+function getSuggestedDocLabel(entry: PerPdfMemoryEntry): string {
+  const facts = entry.facts;
+  const fallback = basenameOf(entry.filename);
+  if (!facts || typeof facts !== 'object') return fallback;
+  const type = entry.doc_type;
+  const get = (key: string): string | null => {
+    const v = (facts as Record<string, unknown>)[key];
+    if (v && typeof v === 'object' && 'value' in (v as Record<string, unknown>)) {
+      const val = (v as { value: unknown }).value;
+      if (val === null || val === undefined) return null;
+      return String(val);
+    }
+    return null;
+  };
+  switch (type) {
+    case 'passport': {
+      const name = get('full_name');
+      return name ? `${name}'s passport` : fallback;
+    }
+    case 'status_doc': {
+      const name = get('full_name');
+      const cls = get('status_class');
+      return [name, cls].filter(Boolean).join(' · ') || fallback;
+    }
+    case 'bank_statement': {
+      const bank = get('bank_name');
+      const last4 = get('account_last4');
+      const period = get('statement_period');
+      const parts = [bank, last4 && `·${last4}`, period].filter(Boolean);
+      return parts.length > 0 ? parts.join(' ') : fallback;
+    }
+    case 'tax_doc': {
+      const filer = get('filer_name');
+      const year = get('tax_year');
+      const form = get('form_type');
+      return [filer, year, form].filter(Boolean).join(' · ') || fallback;
+    }
+    case 'money_movement': {
+      const amt = get('amount_usd');
+      const date = get('date');
+      const to = get('to_holder');
+      const parts = [amt && `$${amt}`, date, to && `→ ${to}`].filter(Boolean);
+      return parts.length > 0 ? parts.join(' · ') : fallback;
+    }
+    case 'source_of_funds': {
+      const cat = get('category');
+      const amt = get('amount_usd');
+      const donor = get('donor_or_seller');
+      const parts = [cat, amt && `$${amt}`, donor && `from ${donor}`].filter(Boolean);
+      return parts.length > 0 ? parts.join(' · ') : fallback;
+    }
+    case 'formation_doc': {
+      const kind = get('kind');
+      const entity = get('entity_legal_name');
+      return [kind, entity].filter(Boolean).join(' · ') || fallback;
+    }
+    case 'ownership_evidence': {
+      const kind = get('kind');
+      const entity = get('entity_name');
+      return [kind, entity].filter(Boolean).join(' · ') || fallback;
+    }
+    case 'lease_or_property': {
+      const addr = get('address');
+      return addr ? `Lease · ${addr}` : fallback;
+    }
+    case 'business_plan': {
+      const ent = get('enterprise_name');
+      return ent ? `${ent} business plan` : fallback;
+    }
+    case 'invoice_or_receipt': {
+      const vendor = get('vendor');
+      const amt = get('amount_usd');
+      const cat = get('category');
+      const parts = [vendor, amt && `$${amt}`, cat].filter(Boolean);
+      return parts.length > 0 ? parts.join(' · ') : fallback;
+    }
+    case 'business_contract': {
+      const cp = get('counterparty_name');
+      const role = get('role');
+      return [cp, role].filter(Boolean).join(' · ') || fallback;
+    }
+    case 'payroll_doc': {
+      const emp = get('employer_name');
+      return emp ? `${emp} payroll` : fallback;
+    }
+    case 'uscis_or_dos_form': {
+      const id = get('form_id');
+      const ben = get('beneficiary_name');
+      return [id, ben].filter(Boolean).join(' · ') || fallback;
+    }
+    case 'cover_letter': {
+      const visa = get('visa_type_argued');
+      return visa ? `Cover letter · ${visa}` : 'Cover letter';
+    }
+    case 'expert_letter': {
+      const writer = get('writer_name');
+      const inst = get('writer_institution');
+      if (writer && inst) return `${writer} (${inst})`;
+      return writer ?? fallback;
+    }
+    case 'other': {
+      const sum = get('one_line_summary');
+      return sum ?? fallback;
+    }
+    default:
+      return fallback;
+  }
+}
+
+function basenameOf(p: string): string {
+  const i = p.lastIndexOf('/');
+  return i >= 0 ? p.slice(i + 1) : p;
+}
+
+function MemoryFactsList({ facts }: { facts: Record<string, unknown> }) {
+  const rows: { key: string; value: string }[] = [];
+  for (const [k, v] of Object.entries(facts)) {
+    if (k === 'doc_type') continue;
+    if (v && typeof v === 'object' && 'value' in (v as Record<string, unknown>)) {
+      const fv = (v as { value: unknown }).value;
+      if (fv === null || fv === undefined) continue;
+      rows.push({ key: k, value: String(fv) });
+    } else if (Array.isArray(v) && v.length > 0) {
+      rows.push({ key: k, value: `${v.length} entries` });
+    }
+  }
+  if (rows.length === 0) {
+    return (
+      <div className="font-display italic text-[0.78rem] text-graphite-soft mt-1">
+        all fields null
+      </div>
+    );
+  }
+  return (
+    <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 text-[0.78rem]">
+      {rows.map((r) => (
+        <Fragment key={r.key}>
+          <dt className="font-mono text-[0.7rem] text-graphite tracking-wide">{r.key}</dt>
+          <dd className="text-ink-2 truncate" title={r.value}>
+            {r.value}
+          </dd>
+        </Fragment>
+      ))}
+    </dl>
   );
 }
 
@@ -650,6 +1280,7 @@ function DossierTabs({
 }) {
   const tabs: { key: DossierTab; label: string; suffix?: string }[] = [
     { key: 'facts', label: 'Facts' },
+    { key: 'memory', label: 'Memory' },
     {
       key: 'draft',
       label: 'Draft',
@@ -1483,6 +2114,685 @@ function DragOverlay() {
         <div className="mt-4 smcp text-graphite text-[0.78rem]">
           ※ pdfs · folders · exhibits
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Matter overlay — full-viewport, category accordion + PDF preview        */
+/* ---------------------------------------------------------------------- */
+
+function MatterOverlay({
+  matterName,
+  matterRoot,
+  result,
+  typedMemory,
+  selectedEntryKey,
+  onSelectEntry,
+  entryLabels,
+  onSetLabel,
+  dashboardOverrides,
+  onSetDashboardOverride,
+  onClose,
+}: {
+  matterName: string;
+  matterRoot: string | null;
+  result: IngestResult | undefined;
+  typedMemory: TypedMemory;
+  selectedEntryKey: string | null;
+  onSelectEntry: (key: string | null) => void;
+  entryLabels: Record<string, string>;
+  onSetLabel: (key: string, label: string) => void;
+  dashboardOverrides: Record<string, string>;
+  onSetDashboardOverride: (path: string, value: string) => void;
+  onClose: () => void;
+}) {
+  const buckets = (Object.entries(typedMemory) as [DocType, PerPdfMemoryEntry[]][])
+    .filter(([, list]) => Array.isArray(list) && list.length > 0)
+    .sort((a, b) => b[1].length - a[1].length);
+
+  const totalEntries = buckets.reduce((acc, [, list]) => acc + list.length, 0);
+  const e2Facts =
+    result && 'caseFacts' in result && result.caseFacts?.case_type === 'E2'
+      ? (result.caseFacts.facts as E2Facts)
+      : null;
+  const e2Subtype =
+    result && 'e2_subtype' in result ? (result.e2_subtype ?? null) : null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 paper-grain fade-in flex flex-col"
+      style={{ background: 'var(--color-paper)' }}
+    >
+      <MatterOverlayHeader
+        matterName={matterName}
+        bucketCount={buckets.length}
+        totalEntries={totalEntries}
+        onClose={onClose}
+      />
+      <div className="brass-rule mx-9" />
+      <div className="flex-1 overflow-y-auto border-t border-rule">
+        <div className="max-w-5xl mx-auto px-9 py-9 space-y-12">
+          <MatterDashboard
+            e2Facts={e2Facts}
+            e2Subtype={e2Subtype}
+            ready={!!e2Facts}
+            overrides={dashboardOverrides}
+            onSet={onSetDashboardOverride}
+          />
+          <MatterDocumentsSection
+            buckets={buckets}
+            matterRoot={matterRoot}
+            selectedEntryKey={selectedEntryKey}
+            onSelectEntry={onSelectEntry}
+            entryLabels={entryLabels}
+            onSetLabel={onSetLabel}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MatterOverlayHeader({
+  matterName,
+  bucketCount,
+  totalEntries,
+  onClose,
+}: {
+  matterName: string;
+  bucketCount: number;
+  totalEntries: number;
+  onClose: () => void;
+}) {
+  return (
+    <header className="grid grid-cols-[1fr_auto_1fr] items-center px-9 py-5">
+      <div>
+        <button
+          onClick={onClose}
+          className="font-mono text-[0.78rem] text-graphite hover:text-rubric transition-colors smcp tracking-widest flex items-center gap-2"
+        >
+          <span className="text-[1rem]">←</span>
+          <span>back to dossier</span>
+        </button>
+      </div>
+      <div className="text-center">
+        <div className="smcp text-[0.62rem] text-graphite-soft tracking-widest mb-1">
+          ※ matter
+        </div>
+        <div className="font-display text-[1.4rem] leading-none">
+          {basenameOf(matterName)}
+        </div>
+      </div>
+      <div className="flex items-center justify-end gap-4 font-mono text-[0.7rem] text-graphite tracking-widest">
+        <span>{bucketCount} categories</span>
+        <span className="text-rule-strong">·</span>
+        <span>{totalEntries} documents</span>
+      </div>
+    </header>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Matter dashboard — editable summary at the top of the overlay           */
+/* ---------------------------------------------------------------------- */
+
+function readFieldValue(field: unknown): string | null {
+  if (!field || typeof field !== 'object') return null;
+  const o = field as Record<string, unknown>;
+  if (!('value' in o)) return null;
+  if (o.value === null || o.value === undefined) return null;
+  return String(o.value);
+}
+
+function MatterDashboard({
+  e2Facts,
+  e2Subtype,
+  ready,
+  overrides,
+  onSet,
+}: {
+  e2Facts: E2Facts | null;
+  e2Subtype: { principal_subtype?: string; procedural_posture?: string } | null;
+  ready: boolean;
+  overrides: Record<string, string>;
+  onSet: (path: string, value: string) => void;
+}) {
+  if (!ready || !e2Facts) {
+    return (
+      <section>
+        <SectionTitle marker="⁂" label="dashboard" />
+        <div className="paper-recess border border-rule px-7 py-10 font-display italic text-[1rem] text-graphite text-center">
+          Matter dashboard pending — the aggregator hasn&rsquo;t finished
+          reconciling the typed memory yet.
+        </div>
+      </section>
+    );
+  }
+
+  const inv = e2Facts.investor;
+  const ent = e2Facts.enterprise;
+  const investment = e2Facts.investment;
+  const sof = e2Facts.source_of_funds;
+  const own = e2Facts.ownership_chain;
+  const conflicts = e2Facts.conflict_register;
+
+  const investorRows: { path: string; label: string; value: string | null }[] = [
+    { path: 'investor.full_name', label: 'Full name', value: readFieldValue(inv.full_name) },
+    { path: 'investor.dob', label: 'Date of birth', value: readFieldValue(inv.dob) },
+    { path: 'investor.place_of_birth', label: 'Place of birth', value: readFieldValue(inv.place_of_birth) },
+    { path: 'investor.nationality', label: 'Nationality', value: readFieldValue(inv.nationality) },
+    { path: 'investor.passport_number', label: 'Passport no.', value: readFieldValue(inv.passport_number) },
+    { path: 'investor.passport_expiry', label: 'Passport expiry', value: readFieldValue(inv.passport_expiry) },
+    { path: 'investor.current_us_status', label: 'US status', value: readFieldValue(inv.current_us_status) },
+  ];
+
+  const enterpriseRows: { path: string; label: string; value: string | null }[] = [
+    { path: 'enterprise.legal_name', label: 'Legal name', value: readFieldValue(ent.legal_name) },
+    { path: 'enterprise.ein', label: 'EIN', value: readFieldValue(ent.ein) },
+    { path: 'enterprise.formation_date', label: 'Formation date', value: readFieldValue(ent.formation_date) },
+    { path: 'enterprise.state_of_formation', label: 'State of formation', value: readFieldValue(ent.state_of_formation) },
+    { path: 'enterprise.entity_type', label: 'Entity type', value: readFieldValue(ent.entity_type) },
+    { path: 'enterprise.industry', label: 'Industry', value: readFieldValue(ent.industry) },
+    { path: 'enterprise.naics_code', label: 'NAICS code', value: readFieldValue(ent.naics_code) },
+    { path: 'enterprise.physical_address', label: 'Physical address', value: readFieldValue(ent.physical_address) },
+  ];
+
+  const investmentRows: { path: string; label: string; value: string | null }[] = [
+    { path: 'investment.total_committed_usd', label: 'Total committed', value: readFieldValue(investment.total_committed_usd) },
+    { path: 'investment.total_spent_usd', label: 'Total spent', value: readFieldValue(investment.total_spent_usd) },
+    { path: 'investment.total_cost_of_enterprise_usd', label: 'Total cost of enterprise', value: readFieldValue(investment.total_cost_of_enterprise_usd) },
+    { path: 'investment.proportionality_percent', label: 'Proportionality %', value: readFieldValue(investment.proportionality_percent) },
+    { path: 'investment.items_count', label: 'Investment line items', value: String(investment.items.length) },
+  ];
+
+  const subtypeStr = e2Subtype?.principal_subtype
+    ? `${e2Subtype.principal_subtype}${e2Subtype.procedural_posture ? ' · ' + e2Subtype.procedural_posture : ''}`
+    : null;
+  const subtypeRows: { path: string; label: string; value: string | null }[] = [
+    { path: 'meta.subtype', label: 'Sub-type', value: subtypeStr },
+    { path: 'meta.case_type', label: 'Case type', value: 'E-2 Treaty Investor' },
+  ];
+
+  const criticalConflicts = conflicts.filter((c) => {
+    const sev = readFieldValue(c.severity);
+    return sev === '4' || sev === '5';
+  });
+
+  return (
+    <section className="space-y-9">
+      <SectionTitle marker="⁂" label="dashboard" />
+
+      <DashboardPanel title="Case meta">
+        {subtypeRows.map((r) => (
+          <DashboardRow
+            key={r.path}
+            label={r.label}
+            path={r.path}
+            extracted={r.value}
+            override={overrides[r.path]}
+            onSave={onSet}
+          />
+        ))}
+      </DashboardPanel>
+
+      <DashboardPanel title="Investor">
+        {investorRows.map((r) => (
+          <DashboardRow
+            key={r.path}
+            label={r.label}
+            path={r.path}
+            extracted={r.value}
+            override={overrides[r.path]}
+            onSave={onSet}
+          />
+        ))}
+      </DashboardPanel>
+
+      <DashboardPanel title="Enterprise">
+        {enterpriseRows.map((r) => (
+          <DashboardRow
+            key={r.path}
+            label={r.label}
+            path={r.path}
+            extracted={r.value}
+            override={overrides[r.path]}
+            onSave={onSet}
+          />
+        ))}
+      </DashboardPanel>
+
+      <DashboardPanel title="Investment">
+        {investmentRows.map((r) => (
+          <DashboardRow
+            key={r.path}
+            label={r.label}
+            path={r.path}
+            extracted={r.value}
+            override={overrides[r.path]}
+            onSave={onSet}
+          />
+        ))}
+      </DashboardPanel>
+
+      {own.length > 0 && (
+        <DashboardPanel title={`Ownership chain · ${own.length}`}>
+          <ul className="divide-y divide-rule">
+            {own.map((o, i) => (
+              <li key={i} className="py-2 grid grid-cols-[1fr_auto_auto] gap-4 items-baseline">
+                <div className="font-display text-[0.95rem]">
+                  {readFieldValue(o.owner_name) ?? '(unnamed)'}
+                </div>
+                <div className="font-mono text-[0.78rem] text-graphite">
+                  {readFieldValue(o.nationality) ?? '—'}
+                </div>
+                <div className="font-mono text-[0.85rem] text-ink-2">
+                  {readFieldValue(o.ownership_percent) ?? '—'}%
+                </div>
+              </li>
+            ))}
+          </ul>
+        </DashboardPanel>
+      )}
+
+      {sof.length > 0 && (
+        <DashboardPanel title={`Source of funds · ${sof.length} chain${sof.length === 1 ? '' : 's'}`}>
+          <ul className="space-y-3">
+            {sof.map((s, i) => (
+              <li key={i} className="border-l-2 border-rule pl-3">
+                <div className="font-display text-[0.95rem]">
+                  {readFieldValue(s.origin_category) ?? '(category unknown)'}
+                  {readFieldValue(s.origin_amount_usd) && (
+                    <span className="font-mono text-[0.78rem] text-graphite ml-2">
+                      · ${readFieldValue(s.origin_amount_usd)}
+                    </span>
+                  )}
+                </div>
+                {readFieldValue(s.origin_evidence) && (
+                  <div className="font-mono text-[0.75rem] text-graphite-soft mt-0.5">
+                    {readFieldValue(s.origin_evidence)}
+                  </div>
+                )}
+                {readFieldValue(s.notes) && (
+                  <div className="font-display italic text-[0.82rem] text-ink-2 mt-1">
+                    {readFieldValue(s.notes)}
+                  </div>
+                )}
+              </li>
+            ))}
+          </ul>
+        </DashboardPanel>
+      )}
+
+      {criticalConflicts.length > 0 && (
+        <DashboardPanel title={`Conflicts · ${criticalConflicts.length} flagged for attorney`}>
+          <ul className="space-y-2">
+            {criticalConflicts.map((c, i) => (
+              <li key={i} className="flex items-baseline gap-3">
+                <span className="font-mono text-[0.62rem] text-rubric tracking-widest shrink-0">
+                  sev {readFieldValue(c.severity)}
+                </span>
+                <span className="font-display text-[0.88rem] text-ink-2">
+                  {readFieldValue(c.description) ?? '(no description)'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </DashboardPanel>
+      )}
+    </section>
+  );
+}
+
+function SectionTitle({ marker, label }: { marker: string; label: string }) {
+  return (
+    <div className="flex items-baseline gap-3 mb-5">
+      <span className="font-display italic text-[1.1rem] text-rubric">{marker}</span>
+      <span className="smcp text-[0.78rem] text-graphite tracking-[0.2em]">
+        {label}
+      </span>
+      <div className="flex-1 border-b border-rule mb-1.5" />
+    </div>
+  );
+}
+
+function DashboardPanel({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="paper-recess border border-rule px-7 py-5">
+      <div className="smcp text-[0.7rem] text-rubric tracking-widest mb-3 pb-2 border-b border-rule">
+        {title}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function DashboardRow({
+  label,
+  path,
+  extracted,
+  override,
+  onSave,
+}: {
+  label: string;
+  path: string;
+  extracted: string | null;
+  override: string | undefined;
+  onSave: (path: string, value: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const display = override ?? extracted;
+  const overridden = override !== undefined;
+
+  return (
+    <div className="grid grid-cols-[10rem_1fr_auto] gap-4 items-baseline py-1.5">
+      <div className="font-mono text-[0.7rem] text-graphite tracking-wide uppercase">
+        {label}
+      </div>
+      {editing ? (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              onSave(path, draft);
+              setEditing(false);
+            } else if (e.key === 'Escape') {
+              setEditing(false);
+            }
+          }}
+          className="font-display text-[0.95rem] bg-transparent border-b border-rubric outline-none pb-0.5"
+        />
+      ) : (
+        <div className="font-display text-[0.95rem] text-ink-2 break-words">
+          {display ?? <span className="italic text-graphite-soft">not extracted</span>}
+          {overridden && (
+            <span className="ml-2 font-mono text-[0.6rem] text-ochre tracking-widest">
+              edited
+            </span>
+          )}
+        </div>
+      )}
+      {editing ? (
+        <button
+          onClick={() => {
+            onSave(path, draft);
+            setEditing(false);
+          }}
+          className="font-mono text-[0.62rem] text-rubric tracking-widest smcp hover:text-ink"
+        >
+          save
+        </button>
+      ) : (
+        <button
+          onClick={() => {
+            setDraft(display ?? '');
+            setEditing(true);
+          }}
+          className="font-mono text-[0.62rem] text-graphite hover:text-rubric tracking-widest smcp"
+        >
+          ✎
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Documents accordion — categories + per-doc inline expand                */
+/* ---------------------------------------------------------------------- */
+
+function MatterDocumentsSection({
+  buckets,
+  matterRoot,
+  selectedEntryKey,
+  onSelectEntry,
+  entryLabels,
+  onSetLabel,
+}: {
+  buckets: [DocType, PerPdfMemoryEntry[]][];
+  matterRoot: string | null;
+  selectedEntryKey: string | null;
+  onSelectEntry: (key: string | null) => void;
+  entryLabels: Record<string, string>;
+  onSetLabel: (key: string, label: string) => void;
+}) {
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {};
+    for (const [t] of buckets) init[t] = false;
+    return init;
+  });
+
+  return (
+    <section>
+      <SectionTitle marker="⁂" label="documents · click to preview" />
+      <div className="space-y-5">
+        {buckets.map(([docType, entries]) => {
+          const isCollapsed = !!collapsed[docType];
+          return (
+            <div key={docType} className="border border-rule paper-recess">
+              <button
+                onClick={() =>
+                  setCollapsed((s) => ({ ...s, [docType]: !s[docType] }))
+                }
+                className="w-full flex items-baseline justify-between px-5 py-3 group hover:bg-paper-2/50 transition-colors text-left"
+              >
+                <div className="flex items-baseline gap-3">
+                  <span
+                    className="font-mono text-[0.78rem] text-graphite-soft transition-transform group-hover:text-rubric"
+                    style={{
+                      display: 'inline-block',
+                      transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+                      transformOrigin: '50% 55%',
+                      width: '0.8rem',
+                    }}
+                  >
+                    ▶
+                  </span>
+                  <span className="font-display text-[1.05rem] group-hover:text-rubric transition-colors">
+                    {DOC_TYPE_LABEL[docType]}
+                  </span>
+                  <span className="font-mono text-[0.65rem] text-graphite tracking-widest">
+                    {entries.length}
+                  </span>
+                </div>
+                <span className="font-mono text-[0.6rem] text-graphite-soft tracking-widest">
+                  {docType}
+                </span>
+              </button>
+              {!isCollapsed && (
+                <ul className="border-t border-rule">
+                  {entries.map((e) => {
+                    const key = entryKey(docType, e.filename);
+                    const expanded = selectedEntryKey === key;
+                    const label = entryLabels[key] ?? getSuggestedDocLabel(e);
+                    return (
+                      <li key={key} className="border-b border-rule last:border-b-0">
+                        <button
+                          onClick={() => onSelectEntry(expanded ? null : key)}
+                          className={
+                            'w-full text-left flex items-baseline gap-3 px-5 py-2.5 transition-colors group ' +
+                            (expanded
+                              ? 'bg-paper-2/40'
+                              : 'hover:bg-paper-2/30')
+                          }
+                        >
+                          <span
+                            className="font-mono text-[0.62rem] text-graphite-soft shrink-0"
+                            style={{
+                              display: 'inline-block',
+                              transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                              transformOrigin: '50% 55%',
+                              width: '0.7rem',
+                            }}
+                          >
+                            ▶
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <div
+                              className={
+                                'font-display text-[0.92rem] truncate ' +
+                                (expanded ? 'text-rubric' : 'text-ink-2 group-hover:text-rubric')
+                              }
+                              title={label}
+                            >
+                              {label}
+                            </div>
+                            <div
+                              className="font-mono text-[0.62rem] text-graphite-soft truncate"
+                              title={e.filename}
+                            >
+                              {basenameOf(e.filename)}
+                            </div>
+                          </div>
+                          {e.error && (
+                            <span className="shrink-0 font-mono text-[0.6rem] text-rubric tracking-widest">
+                              error
+                            </span>
+                          )}
+                        </button>
+                        {expanded && (
+                          <DocumentInlinePreview
+                            entry={e}
+                            entryKeyValue={key}
+                            docType={docType}
+                            matterRoot={matterRoot}
+                            label={label}
+                            onSetLabel={onSetLabel}
+                            overridden={entryLabels[key] !== undefined}
+                          />
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function DocumentInlinePreview({
+  entry,
+  entryKeyValue,
+  docType,
+  matterRoot,
+  label,
+  onSetLabel,
+  overridden,
+}: {
+  entry: PerPdfMemoryEntry;
+  entryKeyValue: string;
+  docType: DocType;
+  matterRoot: string | null;
+  label: string;
+  onSetLabel: (key: string, value: string) => void;
+  overridden: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const absPath = matterRoot
+    ? `${matterRoot}${matterRoot.endsWith('/') ? '' : '/'}${entry.filename}`
+    : null;
+  const pdfSrc = absPath
+    ? `/api/file?path=${encodeURIComponent(absPath)}`
+    : null;
+
+  return (
+    <div className="px-5 py-5 border-t border-rule space-y-5 bg-paper">
+      <div>
+        {editing ? (
+          <div className="flex items-baseline gap-3">
+            <input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  if (draft.trim()) onSetLabel(entryKeyValue, draft.trim());
+                  setEditing(false);
+                } else if (e.key === 'Escape') {
+                  setEditing(false);
+                }
+              }}
+              className="flex-1 font-display italic text-[1.25rem] bg-transparent border-b border-rubric outline-none pb-1"
+            />
+            <button
+              onClick={() => {
+                if (draft.trim()) onSetLabel(entryKeyValue, draft.trim());
+                setEditing(false);
+              }}
+              className="font-mono text-[0.62rem] text-rubric tracking-widest smcp hover:text-ink"
+            >
+              save
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-baseline justify-between gap-3">
+            <h3 className="font-display italic text-[1.25rem] leading-tight">
+              {label}
+            </h3>
+            <button
+              onClick={() => {
+                setDraft(label);
+                setEditing(true);
+              }}
+              className="shrink-0 font-mono text-[0.62rem] text-graphite hover:text-rubric tracking-widest smcp"
+            >
+              ✎ rename
+            </button>
+          </div>
+        )}
+        <div className="mt-1 font-mono text-[0.65rem] text-graphite-soft truncate" title={entry.filename}>
+          {DOC_TYPE_LABEL[docType]} · {entry.filename}
+          {!overridden && (
+            <span className="ml-2 text-rule-strong">(auto-named)</span>
+          )}
+        </div>
+      </div>
+
+      {pdfSrc ? (
+        <div className="border border-rule paper-recess">
+          <iframe
+            src={pdfSrc}
+            title={label}
+            className="w-full"
+            style={{ height: '60vh', border: 0 }}
+          />
+        </div>
+      ) : (
+        <div className="border border-rule paper-recess px-5 py-12 text-center font-display italic text-graphite">
+          PDF preview unavailable — matter root not set.
+        </div>
+      )}
+
+      <div>
+        <div className="smcp text-[0.62rem] text-graphite-soft tracking-widest mb-2">
+          ⁂  facts
+        </div>
+        {entry.error ? (
+          <div className="font-mono text-[0.78rem] text-rubric">
+            error · {entry.error.code}: {entry.error.message}
+          </div>
+        ) : entry.facts ? (
+          <MemoryFactsList facts={entry.facts} />
+        ) : (
+          <div className="font-display italic text-[0.85rem] text-graphite-soft">
+            No facts extracted.
+          </div>
+        )}
       </div>
     </div>
   );

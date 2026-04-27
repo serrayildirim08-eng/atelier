@@ -235,7 +235,7 @@ export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResul
   const userMessage = `Draft the cover letter using the extracted facts below. Each value carries source_page (page in the client document), source_quote (verbatim phrase), and confidence (0–1).\n\n\`\`\`json\n${factsJson}\n\`\`\``;
 
   const response = await getAnthropic().messages.create({
-    model: 'claude-opus-4-7',
+    model: 'claude-sonnet-4-6',
     max_tokens: 16000,
     thinking: { type: 'adaptive' },
     output_config: { effort: 'high' },
@@ -258,7 +258,7 @@ export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResul
 
   logAnthropicUsage({
     stage: 'draft',
-    model: 'claude-opus-4-7',
+    model: 'claude-sonnet-4-6',
     case_type: caseFacts.case_type,
     usage: response.usage,
   });

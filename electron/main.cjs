@@ -4,7 +4,7 @@
  * Dev:   loads http://localhost:3000 (run `next dev` separately or via npm script).
  * Prod:  spawns the Next.js standalone server on a free port and loads that.
  */
-const { app, BrowserWindow, Menu, shell } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog } = require('electron');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const net = require('node:net');
@@ -131,6 +131,15 @@ function buildMenu() {
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
+
+ipcMain.handle('dialog:pickFolder', async () => {
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
+    title: 'Choose a folder of PDFs',
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+});
 
 app.whenReady().then(async () => {
   buildMenu();
