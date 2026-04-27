@@ -1,0 +1,18 @@
+{
+  "_doc": "I-129 E-1/E-2 Classification Supplement — starter field map for the E-2 Treaty Investor variant. Field names calibrated to the 11/15/2024 edition; verify against app/forms/blank/i-129e.pdf when present.",
+  "_data_root": "Expects $.facts (E2Facts).",
+
+  "Pt1_TreatyCountry[0]": "$.facts.investor.nationality",
+  "Pt1_NationalityOfApplicant[0]": "$.facts.investor.nationality",
+  "Pt1_PrincipalEmployerOrInvestor_Name[0]": "$.facts.enterprise.legal_name",
+  "Pt1_BusinessType[0]": "$.facts.enterprise.industry",
+
+  "Pt2Line1_NatureOfBusiness[0]": "$.facts.enterprise.industry",
+  "Pt2Line2_DateBusinessEstablished[0]": "$.facts.enterprise.formation_date",
+  "Pt2Line3_TotalInvestmentAmount[0]": "$.facts.investment.total_committed_usd",
+  "Pt2Line4_TotalCostOfEnterprise[0]": "$.facts.investment.total_cost_of_enterprise_usd",
+  "Pt2Line5_ProportionalityPercent[0]": "$.facts.investment.proportionality_percent",
+
+  "Pt3Line1_PercentOfOwnershipByApplicant[0]": "$.facts.investment.investor_ownership_percent",
+  "Pt3Line2_PositionOrTitle[0]": "$.facts.investment.role_title"
+}

@@ -1,0 +1,26 @@
+{
+  "_doc": "G-28 Notice of Entry of Appearance as Attorney — starter field map. Field names calibrated to the 09/17/2024 edition; verify against app/forms/blank/g-28.pdf when present. Attorney info expected under $.context.attorney; client info under $.facts.investor and $.facts.enterprise.",
+
+  "Pt1Line1a_FamilyName[0]": "$.context.attorney.family_name",
+  "Pt1Line1b_GivenName[0]": "$.context.attorney.given_name",
+  "Pt1Line1c_MiddleName[0]": "$.context.attorney.middle_name",
+  "Pt1Line2_LawFirm[0]": "$.context.attorney.firm_name",
+  "Pt1Line3a_StreetAddress[0]": "$.context.attorney.street_address",
+  "Pt1Line3b_City[0]": "$.context.attorney.city",
+  "Pt1Line3c_State[0]": "$.context.attorney.state",
+  "Pt1Line3d_ZipCode[0]": "$.context.attorney.zip_code",
+  "Pt1Line4_Email[0]": "$.context.attorney.email",
+  "Pt1Line5_PhoneNumber[0]": "$.context.attorney.phone",
+  "Pt1Line6_FaxNumber[0]": "$.context.attorney.fax",
+  "Pt1Line7_StateBarNumber[0]": "$.context.attorney.state_bar_number",
+  "Pt1Line8_StateOfHighestCourt[0]": "$.context.attorney.state_of_highest_court",
+
+  "Pt2Line1a_ClientFamilyName[0]": "$.facts.investor.full_name",
+  "Pt2Line2a_ClientCompanyName[0]": "$.facts.enterprise.legal_name",
+  "Pt2Line3_ClientDateOfBirth[0]": "$.facts.investor.dob",
+  "Pt2Line4_ClientAlienRegistrationNumber[0]": "$.facts.investor.a_number",
+  "Pt2Line5_ClientUSCISOnlineAccountNumber[0]": "$.facts.investor.uscis_online_account_number",
+
+  "Pt3Line1_FormName[0]": "$.context.form_name_of_record",
+  "Pt3Line2_ReceiptNumber[0]": "$.context.uscis_receipt_number"
+}

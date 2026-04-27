@@ -1,0 +1,25 @@
+{
+  "_doc": "I-129 Petition for a Nonimmigrant Worker — starter field map. AcroField names are calibrated to the USCIS edition published 2024-04-01; verify against app/forms/blank/i-129.pdf when present and extend per the live field set. Pt1 = Petitioner, Pt2 = Beneficiary, Pt3 = Beneficiary Information, Pt4 = Processing.",
+  "_data_root": "Expects $.facts (E2Facts) at the root of the data passed to fillForm. Forms-filler unwraps Field<T> wrappers automatically.",
+
+  "Pt1Line1a_FamilyName[0]": "$.facts.enterprise.legal_name",
+  "Pt1Line2_DBAName[0]": "$.facts.enterprise.legal_name",
+  "Pt1Line3_USAddress_StreetNumberName[0]": "$.facts.enterprise.physical_address",
+  "Pt1Line5_FederalEmployerIdentificationNumber[0]": "$.facts.enterprise.ein",
+  "Pt1Line8_TypeOfBusiness[0]": "$.facts.enterprise.industry",
+  "Pt1Line9_YearEstablished[0]": "$.facts.enterprise.formation_date",
+  "Pt1Line10_CurrentNumberOfEmployees[0]": "$.facts.enterprise.current_employee_count",
+
+  "Pt3Line1a_FamilyName[0]": "$.facts.investor.full_name",
+  "Pt3Line3_DateOfBirth[0]": "$.facts.investor.dob",
+  "Pt3Line4_CountryOfBirth[0]": "$.facts.investor.place_of_birth",
+  "Pt3Line5_CountryOfCitizenship[0]": "$.facts.investor.nationality",
+  "Pt3Line8_PassportNumber[0]": "$.facts.investor.passport_number",
+  "Pt3Line9_PassportExpirationDate[0]": "$.facts.investor.passport_expiry",
+  "Pt3Line10_AlienRegistrationNumber[0]": "$.facts.investor.a_number",
+
+  "Pt4Line1_RequestedAction[0]": "$.context.requested_action",
+  "Pt4Line2_RequestedClassification[0]": "$.context.requested_classification",
+  "Pt4Line3_RequestedFromDate[0]": "$.context.requested_from_date",
+  "Pt4Line4_RequestedToDate[0]": "$.context.requested_to_date"
+}
