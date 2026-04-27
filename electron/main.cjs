@@ -4,13 +4,15 @@
  * Dev:   loads http://localhost:3000 (run `next dev` separately or via npm script).
  * Prod:  spawns the Next.js standalone server on a free port and loads that.
  */
-const { app, BrowserWindow, Menu, shell, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, Menu, shell, ipcMain, dialog, nativeImage } = require('electron');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const net = require('node:net');
 const http = require('node:http');
 
 const isDev = !app.isPackaged;
+
+const APP_ICON_PATH = path.join(__dirname, '..', 'build', 'icon.png');
 
 let mainWindow = null;
 let nextServerProcess = null;
@@ -84,6 +86,7 @@ function createWindow(targetUrl) {
     backgroundColor: '#F1E9D6',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     title: 'AKALAN Atelier',
+    icon: APP_ICON_PATH,
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -143,6 +146,17 @@ ipcMain.handle('dialog:pickFolder', async () => {
 
 app.whenReady().then(async () => {
   buildMenu();
+  // macOS dock icon — BrowserWindow#icon is a no-op on darwin in dev mode;
+  // the dock reflects the app bundle's icon when packaged but falls back
+  // to Electron's default during `electron .`. Calling app.dock.setIcon
+  // overrides that so the dev session shows the atelier mark too.
+  if (process.platform === 'darwin' && app.dock) {
+    try {
+      app.dock.setIcon(nativeImage.createFromPath(APP_ICON_PATH));
+    } catch (e) {
+      console.warn('Could not set dock icon:', e.message);
+    }
+  }
   try {
     const url = isDev ? 'http://localhost:3000' : await startNextServer();
     createWindow(url);

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" fill="#FAFAFA"/>
+  <rect x="32" y="32" width="960" height="960" fill="none" stroke="#0A0A0A" stroke-width="6"/>
+  <text
+    x="560"
+    y="660"
+    text-anchor="middle"
+    font-family="'Courier New', Courier, monospace"
+    font-style="normal"
+    font-weight="700"
+    font-size="600"
+    letter-spacing="-90"
+    fill="#0A0A0A"
+  >a.</text>
+</svg>
