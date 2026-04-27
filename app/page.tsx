@@ -3,30 +3,33 @@
 import { useCallback, useState } from 'react';
 import type { DragEvent, ChangeEvent } from 'react';
 import type { ReviewReport } from '@/reason';
+import type { CaseType } from '@/ingest';
 
-interface FieldProvenance<T> {
-  value: T | null;
+interface FieldProvenance {
+  value: unknown;
   source_page: number | null;
   source_quote: string | null;
   confidence: number | null;
 }
 
-interface E2FactsLike {
-  applicant_name: FieldProvenance<string>;
-  dob: FieldProvenance<string>;
-  passport_number: FieldProvenance<string>;
-  country: FieldProvenance<string>;
-  business_name: FieldProvenance<string>;
-  ein: FieldProvenance<string>;
-  investment_amount: FieldProvenance<number>;
-  dates: FieldProvenance<string>[];
-  addresses: FieldProvenance<string>[];
+function isFieldLeaf(v: unknown): v is FieldProvenance {
+  if (!v || typeof v !== 'object') return false;
+  const o = v as Record<string, unknown>;
+  return (
+    'value' in o &&
+    'source_page' in o &&
+    'source_quote' in o &&
+    'confidence' in o
+  );
 }
 
 interface IngestResult {
   filename: string;
   pageCount: number;
-  facts?: E2FactsLike;
+  case_type?: CaseType;
+  detection_confidence?: number;
+  detection_reasoning?: string;
+  facts?: Record<string, unknown>;
   draft?: string;
   draftError?: { code: string; message: string };
   review?: ReviewReport;
@@ -44,10 +47,8 @@ async function collectFilesFromItems(items: DataTransferItemList): Promise<File[
     file?: (cb: (file: File) => void) => void;
     createReader?: () => { readEntries: (cb: (entries: Entry[]) => void) => void };
   };
-
   const readDir = (reader: { readEntries: (cb: (entries: Entry[]) => void) => void }) =>
     new Promise<Entry[]>((resolve) => reader.readEntries(resolve));
-
   const traverse = async (entry: Entry | null): Promise<void> => {
     if (!entry) return;
     if (entry.isFile && entry.file) {
@@ -68,7 +69,6 @@ async function collectFilesFromItems(items: DataTransferItemList): Promise<File[
       }
     }
   };
-
   const work: Promise<void>[] = [];
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
@@ -158,8 +158,9 @@ export default function Page() {
     <main className="min-h-screen p-8 max-w-5xl mx-auto">
       <h1 className="text-2xl font-semibold mb-1">AKALAN Portal — Ingest</h1>
       <p className="text-sm text-gray-600 mb-6">
-        Drop a PDF (or a folder of PDFs) to extract E2 facts. Each value carries page, source
-        quote, and confidence.
+        Drop a PDF (or a folder of PDFs). The system detects case type (E-2 / EB-1A / EB-1B /
+        EB-1C), extracts facts with provenance, drafts a cover letter, and reviews it for RFE
+        risk.
       </p>
 
       <div
@@ -176,7 +177,7 @@ export default function Page() {
       >
         <p className="text-gray-700 mb-4">
           {loading
-            ? 'Working… extracting facts → drafting letter → reviewing (1–3 min per file)'
+            ? 'Working… detecting case type → extracting facts → drafting → reviewing (2–4 min per file)'
             : dragActive
               ? 'Release to upload'
               : 'Drag PDFs or a folder here'}
@@ -212,6 +213,20 @@ export default function Page() {
   );
 }
 
+const CASE_TYPE_LABEL: Record<CaseType, string> = {
+  E2: 'E-2 Treaty Investor',
+  EB1A: 'EB-1A Extraordinary Ability',
+  EB1B: 'EB-1B Outstanding Researcher',
+  EB1C: 'EB-1C Multinational Manager/Executive',
+};
+
+const CASE_TYPE_STYLE: Record<CaseType, string> = {
+  E2: 'bg-indigo-100 text-indigo-800 border-indigo-200',
+  EB1A: 'bg-purple-100 text-purple-800 border-purple-200',
+  EB1B: 'bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200',
+  EB1C: 'bg-rose-100 text-rose-800 border-rose-200',
+};
+
 function ResultCard({ result }: { result: IngestResult }) {
   if (result.error) {
     return (
@@ -223,61 +238,231 @@ function ResultCard({ result }: { result: IngestResult }) {
       </div>
     );
   }
-  if (!result.facts) return null;
-  const facts = result.facts;
-  type Row = { label: string; field: FieldProvenance<string | number> };
-  const rows: Row[] = [
-    { label: 'applicant_name', field: facts.applicant_name },
-    { label: 'dob', field: facts.dob },
-    { label: 'passport_number', field: facts.passport_number },
-    { label: 'country', field: facts.country },
-    { label: 'business_name', field: facts.business_name },
-    { label: 'ein', field: facts.ein },
-    { label: 'investment_amount', field: facts.investment_amount },
-  ];
+  if (!result.facts || !result.case_type) return null;
 
   return (
     <div className="border rounded p-4 bg-white">
-      <div className="font-medium mb-3">
-        {result.filename}{' '}
-        <span className="text-xs text-gray-500">({result.pageCount} pages)</span>
+      <div className="flex items-start justify-between mb-3 gap-3">
+        <div>
+          <div className="font-medium">
+            {result.filename}{' '}
+            <span className="text-xs text-gray-500">({result.pageCount} pages)</span>
+          </div>
+          {result.detection_reasoning && (
+            <div className="text-xs text-gray-500 mt-1 italic">
+              Detection: {result.detection_reasoning}
+            </div>
+          )}
+        </div>
+        <span
+          className={
+            'shrink-0 inline-block text-xs px-2 py-1 rounded border font-medium ' +
+            CASE_TYPE_STYLE[result.case_type]
+          }
+        >
+          {CASE_TYPE_LABEL[result.case_type]}
+          {typeof result.detection_confidence === 'number' && (
+            <span className="ml-2 font-normal text-[10px] opacity-75">
+              {result.detection_confidence.toFixed(2)}
+            </span>
+          )}
+        </span>
       </div>
-      <table className="w-full text-sm">
-        <thead className="text-left text-gray-500 text-xs uppercase">
-          <tr>
-            <th className="py-1 pr-4 font-normal">Field</th>
-            <th className="py-1 pr-4 font-normal">Value</th>
-            <th className="py-1 pr-4 font-normal">Page</th>
-            <th className="py-1 pr-4 font-normal">Conf.</th>
-            <th className="py-1 font-normal">Source quote</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <FieldRow key={row.label} label={row.label} field={row.field} />
-          ))}
-          {facts.dates.map((f, i) => (
-            <FieldRow key={`dates-${i}`} label={i === 0 ? 'dates' : ''} field={f} />
-          ))}
-          {facts.addresses.map((f, i) => (
-            <FieldRow key={`addresses-${i}`} label={i === 0 ? 'addresses' : ''} field={f} />
-          ))}
-        </tbody>
-      </table>
+
+      <FactsViewer facts={result.facts} />
+
       <DraftSection result={result} />
       <ReviewSection result={result} />
     </div>
   );
 }
 
-const ELEMENT_LABEL: Record<string, string> = {
-  treaty_country: 'Treaty country',
-  substantial_investment: 'Substantial investment',
-  real_and_operating: 'Real & operating',
-  more_than_marginal: 'More than marginal',
-  develop_and_direct: 'Develop & direct',
-  general: 'General',
-};
+/* ---------------------------------------------------------------------- */
+/* Facts viewer — recursive renderer for Field<T> + nested objects         */
+/* ---------------------------------------------------------------------- */
+
+function FactsViewer({ facts }: { facts: Record<string, unknown> }) {
+  return (
+    <div className="space-y-4">
+      {Object.entries(facts).map(([key, value]) => (
+        <FactSection key={key} label={key} value={value} />
+      ))}
+    </div>
+  );
+}
+
+function FactSection({ label, value }: { label: string; value: unknown }) {
+  if (isFieldLeaf(value)) {
+    return (
+      <div>
+        <div className="text-xs font-medium uppercase text-gray-500 mb-1">{label}</div>
+        <FactRow field={value} />
+      </div>
+    );
+  }
+  if (Array.isArray(value)) {
+    return (
+      <div>
+        <div className="text-xs font-medium uppercase text-gray-500 mb-1">
+          {label} <span className="text-gray-400">({value.length})</span>
+        </div>
+        {value.length === 0 ? (
+          <div className="text-xs text-gray-400 italic">empty</div>
+        ) : (
+          <div className="space-y-1">
+            {value.map((item, i) => (
+              <ArrayItem key={i} index={i} item={item} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (value && typeof value === 'object') {
+    return (
+      <div>
+        <div className="text-xs font-medium uppercase text-gray-500 mb-1">{label}</div>
+        <table className="w-full text-sm border rounded">
+          <tbody>
+            {Object.entries(value as Record<string, unknown>).map(([k, v]) => (
+              <FactSubRow key={k} label={k} value={v} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <span className="text-xs text-gray-500">{label}:</span>{' '}
+      <span className="text-sm">{String(value)}</span>
+    </div>
+  );
+}
+
+function FactSubRow({ label, value }: { label: string; value: unknown }) {
+  if (isFieldLeaf(value)) {
+    const f = value;
+    return (
+      <tr className="border-t first:border-t-0">
+        <td className="py-1 px-2 text-xs text-gray-600 align-top w-48">{label}</td>
+        <td className="py-1 px-2 align-top">
+          <FactRowInline field={f} />
+        </td>
+      </tr>
+    );
+  }
+  if (Array.isArray(value)) {
+    return (
+      <tr className="border-t first:border-t-0">
+        <td className="py-1 px-2 text-xs text-gray-600 align-top w-48">{label}</td>
+        <td className="py-1 px-2 align-top">
+          <div className="space-y-1">
+            {value.map((item, i) => (
+              <ArrayItem key={i} index={i} item={item} compact />
+            ))}
+          </div>
+        </td>
+      </tr>
+    );
+  }
+  if (value && typeof value === 'object') {
+    return (
+      <tr className="border-t first:border-t-0">
+        <td className="py-1 px-2 text-xs text-gray-600 align-top w-48">{label}</td>
+        <td className="py-1 px-2 align-top">
+          <table className="w-full text-xs">
+            <tbody>
+              {Object.entries(value as Record<string, unknown>).map(([k, v]) => (
+                <FactSubRow key={k} label={k} value={v} />
+              ))}
+            </tbody>
+          </table>
+        </td>
+      </tr>
+    );
+  }
+  return (
+    <tr className="border-t first:border-t-0">
+      <td className="py-1 px-2 text-xs text-gray-600 align-top w-48">{label}</td>
+      <td className="py-1 px-2 text-sm align-top">{String(value)}</td>
+    </tr>
+  );
+}
+
+function ArrayItem({
+  index,
+  item,
+  compact,
+}: {
+  index: number;
+  item: unknown;
+  compact?: boolean;
+}) {
+  if (isFieldLeaf(item)) {
+    return (
+      <div className="border rounded px-2 py-1">
+        <FactRowInline field={item} prefix={`[${index}]`} />
+      </div>
+    );
+  }
+  if (item && typeof item === 'object') {
+    return (
+      <div className={compact ? 'border rounded' : 'border rounded'}>
+        <table className="w-full text-xs">
+          <tbody>
+            {Object.entries(item as Record<string, unknown>).map(([k, v]) => (
+              <FactSubRow key={k} label={k} value={v} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+  return (
+    <div className="text-sm">
+      [{index}] {String(item)}
+    </div>
+  );
+}
+
+function FactRow({ field }: { field: FieldProvenance }) {
+  return (
+    <div className="border rounded">
+      <FactRowInline field={field} />
+    </div>
+  );
+}
+
+function FactRowInline({
+  field,
+  prefix,
+}: {
+  field: FieldProvenance;
+  prefix?: string;
+}) {
+  return (
+    <div className="px-2 py-1 text-sm flex flex-wrap gap-x-3 gap-y-0.5 items-baseline">
+      {prefix && <span className="text-gray-400 text-xs">{prefix}</span>}
+      <span className="font-medium">
+        {field.value === null ? <span className="text-gray-400">—</span> : String(field.value)}
+      </span>
+      {field.source_page != null && (
+        <span className="text-xs text-gray-500">p. {field.source_page}</span>
+      )}
+      {field.confidence != null && (
+        <span className="text-xs text-gray-500">conf {field.confidence.toFixed(2)}</span>
+      )}
+      {field.source_quote && (
+        <span className="text-xs text-gray-600 italic">“{field.source_quote}”</span>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Draft + Review sections                                                 */
+/* ---------------------------------------------------------------------- */
 
 const ASSESSMENT_STYLE: Record<string, string> = {
   ready: 'bg-green-100 text-green-800 border-green-200',
@@ -340,7 +525,9 @@ function ReviewSection({ result }: { result: IngestResult }) {
           <div key={i} className="border rounded p-3 bg-white">
             <div className="flex items-center gap-2 mb-1">
               <SeverityBadge severity={f.severity} />
-              <span className="text-xs text-gray-500 uppercase">{f.category.replace('_', ' ')}</span>
+              <span className="text-xs text-gray-500 uppercase">
+                {f.category.replace('_', ' ')}
+              </span>
             </div>
             <div className="text-sm text-gray-800">{f.description}</div>
             {f.letter_excerpt && (
@@ -360,13 +547,11 @@ function ReviewSection({ result }: { result: IngestResult }) {
       <FindingGroup
         title="Missing arguments"
         count={r.missing_arguments.length}
-        emptyText="All five elements appear to be argued."
+        emptyText="All required elements/criteria appear to be argued."
       >
         {r.missing_arguments.map((f, i) => (
           <div key={i} className="border rounded p-3 bg-white">
-            <div className="text-xs text-gray-500 uppercase mb-1">
-              {ELEMENT_LABEL[f.element] ?? f.element}
-            </div>
+            <div className="text-xs text-gray-500 uppercase mb-1">{f.element}</div>
             <div className="text-sm text-gray-800 mb-1">{f.description}</div>
             <div className="text-xs text-gray-600 mb-1">
               <span className="font-medium">Missing:</span> {f.what_is_missing}
@@ -387,9 +572,7 @@ function ReviewSection({ result }: { result: IngestResult }) {
           <div key={i} className="border rounded p-3 bg-white">
             <div className="flex items-center gap-2 mb-1">
               <SeverityBadge severity={f.severity} />
-              <span className="text-xs text-gray-500 uppercase">
-                {ELEMENT_LABEL[f.element] ?? f.element}
-              </span>
+              <span className="text-xs text-gray-500 uppercase">{f.element}</span>
             </div>
             <div className="text-sm text-gray-800 mb-1">{f.description}</div>
             <div className="text-xs text-gray-600 mb-1">
@@ -468,33 +651,5 @@ function DraftSection({ result }: { result: IngestResult }) {
         {draft}
       </div>
     </div>
-  );
-}
-
-function FieldRow({
-  label,
-  field,
-}: {
-  label: string;
-  field: FieldProvenance<string | number>;
-}) {
-  return (
-    <tr className="border-t">
-      <td className="py-1 pr-4 align-top text-gray-600">{label}</td>
-      <td className="py-1 pr-4 align-top">
-        {field.value === null ? (
-          <span className="text-gray-400">—</span>
-        ) : (
-          String(field.value)
-        )}
-      </td>
-      <td className="py-1 pr-4 align-top">{field.source_page ?? ''}</td>
-      <td className="py-1 pr-4 align-top">
-        {field.confidence != null ? field.confidence.toFixed(2) : ''}
-      </td>
-      <td className="py-1 align-top text-gray-700 italic">
-        {field.source_quote ? `“${field.source_quote}”` : ''}
-      </td>
-    </tr>
   );
 }

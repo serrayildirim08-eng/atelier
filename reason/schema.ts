@@ -2,22 +2,15 @@ import { z } from 'zod';
 
 const SeverityEnum = z.enum(['critical', 'major', 'minor']);
 
-const ElementEnum = z.enum([
-  'treaty_country',
-  'substantial_investment',
-  'real_and_operating',
-  'more_than_marginal',
-  'develop_and_direct',
-]);
-
-const ElementOrGeneralEnum = z.enum([
-  'treaty_country',
-  'substantial_investment',
-  'real_and_operating',
-  'more_than_marginal',
-  'develop_and_direct',
-  'general',
-]);
+/**
+ * Element / criterion label is free-form because the labels differ by
+ * case type (E-2 has 5 statutory elements; EB-1A has 10 regulatory
+ * criteria + final merits; EB-1B has 6; EB-1C has qualifying-relationship
+ * etc.). The reviewer prompt instructs the model to use stable per-case
+ * labels (e.g. "e2_treaty_country", "eb1a_3_published_material_about",
+ * "eb1c_qualifying_relationship", or "general").
+ */
+const ElementLabel = z.string();
 
 const InconsistencySchema = z.object({
   severity: SeverityEnum,
@@ -28,7 +21,7 @@ const InconsistencySchema = z.object({
 });
 
 const MissingArgumentSchema = z.object({
-  element: ElementEnum,
+  element: ElementLabel,
   description: z.string(),
   what_is_missing: z.string(),
   suggestion: z.string(),
@@ -36,7 +29,7 @@ const MissingArgumentSchema = z.object({
 
 const WeakSpotSchema = z.object({
   severity: SeverityEnum,
-  element: ElementOrGeneralEnum,
+  element: ElementLabel,
   description: z.string(),
   rfe_risk: z.string(),
   suggestion: z.string(),

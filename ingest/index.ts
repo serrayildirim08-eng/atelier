@@ -1,19 +1,30 @@
 import { extractPdfText } from './pdf';
-import { extractFactsWithClaude } from './claude';
-import type { E2Facts } from './schema';
+import { extractFactsByCaseType } from './claude';
+import { detectCaseType } from './detect';
+import type { CaseFacts, CaseType, E2Facts, EB1AFacts, EB1BFacts, EB1CFacts } from './schema';
 import type { ReviewReport } from '@/reason';
 
-export type { E2Facts } from './schema';
+export type {
+  CaseType,
+  CaseFacts,
+  E2Facts,
+  EB1AFacts,
+  EB1BFacts,
+  EB1CFacts,
+} from './schema';
 
-export interface IngestSuccess {
+type CommonIngestFields = {
   filename: string;
   pageCount: number;
-  facts: E2Facts;
+  detection_confidence: number;
+  detection_reasoning: string;
   draft?: string;
   draftError?: { code: string; message: string };
   review?: ReviewReport;
   reviewError?: { code: string; message: string };
-}
+};
+
+export type IngestSuccess = CommonIngestFields & CaseFacts;
 
 export interface IngestFailure {
   filename: string;
@@ -50,9 +61,34 @@ export async function ingestPdf(buffer: Buffer, filename: string): Promise<Inges
     };
   }
 
+  let caseType: CaseType;
+  let detectionConfidence: number;
+  let detectionReasoning: string;
   try {
-    const { facts } = await extractFactsWithClaude(pdf.text);
-    return { filename, pageCount: pdf.pageCount, facts };
+    const detection = await detectCaseType([{ filename, text: pdf.text }]);
+    caseType = detection.case_type;
+    detectionConfidence = detection.confidence;
+    detectionReasoning = detection.reasoning;
+  } catch (e: unknown) {
+    return {
+      filename,
+      pageCount: pdf.pageCount,
+      error: {
+        code: 'detection_failed',
+        message: e instanceof Error ? e.message : String(e),
+      },
+    };
+  }
+
+  try {
+    const { caseFacts } = await extractFactsByCaseType(caseType, pdf.text);
+    const common: CommonIngestFields = {
+      filename,
+      pageCount: pdf.pageCount,
+      detection_confidence: detectionConfidence,
+      detection_reasoning: detectionReasoning,
+    };
+    return { ...common, ...caseFacts };
   } catch (e: unknown) {
     return {
       filename,

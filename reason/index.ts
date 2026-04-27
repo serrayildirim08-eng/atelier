@@ -1,4 +1,4 @@
-export { checkE2Draft, type ReviewResult } from './checker';
+export { checkDraft, type ReviewResult } from './checker';
 export {
   ReviewReportSchema,
   type ReviewReport,
