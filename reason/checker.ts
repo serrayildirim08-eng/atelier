@@ -244,10 +244,13 @@ export async function checkDraft(
   // the user message, which is per-request anyway).
   const verifySection = verifyReport ? `\n\n${reportToReviewerPrompt(verifyReport)}` : '';
 
+  // No `thinking` here: the reviewer is structured-output-shaped
+  // (ReviewReportSchema enumerates the failure modes) and Phase B already
+  // catches the citation-allowlist class. Adaptive thinking was ~60-120 s
+  // TTFT and ~$0.10/case for no measured catch-rate gain.
   const response = await getAnthropic().messages.parse({
     model: 'claude-sonnet-4-6',
     max_tokens: 16000,
-    thinking: { type: 'adaptive' },
     output_config: {
       effort: 'high',
       format: REVIEW_FORMAT,
