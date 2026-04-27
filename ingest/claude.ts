@@ -1,5 +1,6 @@
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { getAnthropic } from '@/lib/anthropic';
+import { logAnthropicUsage } from '@/lib/usage-log';
 import {
   E2FactsSchema,
   EB1AFactsSchema,
@@ -239,6 +240,13 @@ export async function extractFactsByCaseType(
   if (!response.parsed_output) {
     throw new Error(`Extractor for ${case_type} did not match the schema`);
   }
+
+  logAnthropicUsage({
+    stage: 'extract',
+    model: 'claude-sonnet-4-6',
+    case_type,
+    usage: response.usage,
+  });
 
   const caseFacts = { case_type, facts: response.parsed_output } as CaseFacts;
   return {

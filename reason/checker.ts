@@ -1,5 +1,6 @@
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { getAnthropic } from '@/lib/anthropic';
+import { logAnthropicUsage } from '@/lib/usage-log';
 import type { CaseFacts, CaseType } from '@/ingest/schema';
 import { ReviewReportSchema, type ReviewReport } from './schema';
 
@@ -209,6 +210,13 @@ export async function checkDraft(
   if (!response.parsed_output) {
     throw new Error('Reviewer response did not match the review report schema');
   }
+
+  logAnthropicUsage({
+    stage: 'review',
+    model: 'claude-opus-4-7',
+    case_type: caseFacts.case_type,
+    usage: response.usage,
+  });
 
   return {
     report: response.parsed_output,

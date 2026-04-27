@@ -1,5 +1,6 @@
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { getAnthropic } from '@/lib/anthropic';
+import { logAnthropicUsage } from '@/lib/usage-log';
 import { DetectionSchema, type Detection } from './schema';
 
 const SYSTEM_PROMPT = `You are an immigration paralegal performing fast case-type triage on a client's case folder. Read the document samples and decide which one of four visa types the case is. Return a structured detection result.
@@ -176,5 +177,13 @@ export async function detectCaseType(samples: DetectionInput[]): Promise<Detecti
   if (!response.parsed_output) {
     throw new Error('Detector response did not match the detection schema');
   }
+
+  logAnthropicUsage({
+    stage: 'detect',
+    model: 'claude-haiku-4-5',
+    case_type: response.parsed_output.case_type,
+    usage: response.usage,
+  });
+
   return response.parsed_output;
 }

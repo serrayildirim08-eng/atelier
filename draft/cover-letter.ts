@@ -1,4 +1,5 @@
 import { getAnthropic } from '@/lib/anthropic';
+import { logAnthropicUsage } from '@/lib/usage-log';
 import type { CaseFacts, CaseType } from '@/ingest/schema';
 
 const SHARED_DRAFTING_RULES = `Drafting rules — strict (a real attorney will sign and file this; hallucinated citations or invented facts cost the firm sanctions):
@@ -225,6 +226,13 @@ export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResul
       letter += (letter ? '\n\n' : '') + block.text;
     }
   }
+
+  logAnthropicUsage({
+    stage: 'draft',
+    model: 'claude-opus-4-7',
+    case_type: caseFacts.case_type,
+    usage: response.usage,
+  });
 
   return {
     letter,

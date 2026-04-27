@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# usage telemetry (lib/usage-log.ts append-only JSONL)
+db/cost.jsonl
