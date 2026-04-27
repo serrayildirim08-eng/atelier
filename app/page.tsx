@@ -176,12 +176,62 @@ const ASSESSMENT_LABEL: Record<string, string> = {
   not_ready: 'Not ready',
 };
 
-const ASSESSMENT_TONE: Record<string, string> = {
-  ready: 'text-verdant',
-  minor_revisions: 'text-ochre',
-  major_revisions: 'text-rubric',
-  not_ready: 'text-rubric',
+/**
+ * Four-tier status pill styling. Hierarchy is carried by fill / border
+ * weight / type weight — no semantic color. NOT_READY is the visual
+ * anchor (full inverse jet); READY is the quietest (paper with a 20%
+ * jet hairline). Both compact (sidebar row) and full (overlay header)
+ * sizes share the same color/border vocabulary; only padding + font-
+ * size differ. See manual ASSESSMENT_LABEL for the human strings.
+ */
+const ASSESSMENT_PILL: Record<
+  string,
+  { container: string; text: string }
+> = {
+  not_ready: {
+    container: 'bg-ink text-paper border border-ink',
+    text: 'font-bold',
+  },
+  major_revisions: {
+    container: 'bg-paper text-ink border-[1.5px] border-ink',
+    text: 'font-bold',
+  },
+  minor_revisions: {
+    container: 'bg-paper text-ink border border-ink/45',
+    text: 'font-semibold',
+  },
+  ready: {
+    container: 'bg-paper text-graphite border border-ink/20',
+    text: 'font-medium',
+  },
 };
+
+function StatusPill({
+  assessment,
+  size = 'compact',
+}: {
+  assessment: string;
+  size?: 'compact' | 'full';
+}) {
+  const style = ASSESSMENT_PILL[assessment];
+  const label = ASSESSMENT_LABEL[assessment] ?? assessment;
+  if (!style) {
+    return (
+      <span className="smcp text-[0.6rem] text-graphite">{label}</span>
+    );
+  }
+  const sizing =
+    size === 'full'
+      ? 'px-3 py-1.5 text-[0.7rem] tracking-[0.22em]'
+      : 'px-2 py-0.5 text-[0.55rem] tracking-[0.18em]';
+  return (
+    <span
+      className={`inline-flex items-center font-mono uppercase ${sizing} ${style.container} ${style.text}`}
+    >
+      {label}
+    </span>
+  );
+}
 
 /* ---------------------------------------------------------------------- */
 /* Page — three-pane atelier layout                                        */
@@ -715,8 +765,8 @@ function BinderRow({
         )}
       </div>
       {assessment && (
-        <div className={`mt-1 smcp text-[0.6rem] ${ASSESSMENT_TONE[assessment]}`}>
-          † {ASSESSMENT_LABEL[assessment] ?? assessment}
+        <div className="mt-1.5">
+          <StatusPill assessment={assessment} size="compact" />
         </div>
       )}
     </button>
@@ -1245,14 +1295,9 @@ function DossierHeader({ result }: { result: IngestResult }) {
           </span>
         </h1>
         {assessment && (
-          <div
-            className={`text-right shrink-0 ${ASSESSMENT_TONE[assessment]}`}
-            title="Review assessment"
-          >
-            <div className="smcp text-[0.62rem] text-graphite">† assessment</div>
-            <div className="font-display italic text-[1.15rem] leading-tight">
-              {ASSESSMENT_LABEL[assessment] ?? assessment}
-            </div>
+          <div className="text-right shrink-0" title="Review assessment">
+            <div className="smcp text-[0.62rem] text-graphite mb-1.5">assessment</div>
+            <StatusPill assessment={assessment} size="full" />
           </div>
         )}
       </div>
