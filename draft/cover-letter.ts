@@ -225,12 +225,30 @@ const SYSTEM_PROMPTS: Record<CaseType, string> = {
   EB1C: EB1C_SYSTEM_PROMPT,
 };
 
+// Drafter model routing. Harvey BigLaw Bench (2026-04) puts Opus 4.7 at
+// 90.9% vs Sonnet 4.6 at 87.6% — the 3.3-point delta concentrates on
+// "complex multi-document analysis" and "ambiguous editing", which is
+// exactly the EB-1A Kazarian step-2 and EB-1B international-recognition
+// narrative work. E-2 and EB-1C are structurally rigid (fixed sections
+// pinned to a small authority allowlist) — Sonnet 4.6 + effort:high is at
+// the ceiling there. At 5-20 cases/month with ~2-4 EB-1 per month, the
+// added Opus cost is a few \$/month for measurably stronger drafts on the
+// highest-stakes case types.
+type DrafterModel = 'claude-opus-4-7' | 'claude-sonnet-4-6';
+const DRAFTER_MODEL: Record<CaseType, DrafterModel> = {
+  E2: 'claude-sonnet-4-6',
+  EB1A: 'claude-opus-4-7',
+  EB1B: 'claude-opus-4-7',
+  EB1C: 'claude-sonnet-4-6',
+};
+
 export interface DraftResult {
   letter: string;
   usage: { input_tokens: number; output_tokens: number };
 }
 
 export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResult> {
+  const model = DRAFTER_MODEL[caseFacts.case_type];
   // Facts JSON lives in the system array (not the user message) so it sits
   // on its own cache breakpoint. The byte-identical JSON.stringify(facts,
   // null, 2) shape is shared with reason/checker.ts so a within-call retry
@@ -243,7 +261,7 @@ export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResul
   const userMessage = `Draft the cover letter using the facts in the system context.`;
 
   const response = await getAnthropic().messages.create({
-    model: 'claude-sonnet-4-6',
+    model,
     max_tokens: 16000,
     thinking: { type: 'adaptive' },
     output_config: { effort: 'high' },
@@ -271,7 +289,7 @@ export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResul
 
   logAnthropicUsage({
     stage: 'draft',
-    model: 'claude-sonnet-4-6',
+    model,
     case_type: caseFacts.case_type,
     usage: response.usage,
   });
