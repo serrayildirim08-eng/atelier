@@ -10,6 +10,8 @@ import {
   type ApprovalResult,
 } from '@/app/components/pre-generation-approval';
 import type { PreviewGenerator } from '@/lib/preview-store';
+import { DOC_TYPE_TO_TAB } from '@/draft/exhibit-list';
+import type { Tab as ExhibitTabKey } from '@/draft/exhibit-list';
 import {
   LoadingProgress,
   type LoadingStreamEvent,
@@ -711,21 +713,21 @@ function Binder({
 }) {
   return (
     <aside className="border-r border-rule paper-grain min-h-0 flex flex-col">
-      <div className="px-5 pt-5 pb-3">
-        <div className="smcp text-[0.65rem] text-graphite-soft mb-1">⁂  my matters</div>
-        <div className="font-display text-[0.92rem] leading-tight">
+      <div className="px-5 pt-6 pb-4">
+        <div className="smcp text-graphite-soft mb-1">my matters</div>
+        <div className="text-title leading-tight">
           {results.length === 0
             ? 'No active matters.'
             : `${results.length} ${results.length === 1 ? 'matter' : 'matters'} on the desk`}
         </div>
       </div>
 
-      <div className="brass-rule mx-3" />
+      <div className="border-t border-rule" />
 
       <div className="flex-1 overflow-y-auto px-2 py-2 min-h-0">
         {loading && <BinderLoadingRow progress={progress} perPdfCount={perPdfCount} />}
         {!loading && results.length === 0 && (
-          <div className="px-3 py-6 text-[0.78rem] text-graphite italic font-display">
+          <div className="px-3 py-6 text-body text-graphite leading-relaxed">
             Drop a dossier into the dossier pane to begin.
           </div>
         )}
@@ -743,9 +745,9 @@ function Binder({
         {isElectron ? (
           <button
             onClick={onPickFolderElectron}
-            className="block text-center px-3 py-1.5 border border-ink-2 text-[0.78rem] cursor-pointer hover:bg-ink hover:text-paper transition-colors smcp"
+            className="block text-center px-3 py-2 border border-ink-2 cursor-pointer hover:bg-ink hover:text-paper transition-colors smcp"
           >
-            ※ create new matter
+            create new matter
           </button>
         ) : (
           <label className="block">
@@ -762,12 +764,12 @@ function Binder({
               className="hidden"
               onChange={onPickFolder}
             />
-            <span className="block text-center px-3 py-1.5 border border-ink-2 text-[0.78rem] cursor-pointer hover:bg-ink hover:text-paper transition-colors smcp">
-              ※ create new matter
+            <span className="block text-center px-3 py-2 border border-ink-2 cursor-pointer hover:bg-ink hover:text-paper transition-colors smcp">
+              create new matter
             </span>
           </label>
         )}
-        <div className="font-mono text-[0.62rem] text-graphite-soft text-center tracking-widest">
+        <div className="label-quiet text-graphite-soft text-center">
           {isElectron ? 'native picker · streamed from disk' : 'PDFs · case files · exhibits'}
         </div>
       </div>
@@ -785,29 +787,22 @@ function BinderLoadingRow({
   const showCount = perPdfCount.total > 0;
   return (
     <div className="px-3 py-3">
-      <div className="smcp text-[0.62rem] text-rubric mb-2">⁂  working</div>
+      <div className="smcp text-ink mb-2">working</div>
       {progress ? (
         <>
-          <div className="font-mono text-[0.62rem] text-graphite mb-1 tracking-widest uppercase">
-            {progress.stage}
-          </div>
-          <div className="font-display italic text-[0.85rem] text-ink-2 leading-tight">
-            {progress.label}
-          </div>
+          <div className="label-quiet text-graphite mb-1 uppercase">{progress.stage}</div>
+          <div className="text-body text-ink-2 leading-snug">{progress.label}</div>
           {showCount && progress.stage === 'classifying' && (
-            <div className="mt-2 font-mono text-[0.7rem] text-ink-2">
+            <div className="mt-2 font-mono text-meta text-ink-2 tabular-nums">
               {perPdfCount.done} / {perPdfCount.total}
             </div>
           )}
         </>
       ) : (
-        <div className="font-display italic text-[0.85rem] text-ink-2 leading-tight">
+        <div className="text-body text-ink-2 leading-snug">
           Detecting case type… extracting facts… drafting… reviewing.
         </div>
       )}
-      <div className="mt-2 font-mono text-[0.62rem] text-graphite tracking-widest">
-        TYPED MEMORY · PARALLEL HAIKU + SONNET AGGREGATOR
-      </div>
     </div>
   );
 }
@@ -836,21 +831,21 @@ function BinderRow({
       }
     >
       <div className="flex items-baseline justify-between gap-2 mb-0.5">
-        <div className="font-display text-[0.92rem] leading-tight truncate">
+        <div className="text-body leading-snug truncate">
           {trimFilename(result.filename)}
         </div>
         {caseType && (
-          <span className="font-mono text-[0.62rem] text-graphite shrink-0 tracking-wider">
+          <span className="font-mono text-meta text-graphite shrink-0">
             {CASE_GLYPH[caseType]}
           </span>
         )}
       </div>
-      <div className="flex items-center gap-2 text-[0.7rem] text-graphite-soft">
+      <div className="flex items-center gap-2 text-meta text-graphite-soft">
         {isError ? (
-          <span className="text-rubric smcp">error</span>
+          <span className="smcp text-ink">error</span>
         ) : caseType ? (
           <>
-            <span className="font-mono">{result.pageCount}p</span>
+            <span className="font-mono tabular-nums">{result.pageCount}p</span>
             <span className="text-rule-strong">·</span>
             <span className="truncate">{CASE_LABEL[caseType]}</span>
           </>
@@ -932,7 +927,11 @@ function Dossier({
       <DossierTabs tab={tab} onTab={onTab} result={result} />
       <div className="flex-1 overflow-y-auto min-h-0">
         {tab === 'facts' && (
-          <FactsPane facts={result.caseFacts.facts} typedMemory={typedMemory} />
+          <FactsPane
+            facts={result.caseFacts.facts}
+            typedMemory={typedMemory}
+            matterId={result.filename}
+          />
         )}
         {tab === 'exhibits' && (
           <MemoryPane
@@ -944,7 +943,14 @@ function Dossier({
             caseFacts={result.caseFacts}
           />
         )}
-        {tab === 'draft' && <DraftPane result={result} streamingDraft={streamingDraft} />}
+        {tab === 'draft' && (
+          <DraftPane
+            result={result}
+            streamingDraft={streamingDraft}
+            typedMemory={typedMemory}
+            matterRoot={matterRoot}
+          />
+        )}
         {tab === 'review' && <ReviewPane result={result} />}
         {tab === 'log' && <LogPane result={result} />}
       </div>
@@ -959,13 +965,13 @@ function DossierLoadingHeader({
 }) {
   return (
     <header className="px-9 pt-7 pb-5 border-b border-rule">
-      <div className="smcp text-[0.65rem] text-graphite-soft mb-1">⁂  building typed memory</div>
-      <h1 className="font-display text-[1.55rem] leading-tight">
+      <div className="smcp text-graphite-soft mb-1">building typed memory</div>
+      <h1 className="text-title leading-snug">
         Classifying {perPdfCount.done} of {perPdfCount.total} documents
       </h1>
-      <p className="font-display italic text-[0.95rem] text-graphite mt-1.5">
-        Each PDF is sorted into its document type and its facts read into memory. The
-        aggregator runs once every PDF is in.
+      <p className="text-body text-graphite mt-2 leading-relaxed">
+        Each PDF is sorted into its document type and its facts read into memory.
+        The aggregator runs once every PDF is in.
       </p>
     </header>
   );
@@ -1199,7 +1205,17 @@ function MemoryPane({
           open={openGenerator !== null}
           matterId={matterId}
           generator={openGenerator ?? 'cover_letter'}
-          caseFacts={caseFacts}
+          // Merge attorney-intake (phone/email/address) into caseFacts
+          // before the modal POSTs them. Empty intake fields don't
+          // overwrite extracted values.
+          caseFacts={
+            caseFacts && (caseFacts as { facts?: unknown }).facts
+              ? mergeIntakeIntoCaseFacts(
+                  caseFacts as { facts: { investor?: unknown } },
+                  readIntakeForm(matterId),
+                )
+              : caseFacts
+          }
           typedMemory={typedMemory}
           onClose={() => setOpenGenerator(null)}
           onApproved={(result: ApprovalResult) => {
@@ -1607,38 +1623,33 @@ function MemoryFactsList({ facts }: { facts: Record<string, unknown> }) {
 }
 
 function DossierEmpty() {
+  const caseTypes = [
+    ['E·II', 'Treaty Investor'],
+    ['EB·IA', 'Extraordinary Ability'],
+    ['EB·IB', 'Outstanding Researcher'],
+    ['EB·IC', 'Multinational Manager'],
+  ] as const;
   return (
     <section className="min-h-0 grid place-items-center paper-grain px-12">
       <div className="max-w-[560px] text-center">
-        <div className="dinkus mb-8">⁂</div>
-        <h1 className="font-display text-[3.2rem] leading-[1.05] tracking-[-0.01em]">
-          Drop a <span className="display-italic text-rubric">dossier</span>.
+        <h1 className="text-display leading-[1.05] tracking-[-0.01em]">
+          Drop a dossier.
         </h1>
-        <p className="mt-6 font-display italic text-[1.1rem] text-ink-2 leading-relaxed">
-          PDFs, folders, exhibits — anything bound for USCIS.
+        <p className="mt-5 text-lede text-ink-2 leading-relaxed">
+          PDFs, folders, exhibits &mdash; anything bound for USCIS.
         </p>
-        <div className="mt-8 grid grid-cols-4 gap-x-4 gap-y-1 text-[0.72rem] smcp text-graphite border-t border-b border-rule py-4">
-          <div>E·II</div>
-          <div>EB·IA</div>
-          <div>EB·IB</div>
-          <div>EB·IC</div>
-          <div className="font-display italic normal-case tracking-normal text-graphite-soft text-[0.78rem]">
-            Treaty Investor
-          </div>
-          <div className="font-display italic normal-case tracking-normal text-graphite-soft text-[0.78rem]">
-            Extraordinary Ability
-          </div>
-          <div className="font-display italic normal-case tracking-normal text-graphite-soft text-[0.78rem]">
-            Outstanding Researcher
-          </div>
-          <div className="font-display italic normal-case tracking-normal text-graphite-soft text-[0.78rem]">
-            Multinational Manager
-          </div>
+        <div className="mt-10 grid grid-cols-4 gap-x-4 gap-y-2 border-t border-b border-rule py-5">
+          {caseTypes.map(([glyph, label]) => (
+            <div key={glyph} className="grid gap-1">
+              <div className="font-mono text-meta text-graphite">{glyph}</div>
+              <div className="text-meta text-graphite-soft">{label}</div>
+            </div>
+          ))}
         </div>
-        <p className="mt-8 text-[0.78rem] text-graphite leading-relaxed drop-cap">
-          The atelier reads each file end to end, identifies the case type, extracts every fact
-          with provenance, drafts the cover letter in the firm’s voice, and audits the draft for
-          inconsistency and RFE risk before you ever set eyes on it.
+        <p className="mt-8 text-body text-graphite leading-relaxed">
+          The clerk reads each file end to end, identifies the case type, extracts every fact
+          with provenance, drafts the cover letter in the firm&rsquo;s voice, and audits the draft
+          for inconsistency and RFE risk before you set eyes on it.
         </p>
       </div>
     </section>
@@ -1649,19 +1660,14 @@ function DossierLoading() {
   return (
     <section className="min-h-0 grid place-items-center paper-grain px-12">
       <div className="max-w-[480px] text-center fade-in">
-        <div className="dinkus mb-8">⁂</div>
-        <p className="font-display italic text-[1.4rem] text-ink leading-relaxed">
-          “The clerk is reading the file.”
-        </p>
-        <ol className="mt-10 grid gap-3 text-left">
-          <LoadingStep n="i" label="detecting case type" />
-          <LoadingStep n="ii" label="extracting facts with citation" />
-          <LoadingStep n="iii" label="drafting the cover letter" />
-          <LoadingStep n="iv" label="reviewing for inconsistency & rfe risk" />
+        <h2 className="text-title text-ink leading-snug">The clerk is reading the file.</h2>
+        <ol className="mt-10 grid gap-2 text-left">
+          <LoadingStep n="01" label="detecting case type" />
+          <LoadingStep n="02" label="extracting facts with citation" />
+          <LoadingStep n="03" label="drafting the cover letter" />
+          <LoadingStep n="04" label="reviewing for inconsistency & RFE risk" />
         </ol>
-        <div className="mt-10 font-mono text-[0.7rem] text-graphite tracking-widest">
-          ‹ 2–4 MIN PER FILE ›
-        </div>
+        <div className="mt-10 label-quiet text-graphite-soft">2&ndash;4 min per file</div>
       </div>
     </section>
   );
@@ -1669,9 +1675,9 @@ function DossierLoading() {
 
 function LoadingStep({ n, label }: { n: string; label: string }) {
   return (
-    <li className="flex items-baseline gap-4 border-b border-rule pb-2">
-      <span className="font-mono text-[0.7rem] smcp text-rubric w-6">{n}.</span>
-      <span className="font-display italic text-[0.95rem] text-ink-2">{label}</span>
+    <li className="flex items-baseline gap-4 border-b border-rule pb-2.5">
+      <span className="font-mono text-meta text-graphite tabular-nums w-7 shrink-0">{n}</span>
+      <span className="text-body text-ink-2">{label}</span>
     </li>
   );
 }
@@ -1679,15 +1685,11 @@ function LoadingStep({ n, label }: { n: string; label: string }) {
 function DossierError({ result }: { result: IngestResult }) {
   return (
     <section className="min-h-0 grid place-items-center px-12 paper-grain">
-      <div className="max-w-[520px] border border-rubric/40 paper-recess p-8 fade-up">
-        <div className="smcp text-rubric text-[0.75rem] mb-3">† problem with the deposit</div>
-        <div className="font-display text-[1.4rem] leading-tight mb-1">{result.filename}</div>
-        <div className="font-mono text-[0.7rem] text-graphite mb-4">
-          [{result.error?.code}]
-        </div>
-        <div className="font-display italic text-[1rem] text-ink-2 leading-relaxed">
-          {result.error?.message}
-        </div>
+      <div className="max-w-[520px] border border-rule-strong paper-recess p-8 fade-up">
+        <div className="smcp text-ink mb-3">extraction failed</div>
+        <div className="text-title leading-snug mb-1">{result.filename}</div>
+        <div className="font-mono text-meta text-graphite mb-4">[{result.error?.code}]</div>
+        <div className="text-body text-ink-2 leading-relaxed">{result.error?.message}</div>
       </div>
     </section>
   );
@@ -1701,38 +1703,38 @@ function DossierHeader({ result }: { result: IngestResult }) {
 
   return (
     <header className="px-9 pt-7 pb-5">
-      <div className="flex items-center gap-3 smcp text-[0.65rem] text-graphite mb-3">
-        <span className="font-mono not-italic">{result.filename}</span>
+      <div className="flex items-center gap-3 font-mono text-meta text-graphite mb-3">
+        <span className="truncate">{result.filename}</span>
         <span className="text-rule-strong">·</span>
-        <span className="font-mono">{result.pageCount} pp</span>
+        <span className="tabular-nums">{result.pageCount} pp</span>
         {caseType && (
           <>
             <span className="text-rule-strong">·</span>
-            <span className="font-mono">{CASE_GLYPH[caseType]}</span>
+            <span>{CASE_GLYPH[caseType]}</span>
           </>
         )}
         {typeof conf === 'number' && (
           <>
             <span className="text-rule-strong">·</span>
-            <span className="font-mono">conf {conf.toFixed(2)}</span>
+            <span className="tabular-nums">conf {conf.toFixed(2)}</span>
           </>
         )}
       </div>
 
       <div className="flex items-baseline justify-between gap-6">
-        <h1 className="font-display text-[2.4rem] leading-[1.1] tracking-[-0.012em] text-ink">
+        <h1 className="text-display leading-[1.1] tracking-[-0.012em] text-ink">
           {clientName}
-          <span className="display-italic text-graphite text-[1.5rem] ml-3">
-            — {caseType ? CASE_LABEL[caseType] : 'matter'}
-          </span>
         </h1>
         {assessment && (
-          <div className="text-right shrink-0" title="Review assessment">
-            <div className="smcp text-[0.62rem] text-graphite mb-1.5">assessment</div>
+          <div className="text-right shrink-0">
+            <div className="smcp text-graphite mb-1.5">assessment</div>
             <StatusPill assessment={assessment} size="full" />
           </div>
         )}
       </div>
+      {caseType && (
+        <div className="mt-2 text-meta text-graphite">{CASE_LABEL[caseType]}</div>
+      )}
     </header>
   );
 }
@@ -1811,14 +1813,9 @@ function DossierTabs({
                     : 'border-transparent text-graphite hover:text-ink-2')
                 }
               >
-                <span className="font-display text-[1rem]">{t.label}</span>
+                <span className="text-body">{t.label}</span>
                 {t.suffix && (
-                  <span
-                    className={
-                      'font-mono text-[0.6rem] ' +
-                      (t.suffix === '!' ? 'text-rubric' : 'text-graphite-soft')
-                    }
-                  >
+                  <span className="font-mono text-meta text-graphite-soft tabular-nums">
                     {t.suffix}
                   </span>
                 )}
@@ -1838,13 +1835,19 @@ function DossierTabs({
 function FactsPane({
   facts,
   typedMemory,
+  matterId,
 }: {
   facts: Record<string, unknown>;
   typedMemory?: TypedMemory;
+  matterId?: string;
 }) {
   return (
     <div className="px-9 py-7 grid gap-8 fade-in">
-      <StructuredFactsPanel facts={facts} typedMemory={typedMemory} />
+      <StructuredFactsPanel
+        facts={facts}
+        typedMemory={typedMemory}
+        matterId={matterId}
+      />
       <details className="border border-rule paper-recess">
         <summary className="cursor-pointer px-5 py-3 font-mono text-[0.75rem] text-graphite hover:bg-ink/5">
           ▸ raw extracted facts (full schema dump)
@@ -1868,10 +1871,13 @@ function FactsPane({
 function StructuredFactsPanel({
   facts,
   typedMemory,
+  matterId,
 }: {
   facts: Record<string, unknown>;
   typedMemory?: TypedMemory;
+  matterId?: string;
 }) {
+  const [intake, setIntake] = useIntakeForm(matterId);
   const investor = (facts.investor as Record<string, FieldLeaf<unknown>> | undefined) ?? {};
   const enterprise = (facts.enterprise as Record<string, FieldLeaf<unknown>> | undefined) ?? {};
   const investment = (facts.investment as Record<string, unknown> | undefined) ?? {};
@@ -1922,10 +1928,14 @@ function StructuredFactsPanel({
                 : '✈ abroad'
               : null,
           },
-          { label: 'Address', fallback: '[MISSING — collect from intake form]' },
-          { label: 'Phone', fallback: '[MISSING — collect from intake form]' },
-          { label: 'Email', fallback: '[MISSING — collect from intake form]' },
         ]}
+      />
+
+      <IntakeBlock
+        roman="I.b"
+        title="Applicant intake (manual)"
+        intake={intake}
+        onChange={setIntake}
       />
 
       <StructuredBlock
@@ -2068,6 +2078,202 @@ interface FieldLeaf<T> {
 
 function isFieldLeafShape(v: unknown): v is FieldLeaf<unknown> {
   return !!v && typeof v === 'object' && 'value' in v && 'source_page' in v;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Intake form (phone / email / address — fields not in PerPdfFacts)      */
+/* ---------------------------------------------------------------------- */
+
+export interface IntakeFields {
+  address: string;
+  phone: string;
+  email: string;
+}
+
+const EMPTY_INTAKE: IntakeFields = { address: '', phone: '', email: '' };
+
+function intakeKey(matterId: string | undefined): string | null {
+  if (!matterId) return null;
+  return `akalan:intake:v1:${matterId}`;
+}
+
+/**
+ * useIntakeForm — small client-side store for the applicant fields the
+ * pipeline can't extract from PDFs (address / phone / email). Persists
+ * to localStorage so the firm doesn't re-key them each session. The
+ * approval flow merges these into caseFacts.investor before calling
+ * preview/approve, so generated drafts see the values without a schema
+ * change upstream.
+ */
+function useIntakeForm(
+  matterId: string | undefined,
+): [IntakeFields, (next: IntakeFields) => void] {
+  const [state, setState] = useState<IntakeFields>(EMPTY_INTAKE);
+
+  useEffect(() => {
+    const key = intakeKey(matterId);
+    if (!key) return;
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) {
+        setState(EMPTY_INTAKE);
+        return;
+      }
+      const parsed = JSON.parse(raw) as Partial<IntakeFields>;
+      setState({
+        address: typeof parsed.address === 'string' ? parsed.address : '',
+        phone: typeof parsed.phone === 'string' ? parsed.phone : '',
+        email: typeof parsed.email === 'string' ? parsed.email : '',
+      });
+    } catch {
+      setState(EMPTY_INTAKE);
+    }
+  }, [matterId]);
+
+  const setIntake = (next: IntakeFields) => {
+    setState(next);
+    const key = intakeKey(matterId);
+    if (!key) return;
+    try {
+      localStorage.setItem(key, JSON.stringify(next));
+    } catch {
+      /* localStorage full / disabled — non-fatal */
+    }
+  };
+
+  return [state, setIntake];
+}
+
+/**
+ * Read intake values for a matter outside React (used by the modal
+ * call-site to merge into caseFacts before sending to preview/approve).
+ */
+export function readIntakeForm(matterId: string | undefined): IntakeFields {
+  const key = intakeKey(matterId);
+  if (!key || typeof window === 'undefined') return EMPTY_INTAKE;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return EMPTY_INTAKE;
+    const parsed = JSON.parse(raw) as Partial<IntakeFields>;
+    return {
+      address: typeof parsed.address === 'string' ? parsed.address : '',
+      phone: typeof parsed.phone === 'string' ? parsed.phone : '',
+      email: typeof parsed.email === 'string' ? parsed.email : '',
+    };
+  } catch {
+    return EMPTY_INTAKE;
+  }
+}
+
+/** Make a Field<T>-shaped leaf wrapping an attorney-attestation value. */
+function intakeFieldLeaf(value: string): FieldLeaf<string> | null {
+  if (!value || value.trim().length === 0) return null;
+  return {
+    value: value.trim(),
+    source_page: null,
+    source_quote: '[attorney_intake]',
+    confidence: 1,
+  };
+}
+
+/**
+ * Merge intake values into caseFacts.investor. Returns a new caseFacts
+ * object — never mutates the input. Empty fields are skipped so a blank
+ * intake row doesn't overwrite what extraction found.
+ */
+export function mergeIntakeIntoCaseFacts<T extends { facts: { investor?: unknown } }>(
+  caseFacts: T,
+  intake: IntakeFields,
+): T {
+  const cloned = JSON.parse(JSON.stringify(caseFacts)) as T;
+  const factsObj = cloned.facts as Record<string, unknown>;
+  const inv = (factsObj.investor as Record<string, unknown> | undefined) ?? {};
+  const address = intakeFieldLeaf(intake.address);
+  const phone = intakeFieldLeaf(intake.phone);
+  const email = intakeFieldLeaf(intake.email);
+  if (address) inv.address = address;
+  if (phone) inv.phone = phone;
+  if (email) inv.email = email;
+  factsObj.investor = inv;
+  return cloned;
+}
+
+function IntakeBlock({
+  roman,
+  title,
+  intake,
+  onChange,
+}: {
+  roman: string;
+  title: string;
+  intake: IntakeFields;
+  onChange: (next: IntakeFields) => void;
+}) {
+  return (
+    <section className="border border-rule paper-recess">
+      <header className="px-5 py-3 border-b border-rule-strong flex items-baseline justify-between">
+        <div className="flex items-baseline gap-3">
+          <span className="font-mono text-[0.75rem] text-rubric tabular-nums">{roman}.</span>
+          <span className="font-display italic text-[1.05rem] text-ink-2">{title}</span>
+          <span className="font-mono text-[0.62rem] text-graphite-soft">attorney attestation · merges into draft</span>
+        </div>
+      </header>
+      <dl className="px-5 py-4 grid grid-cols-[12rem_1fr] gap-x-6 gap-y-3">
+        <IntakeRow
+          label="Address"
+          value={intake.address}
+          placeholder="123 Main St, City, State ZIP"
+          onChange={(v) => onChange({ ...intake, address: v })}
+        />
+        <IntakeRow
+          label="Phone"
+          value={intake.phone}
+          placeholder="+1 305 555 1212"
+          onChange={(v) => onChange({ ...intake, phone: v })}
+        />
+        <IntakeRow
+          label="Email"
+          value={intake.email}
+          placeholder="client@example.com"
+          onChange={(v) => onChange({ ...intake, email: v })}
+        />
+      </dl>
+    </section>
+  );
+}
+
+function IntakeRow({
+  label,
+  value,
+  placeholder,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  placeholder: string;
+  onChange: (v: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  // Sync draft when matter switches.
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+  return (
+    <>
+      <dt className="font-display text-[0.85rem] text-graphite pt-1.5">{label}</dt>
+      <dd>
+        <input
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            if (draft !== value) onChange(draft);
+          }}
+          placeholder={placeholder}
+          className="w-full max-w-md border border-rule px-2 py-1.5 font-mono text-[0.78rem] text-ink-2 focus:outline-none focus:border-ink-2"
+        />
+      </dd>
+    </>
+  );
 }
 
 /**
@@ -2415,12 +2621,64 @@ function FactLine({ field, compact }: { field: FieldProvenance; compact?: boolea
 /* ---------------------------------------------------------------------- */
 
 /**
- * Inline-render a draft paragraph with `Tab X.Y` / `Exhibit X.Y` /
- * `(see Tab X)` references styled as blue links. The first iteration
- * is visual only — full hover-preview requires a reference→document
- * lookup table built off the exhibit-list output.
+ * Tab letter → ordered list of filenames map. Built off the exhibits
+ * accordion's category routing so a "Tab E.4" reference in the draft
+ * resolves to the 4th item the firm filed under Tab E.
  */
-function ParagraphWithExhibitLinks({ text }: { text: string }) {
+type ExhibitRefMap = Partial<Record<ExhibitTabKey, string[]>>;
+
+function buildExhibitRefMap(
+  typedMemory: TypedMemory | undefined,
+): ExhibitRefMap {
+  const map: ExhibitRefMap = {};
+  if (!typedMemory) return map;
+  for (const [docTypeRaw, list] of Object.entries(typedMemory)) {
+    if (!list) continue;
+    const docType = docTypeRaw as DocType;
+    const tab = DOC_TYPE_TO_TAB[docType] ?? 'unassigned';
+    const bucket = map[tab] ?? [];
+    for (const entry of list) {
+      bucket.push(entry.filename);
+    }
+    map[tab] = bucket;
+  }
+  return map;
+}
+
+/**
+ * Resolve a "Tab E.4" / "Exhibit C" reference to a filename via the
+ * tab → filenames map. Subsection number is 1-based; if it's missing
+ * or out of range, returns the first filename in that tab so the user
+ * still gets *something* to look at.
+ */
+function resolveExhibitRef(ref: string, map: ExhibitRefMap): string | null {
+  const m = ref.match(/^(?:Tab|Exhibit)\s+([A-L])(?:\.(\d+))?/i);
+  if (!m) return null;
+  const tab = m[1].toUpperCase() as ExhibitTabKey;
+  const subsection = m[2] ? Number.parseInt(m[2], 10) : null;
+  const list = map[tab];
+  if (!list || list.length === 0) return null;
+  if (subsection !== null && subsection > 0 && subsection <= list.length) {
+    return list[subsection - 1];
+  }
+  return list[0];
+}
+
+/**
+ * Inline-render a draft paragraph with `Tab X.Y` / `Exhibit X.Y`
+ * references styled as blue links. Click resolves to the matched PDF
+ * via the supplied refMap and fires onPickRef so the parent can open a
+ * preview modal.
+ */
+function ParagraphWithExhibitLinks({
+  text,
+  onPickRef,
+  refMap,
+}: {
+  text: string;
+  onPickRef?: (ref: string) => void;
+  refMap?: ExhibitRefMap;
+}) {
   const re = /\b((?:Tab|Exhibit)\s+[A-L](?:\.\w+(?:\.\w+)?)?)\b/g;
   const parts: (string | { ref: string })[] = [];
   let last = 0;
@@ -2434,19 +2692,24 @@ function ParagraphWithExhibitLinks({ text }: { text: string }) {
   if (parts.length === 0) return <>{text}</>;
   return (
     <>
-      {parts.map((p, i) =>
-        typeof p === 'string' ? (
-          <span key={i}>{p}</span>
-        ) : (
+      {parts.map((p, i) => {
+        if (typeof p === 'string') return <span key={i}>{p}</span>;
+        const resolvable = !!(refMap && resolveExhibitRef(p.ref, refMap));
+        return (
           <span
             key={i}
-            title="Exhibit reference. Hover-preview wiring in next iteration."
-            className="text-blue-700 underline decoration-blue-300 decoration-1 underline-offset-2 cursor-help"
+            onClick={resolvable && onPickRef ? () => onPickRef(p.ref) : undefined}
+            title={resolvable ? 'Click to preview the referenced PDF' : 'Exhibit reference (not yet linked to a document)'}
+            className={
+              resolvable
+                ? 'text-blue-700 underline decoration-blue-500 decoration-1 underline-offset-2 cursor-pointer hover:bg-blue-50'
+                : 'text-blue-700/60 underline decoration-blue-300/60 decoration-1 underline-offset-2 cursor-help'
+            }
           >
             {p.ref}
           </span>
-        ),
-      )}
+        );
+      })}
     </>
   );
 }
@@ -2454,11 +2717,33 @@ function ParagraphWithExhibitLinks({ text }: { text: string }) {
 function DraftPane({
   result,
   streamingDraft,
+  typedMemory,
+  matterRoot,
 }: {
   result: IngestResult;
   streamingDraft?: string;
+  typedMemory?: TypedMemory;
+  matterRoot?: string | null;
 }) {
   const [copied, setCopied] = useState(false);
+  const [previewPath, setPreviewPath] = useState<string | null>(null);
+
+  // Pre-compute "Tab letter → ordered filenames[]" so the inline
+  // ParagraphWithExhibitLinks can resolve "Tab E.4" → 4th item under
+  // Tab E. Memoize across renders since typedMemory is stable inside a
+  // single matter view.
+  const exhibitRefMap = useMemo(
+    () => buildExhibitRefMap(typedMemory),
+    [typedMemory],
+  );
+
+  function onPickRef(ref: string) {
+    if (!matterRoot) return;
+    const filename = resolveExhibitRef(ref, exhibitRefMap);
+    if (!filename) return;
+    const sep = matterRoot.endsWith('/') ? '' : '/';
+    setPreviewPath(`${matterRoot}${sep}${filename}`);
+  }
 
   if (result.draftError) {
     return (
@@ -2529,10 +2814,21 @@ function DraftPane({
               'mb-4 last:mb-0 ' + (i === 0 ? 'drop-cap font-display text-[1.06rem]' : '')
             }
           >
-            <ParagraphWithExhibitLinks text={p.trim()} />
+            <ParagraphWithExhibitLinks
+              text={p.trim()}
+              onPickRef={onPickRef}
+              refMap={exhibitRefMap}
+            />
           </p>
         ))}
       </article>
+
+      {previewPath && (
+        <DocumentPreviewModal
+          path={previewPath}
+          onClose={() => setPreviewPath(null)}
+        />
+      )}
     </div>
   );
 }
@@ -2838,85 +3134,370 @@ function Marginalia({
   return <MatterAuditPanel result={result} />;
 }
 
-// Stubs for two panels referenced above that an auto-process introduced
-// before defining. Render the intro fallback so typecheck stays clean
-// and the right rail renders something coherent until the real
-// implementations land.
-function FirmTriagePanel(_props: { results: IngestResult[] }) {
-  return <MarginaliaIntro />;
-}
-function MatterAuditPanel({ result }: { result: IngestResult }) {
-  void result;
-  return <MarginaliaIntro />;
+/* ---------------------------------------------------------------------- */
+/* Triage rail — replaces brochure intro and matter metadata.             */
+/* Strict monochrome. Urgency carried by order, weight, and hairlines.    */
+/* ---------------------------------------------------------------------- */
+
+interface FieldLeafShape {
+  value: unknown;
+  source_page: number | null;
+  confidence: number | null;
+  source_quote: string | null;
 }
 
-function MarginaliaIntro() {
+function isLeaf(v: unknown): v is FieldLeafShape {
   return (
-    <aside className="border-l border-rule paper-grain min-h-0 overflow-y-auto px-5 py-6 grid gap-7 content-start">
-      <MarginaliaBlock title="the atelier">
-        <p className="margin-note">
-          A single desk for the firm’s immigration practice. Drop a dossier; the clerk reads it,
-          extracts every fact with citation, drafts the cover letter in your voice, and audits the
-          draft against the regulations before you read a word.
-        </p>
-      </MarginaliaBlock>
-      <MarginaliaBlock title="practice areas">
-        <ul className="grid gap-1.5 margin-note">
-          <li className="flex justify-between">
-            <span className="font-mono text-graphite">E·II</span>
-            <span>Treaty Investor</span>
-          </li>
-          <li className="flex justify-between">
-            <span className="font-mono text-graphite">EB·IA</span>
-            <span>Extraordinary Ability</span>
-          </li>
-          <li className="flex justify-between">
-            <span className="font-mono text-graphite">EB·IB</span>
-            <span>Outstanding Researcher</span>
-          </li>
-          <li className="flex justify-between">
-            <span className="font-mono text-graphite">EB·IC</span>
-            <span>Multinational Manager</span>
-          </li>
-        </ul>
-      </MarginaliaBlock>
-      <MarginaliaBlock title="house rules">
-        <ol className="grid gap-2 margin-note">
-          <li>
-            <span className="text-rubric font-mono text-[0.7rem] mr-2">i.</span>
-            Every fact carries its citation.
-          </li>
-          <li>
-            <span className="text-rubric font-mono text-[0.7rem] mr-2">ii.</span>
-            No claim survives the auditor without an exhibit.
-          </li>
-          <li>
-            <span className="text-rubric font-mono text-[0.7rem] mr-2">iii.</span>
-            The PDF stays on this machine.
-          </li>
-        </ol>
-      </MarginaliaBlock>
+    !!v &&
+    typeof v === 'object' &&
+    'value' in (v as object) &&
+    'confidence' in (v as object)
+  );
+}
+
+function leafValue(facts: unknown, path: readonly string[]): unknown {
+  let cur: unknown = facts;
+  for (const k of path) {
+    if (!cur || typeof cur !== 'object') return null;
+    cur = (cur as Record<string, unknown>)[k];
+  }
+  if (isLeaf(cur)) return cur.value;
+  return cur ?? null;
+}
+
+interface MatterStatus {
+  matterName: string;
+  caseType: CaseType | undefined;
+  conflictCount: number;
+  reviewIssues: number;
+  hasDraft: boolean;
+  hasError: boolean;
+  identityKnown: boolean;
+  category: 'at_risk' | 'missing' | 'in_progress' | 'ready';
+}
+
+function analyzeMatter(r: IngestResult): MatterStatus {
+  const caseType = r.caseFacts?.case_type;
+  const facts = r.caseFacts?.facts;
+  const conflicts = facts && (facts as { conflict_register?: unknown[] }).conflict_register;
+  const conflictCount = Array.isArray(conflicts) ? conflicts.length : 0;
+  const reviewIssues =
+    (r.review?.inconsistencies?.length ?? 0) +
+    (r.review?.missing_arguments?.length ?? 0) +
+    (r.review?.weak_spots?.length ?? 0);
+  const hasDraft = !!r.draft && r.draft.length > 0;
+  const hasError = !!r.error || !!r.reviewError;
+
+  let identityKnown = false;
+  if (caseType === 'E2' && facts) {
+    identityKnown =
+      leafValue(facts, ['investor', 'passport_number']) !== null &&
+      leafValue(facts, ['investor', 'current_us_status']) !== null;
+  } else if (
+    facts &&
+    (caseType === 'EB1A' || caseType === 'EB1B' || caseType === 'EB1C')
+  ) {
+    identityKnown = leafValue(facts, ['beneficiary', 'passport_number']) !== null;
+  }
+
+  let category: MatterStatus['category'];
+  if (hasError || conflictCount > 0 || reviewIssues > 0) category = 'at_risk';
+  else if (!identityKnown) category = 'missing';
+  else if (hasDraft) category = 'ready';
+  else category = 'in_progress';
+
+  const matterName = (r.filename ?? '').replace(/\.pdf$/i, '').replace(/_/g, ' ');
+
+  return {
+    matterName,
+    caseType,
+    conflictCount,
+    reviewIssues,
+    hasDraft,
+    hasError,
+    identityKnown,
+    category,
+  };
+}
+
+function FirmTriagePanel({ results }: { results: IngestResult[] }) {
+  if (results.length === 0) return <FirmTriageEmpty />;
+  const statuses = results.map(analyzeMatter);
+  const atRisk = statuses.filter((s) => s.category === 'at_risk');
+  const missing = statuses.filter((s) => s.category === 'missing');
+  const ready = statuses.filter((s) => s.category === 'ready');
+  const inProgress = statuses.filter((s) => s.category === 'in_progress');
+
+  return (
+    <aside className="border-l border-rule paper-grain min-h-0 overflow-y-auto px-6 py-7 grid gap-9 content-start">
+      <header className="grid gap-1">
+        <span className="smcp text-graphite-soft">the desk</span>
+        <h2 className="text-title">
+          {results.length} {results.length === 1 ? 'matter' : 'matters'} on the desk
+        </h2>
+      </header>
+
+      <TriageBlock title="due / at risk" count={atRisk.length} empty="Nothing on fire.">
+        {atRisk.map((s, i) => (
+          <TriageRow key={i} status={s} />
+        ))}
+      </TriageBlock>
+
+      <TriageBlock
+        title="missing"
+        count={missing.length}
+        empty="All matters have core identity facts."
+      >
+        {missing.map((s, i) => (
+          <TriageRow key={i} status={s} />
+        ))}
+      </TriageBlock>
+
+      {inProgress.length > 0 && (
+        <TriageBlock title="in progress" count={inProgress.length} empty="">
+          {inProgress.map((s, i) => (
+            <TriageRow key={i} status={s} />
+          ))}
+        </TriageBlock>
+      )}
+
+      <TriageBlock
+        title="ready to file"
+        count={ready.length}
+        empty="None yet — keep building."
+      >
+        {ready.map((s, i) => (
+          <TriageRow key={i} status={s} />
+        ))}
+      </TriageBlock>
     </aside>
   );
 }
 
-function MarginaliaBlock({
+function FirmTriageEmpty() {
+  return (
+    <aside className="border-l border-rule paper-grain min-h-0 overflow-y-auto px-6 py-7 grid gap-6 content-start">
+      <header className="grid gap-1">
+        <span className="smcp text-graphite-soft">the desk</span>
+        <h2 className="text-title">An empty desk.</h2>
+      </header>
+      <p className="text-body text-graphite leading-relaxed">
+        Drop a dossier on the left to begin. Once a matter lands, this rail
+        shows what&rsquo;s at risk, what&rsquo;s missing, and what&rsquo;s ready to file
+        &mdash; across the firm.
+      </p>
+    </aside>
+  );
+}
+
+function TriageBlock({
   title,
+  count,
   children,
+  empty,
 }: {
   title: string;
+  count: number;
   children: React.ReactNode;
+  empty: string;
 }) {
   return (
     <section>
-      <h4 className="smcp text-[0.65rem] text-rubric mb-2 flex items-baseline gap-2">
-        <span>※</span>
-        <span>{title}</span>
+      <header className="flex items-baseline gap-3 mb-3">
+        <span className="smcp text-graphite">{title}</span>
+        <span className="font-mono text-meta text-graphite-soft tabular-nums">{count}</span>
         <span className="flex-1 border-b border-rule translate-y-[-0.3em]" />
-      </h4>
-      {children}
+      </header>
+      {count === 0 ? (
+        empty ? <p className="text-meta text-graphite-soft">{empty}</p> : null
+      ) : (
+        <ul className="grid gap-3">{children}</ul>
+      )}
     </section>
   );
+}
+
+function TriageRow({ status }: { status: MatterStatus }) {
+  // Hairline tick on the left for at-risk rows — pure jet, no color.
+  const tick =
+    status.category === 'at_risk' ? 'border-l-2 border-ink pl-3 -ml-3' : 'pl-0';
+  const detail = (() => {
+    if (status.category === 'at_risk') {
+      const parts: string[] = [];
+      if (status.hasError) parts.push('extract error');
+      if (status.conflictCount > 0)
+        parts.push(`${status.conflictCount} conflict${status.conflictCount > 1 ? 's' : ''}`);
+      if (status.reviewIssues > 0)
+        parts.push(`${status.reviewIssues} review issue${status.reviewIssues > 1 ? 's' : ''}`);
+      return parts.join(' · ') || 'attention needed';
+    }
+    if (status.category === 'missing') return 'identity facts incomplete';
+    if (status.category === 'ready') return 'auditor passed';
+    return status.hasDraft ? 'drafted, awaiting review' : 'extracting';
+  })();
+
+  const titleWeight = status.category === 'at_risk' ? 'text-ink' : 'text-ink-2';
+
+  return (
+    <li className={`grid grid-cols-[1fr_auto] gap-x-4 items-baseline ${tick}`}>
+      <div className="min-w-0">
+        <div className={`text-body truncate ${titleWeight}`}>{status.matterName}</div>
+        {status.caseType && (
+          <div className="font-mono text-meta text-graphite-soft mt-0.5">
+            {CASE_GLYPH[status.caseType]} · {CASE_LABEL[status.caseType]}
+          </div>
+        )}
+      </div>
+      <div className="text-meta text-graphite text-right shrink-0 max-w-[10rem]">{detail}</div>
+    </li>
+  );
+}
+
+function MatterAuditPanel({ result }: { result: IngestResult }) {
+  const status = analyzeMatter(result);
+  const facts = result.caseFacts?.facts;
+  const items =
+    status.caseType && facts ? checklistFor(status.caseType, facts, status.hasDraft) : null;
+  const done = items ? items.filter((i) => i.met).length : 0;
+  const total = items?.length ?? 0;
+
+  return (
+    <aside className="border-l border-rule paper-grain min-h-0 overflow-y-auto px-6 py-7 grid gap-9 content-start">
+      <header className="grid gap-1">
+        <span className="smcp text-graphite-soft">audit</span>
+        <h2 className="text-title break-words">{status.matterName}</h2>
+        {status.caseType && (
+          <span className="font-mono text-meta text-graphite mt-0.5">
+            {CASE_GLYPH[status.caseType]} · {CASE_LABEL[status.caseType]}
+          </span>
+        )}
+      </header>
+
+      <section>
+        <header className="flex items-baseline gap-3 mb-3">
+          <span className="smcp text-graphite">checklist</span>
+          {items && (
+            <span className="font-mono text-meta text-graphite-soft tabular-nums">
+              {done} / {total}
+            </span>
+          )}
+          <span className="flex-1 border-b border-rule translate-y-[-0.3em]" />
+        </header>
+        {items ? (
+          <ul className="grid gap-2">
+            {items.map((i) => (
+              <li
+                key={i.label}
+                className="grid grid-cols-[1.1rem_1fr] items-baseline gap-x-1"
+              >
+                <span
+                  className={`font-mono text-meta tabular-nums ${i.met ? 'text-ink' : 'text-graphite-soft'}`}
+                >
+                  {i.met ? '✓' : '◯'}
+                </span>
+                <span className={`text-body ${i.met ? 'text-ink-2' : 'text-graphite'}`}>
+                  {i.label}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-meta text-graphite-soft">No case type detected yet.</p>
+        )}
+      </section>
+
+      <section>
+        <header className="flex items-baseline gap-3 mb-3">
+          <span className="smcp text-graphite">risk</span>
+          <span className="font-mono text-meta text-graphite-soft tabular-nums">
+            {status.conflictCount + status.reviewIssues}
+          </span>
+          <span className="flex-1 border-b border-rule translate-y-[-0.3em]" />
+        </header>
+        <ul className="grid gap-1.5">
+          {status.conflictCount > 0 && (
+            <RiskRow
+              label={`${status.conflictCount} conflict${status.conflictCount > 1 ? 's' : ''} on register`}
+            />
+          )}
+          {result.review && (
+            <>
+              {result.review.inconsistencies.length > 0 && (
+                <RiskRow
+                  label={`${result.review.inconsistencies.length} inconsistenc${result.review.inconsistencies.length > 1 ? 'ies' : 'y'}`}
+                />
+              )}
+              {result.review.missing_arguments.length > 0 && (
+                <RiskRow
+                  label={`${result.review.missing_arguments.length} missing argument${result.review.missing_arguments.length > 1 ? 's' : ''}`}
+                />
+              )}
+              {result.review.weak_spots.length > 0 && (
+                <RiskRow
+                  label={`${result.review.weak_spots.length} weak spot${result.review.weak_spots.length > 1 ? 's' : ''}`}
+                />
+              )}
+            </>
+          )}
+          {status.conflictCount + status.reviewIssues === 0 && (
+            <li className="text-meta text-graphite-soft">No flags raised.</li>
+          )}
+        </ul>
+      </section>
+
+      <section>
+        <header className="flex items-baseline gap-3 mb-3">
+          <span className="smcp text-graphite">next</span>
+          <span className="flex-1 border-b border-rule translate-y-[-0.3em]" />
+        </header>
+        <p className="text-body text-ink-2 leading-relaxed">{nextActionFor(status)}</p>
+      </section>
+    </aside>
+  );
+}
+
+function RiskRow({ label }: { label: string }) {
+  return (
+    <li className="grid grid-cols-[1.1rem_1fr] items-baseline gap-x-1">
+      <span className="font-mono text-meta text-ink">⚠</span>
+      <span className="text-body text-ink-2">{label}</span>
+    </li>
+  );
+}
+
+function checklistFor(
+  caseType: CaseType,
+  facts: Record<string, unknown>,
+  hasDraft: boolean,
+): { label: string; met: boolean }[] {
+  if (caseType === 'E2') {
+    const own = facts.ownership_chain;
+    const sof = facts.source_of_funds;
+    return [
+      { label: 'Identity established',     met: leafValue(facts, ['investor', 'passport_number']) !== null },
+      { label: 'US status known',          met: leafValue(facts, ['investor', 'current_us_status']) !== null },
+      { label: 'Enterprise registered',    met: leafValue(facts, ['enterprise', 'ein']) !== null },
+      { label: 'Ownership documented',     met: Array.isArray(own) && own.length > 0 },
+      { label: 'Investment substantiated', met: typeof leafValue(facts, ['investment', 'total_committed_usd']) === 'number' },
+      { label: 'Source of funds traced',   met: Array.isArray(sof) && sof.length > 0 },
+      { label: 'Cover letter drafted',     met: hasDraft },
+    ];
+  }
+  // EB-1A / B / C — extractor schemas vary; show a minimal universal list
+  // and surface case-specific items as those extractors come online.
+  return [
+    { label: 'Beneficiary identity', met: leafValue(facts, ['beneficiary', 'passport_number']) !== null },
+    { label: 'Cover letter drafted', met: hasDraft },
+  ];
+}
+
+function nextActionFor(status: MatterStatus): string {
+  if (status.hasError) return 'Re-run extraction — last attempt errored.';
+  if (status.conflictCount > 0) return 'Resolve conflicts on the register before drafting.';
+  if (!status.identityKnown) return 'Identity facts are missing. Add a passport scan and current status doc.';
+  if (status.reviewIssues > 0) return 'Address auditor findings — review pane on the dossier.';
+  if (!status.hasDraft) return 'Draft the cover letter.';
+  return 'Ready for attorney review.';
 }
 
 function ProvenanceSummary({ result }: { result: IngestResult }) {
