@@ -52,6 +52,11 @@ db/pdf-cache/
 # document-classifier-renamer alias map (per-matter sidecar — runtime state)
 db/filename-aliases.json
 
+# pre-generation approval flow (lib/preview-store.ts) — per-matter
+# preview JSON sidecars + append-only attorney-approval audit log.
+db/previews/
+db/audit/
+
 # claude code session state — ignore everything in .claude/ except shared skills
 .claude/*
 !.claude/skills

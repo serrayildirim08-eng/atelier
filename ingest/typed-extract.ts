@@ -309,7 +309,7 @@ function extractFirstJsonObject(text: string): string {
 
 const SYSTEM_PROMPT = `You are an immigration paralegal performing per-document fact extraction on a single PDF from an E-2 Treaty Investor case folder. Your output goes into a typed memory the case-level aggregator will reason over later.
 
-Your job is THREE-FOLD for each document: classify, extract, and suggest a canonical filename.
+Your job is FOUR-FOLD for each document: classify, extract, suggest a canonical kebab-case filename, AND compose a human-readable display name.
 
 1. CLASSIFY the document into exactly ONE doc_type from this taxonomy. Pick by the document's CONTENT, not by the input filename — the input filename is often opaque scan output (e.g., \`1709245687.pdf\`). Each entry shows 3 canonical-filename examples; suggested_filename should aim for that shape.
 
@@ -436,16 +436,18 @@ export async function classifyAndExtractOnePdf(
       );
     }
 
+    const nullField = {
+      value: null,
+      source_page: null,
+      source_quote: null,
+      confidence: null,
+    };
     const scanEntry: Omit<PerPdfResult, 'filename' | 'error'> = {
       pageCount: parsed.pageCount,
       facts: {
         doc_type: 'other',
-        suggested_filename: {
-          value: null,
-          source_page: null,
-          source_quote: null,
-          confidence: null,
-        },
+        suggested_filename: nullField,
+        display_name: nullField,
         one_line_summary: {
           value: 'Scanned document — text extraction returned sparse content; OCR/vision required.',
           source_page: null,

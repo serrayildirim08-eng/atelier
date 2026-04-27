@@ -51,16 +51,18 @@ describe('readPdfCache / writePdfCache', () => {
 
   it('round-trips a successful extraction entry', () => {
     const hash = pdfContentHash(Buffer.from('hello world'));
+    const nullField = {
+      value: null,
+      source_page: null,
+      source_quote: null,
+      confidence: null,
+    };
     const entry = {
       pageCount: 3,
       facts: {
         doc_type: 'other' as const,
-        suggested_filename: {
-          value: null,
-          source_page: null,
-          source_quote: null,
-          confidence: null,
-        },
+        suggested_filename: nullField,
+        display_name: nullField,
         one_line_summary: {
           value: 'A test document.',
           source_page: 1,

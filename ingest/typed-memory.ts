@@ -126,11 +126,16 @@ export const DOC_TYPE_LABELS: Record<DocType, string> = {
 /* ---------------------------------------------------------------------- */
 
 /**
- * Common fields every micro-schema carries. Currently just the
- * document-classifier-renamer's `suggested_filename` — kebab-case ASCII
- * canonical filename derived from the document's content. Spread into
- * each variant of the discriminated union so the field is required on
- * every PerPdfFacts shape (and the classifier prompt always emits it).
+ * Common fields every micro-schema carries. Spread into each variant of
+ * the discriminated union so the fields are required on every
+ * PerPdfFacts shape (and the classifier prompt always emits them).
+ *
+ * Two coexisting names are stored:
+ *   - suggested_filename — kebab-case ASCII for the audit / rename system.
+ *   - display_name      — slot-based, dot-separated, diacritic-preserved
+ *                         human-readable name for the dashboard inventory
+ *                         and exhibit list. Disk filenames are NEVER
+ *                         modified; both fields are pure metadata.
  */
 const COMMON_FIELDS = {
   /**
@@ -142,6 +147,19 @@ const COMMON_FIELDS = {
    * mutation).
    */
   suggested_filename: Field(z.string()),
+  /**
+   * Human-readable display name. Slot-based, " · " (U+00B7) separated,
+   * Title Case proper nouns + labels, native diacritics PRESERVED (never
+   * ASCII-folded — that's suggested_filename's job). Cap 110 chars
+   * including the .pdf extension; on overflow, slots drop in priority
+   * Detail → Identifier → Institution. Slot order:
+   *   [Entity] · [Institution] · [Identifier] · [Doc Type Label]
+   *           · [Detail] · [Period]
+   * Used by the dashboard document-inventory and the exhibit-list
+   * generator. Coexists with suggested_filename — neither replaces the
+   * raw on-disk filename.
+   */
+  display_name: Field(z.string()),
 };
 
 const PassportFactsSchema = z.object({
