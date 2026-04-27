@@ -461,6 +461,19 @@ export function LoadingProgress({ events, startedAt }: Props) {
                 ? `Reading ${state.matter}…`
                 : 'Preparing the matter…')}
           </div>
+          {state.totalPdfs > 0 && (
+            <div className="mt-2 font-mono text-[0.78rem] tabular-nums text-graphite tracking-[0.06em]">
+              <span className="text-ink-2 font-semibold">
+                {state.completedPdfs}
+              </span>
+              <span className="text-graphite-soft"> / </span>
+              <span>{state.totalPdfs}</span>
+              <span className="text-graphite-soft">
+                {' '}
+                pdf{state.totalPdfs === 1 ? '' : 's'}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -479,6 +492,15 @@ export function LoadingProgress({ events, startedAt }: Props) {
           <span className="text-graphite">0%</span>
           <span className="text-graphite-soft text-[0.7rem] tracking-[0.16em]">
             started {fmtElapsed(elapsedMs)} ago
+            {state.totalPdfs > 0 && (
+              <>
+                <span className="px-2 text-graphite-soft/60">·</span>
+                <span className="text-graphite tabular-nums normal-case tracking-[0.06em]">
+                  {state.completedPdfs}/{state.totalPdfs} pdf
+                  {state.totalPdfs === 1 ? '' : 's'}
+                </span>
+              </>
+            )}
             <span className="px-2 text-graphite-soft/60">·</span>
             {fmtRemaining(elapsedMs, percent)}
           </span>
