@@ -783,6 +783,54 @@ export interface SubstantialityReconResult {
   contract_effective_date: string | null;
 }
 
+/* ---------------------------------------------------------------------- */
+/* Audit-row interfaces — Tab D entity-name coherence                     */
+/* ---------------------------------------------------------------------- */
+
+export interface EntityNameOccurrence {
+  /** Filename the candidate entity name appeared on. */
+  filename: string;
+  /** Source field — e.g., 'formation_doc.corporateFormation.entity_legal_name'. */
+  source_field: string;
+  /** Raw name as extracted (pre-normalize). */
+  raw_name: string;
+}
+
+export interface EntityNameGroup {
+  /** Canonical (normalized + suffix-stripped) name representing the group. */
+  canonical_name: string;
+  /** Every occurrence of this group's name across the typed memory. */
+  occurrences: EntityNameOccurrence[];
+}
+
+/**
+ * Tab D entity-coherence audit row. Verdicts:
+ *   - 'single_entity'           — exactly one normalized name across docs;
+ *                                  no conflict
+ *   - 'parent_subsidiary'       — two groups linked by foreign-corporate
+ *                                  board_resolution.authorizes_us_investment;
+ *                                  no conflict
+ *   - 'name_drift'              — two+ unrelated groups; severity 4
+ *                                  conflict_type='entity_name_drift'
+ *   - 'no_entity_evidence'      — no candidate names at all; no-op
+ */
+export interface EntityCoherenceResult {
+  verdict:
+    | 'single_entity'
+    | 'parent_subsidiary'
+    | 'name_drift'
+    | 'no_entity_evidence';
+  groups: EntityNameGroup[];
+  /** Canonical name when a single coherent identity is established. */
+  canonical_name: string | null;
+  /**
+   * For 'parent_subsidiary' verdict: the foreign-parent's canonical name
+   * and the US-subsidiary's canonical name. Empty otherwise.
+   */
+  foreign_parent_name: string | null;
+  us_subsidiary_name: string | null;
+}
+
 export function groupByDocType(results: PerPdfResult[]): TypedMemory {
   const out: TypedMemory = {};
   for (const r of results) {

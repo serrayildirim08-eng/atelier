@@ -22,6 +22,9 @@ import {
   type TypedMemory,
   type SubstantialityReconResult,
   type SubstantialityReconEvidence,
+  type EntityCoherenceResult,
+  type EntityNameOccurrence,
+  type EntityNameGroup,
 } from './typed-memory';
 import {
   CONTRACT_SUBTYPE_LABELS,
@@ -1093,6 +1096,226 @@ export function reconcileSubstantiality(memory: TypedMemory): SubstantialityReco
   };
 }
 
+/* ---------------------------------------------------------------------- */
+/* Tab D entity-coherence (deterministic gate)                             */
+/* ---------------------------------------------------------------------- */
+
+const ENTITY_LEVENSHTEIN_THRESHOLD = 2;
+
+const ENTITY_SUFFIX_RE =
+  /\b(l\.?l\.?c\.?|inc\.?|corp\.?|corporation|co\.?|company|limited|ltd\.?|p\.?l\.?l\.?c\.?|gmbh|a\.?ş\.?|as|sti)\b/g;
+
+/** Turkish-aware ASCII fold + punctuation strip for entity name compares. */
+function foldEntityName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/ç/g, 'c')
+    .replace(/ğ/g, 'g')
+    .replace(/ı/g, 'i')
+    .replace(/ö/g, 'o')
+    .replace(/ş/g, 's')
+    .replace(/ü/g, 'u')
+    .replace(/[.,'’`"]/g, '')
+    .replace(ENTITY_SUFFIX_RE, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+  const m = a.length;
+  const n = b.length;
+  // Two-row table (memory-efficient).
+  let prev = new Array<number>(n + 1);
+  let cur = new Array<number>(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    cur[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(
+        cur[j - 1] + 1,
+        prev[j] + 1,
+        prev[j - 1] + cost,
+      );
+    }
+    [prev, cur] = [cur, prev];
+  }
+  return prev[n];
+}
+
+const US_LLC_SUFFIX_RE =
+  /\b(l\.?l\.?c\.?|inc\.?|corp\.?|corporation|co\.?|company|limited|ltd\.?|p\.?l\.?l\.?c\.?)\b/i;
+
+function collectEntityNameOccurrences(memory: TypedMemory): EntityNameOccurrence[] {
+  const out: EntityNameOccurrence[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    const facts = entry.facts;
+
+    // Source 1: corporateFormation.entity_legal_name on every formation_doc
+    // that ran through the rich extractor (all 7 subtypes share the field).
+    if (entry.corporateFormation?.entity_legal_name?.value) {
+      out.push({
+        filename: entry.filename,
+        source_field: 'corporateFormation.entity_legal_name',
+        raw_name: entry.corporateFormation.entity_legal_name.value,
+      });
+    }
+
+    if (!facts) continue;
+
+    // Source 2: uscis_or_dos_form.petitioner_name.
+    if (facts.doc_type === 'uscis_or_dos_form' && facts.petitioner_name?.value) {
+      out.push({
+        filename: entry.filename,
+        source_field: 'uscis_or_dos_form.petitioner_name',
+        raw_name: facts.petitioner_name.value,
+      });
+    }
+
+    // Source 3: lease_or_property.lessee — but only when the lessee name
+    // looks like a US entity (carries a corporate suffix). Personal-name
+    // lessees would muddy the gate.
+    if (
+      facts.doc_type === 'lease_or_property' &&
+      typeof facts.lessee?.value === 'string' &&
+      US_LLC_SUFFIX_RE.test(facts.lessee.value)
+    ) {
+      out.push({
+        filename: entry.filename,
+        source_field: 'lease_or_property.lessee',
+        raw_name: facts.lessee.value,
+      });
+    }
+
+    // Source 4: payroll_doc.employer_name.
+    if (facts.doc_type === 'payroll_doc' && facts.employer_name?.value) {
+      out.push({
+        filename: entry.filename,
+        source_field: 'payroll_doc.employer_name',
+        raw_name: facts.employer_name.value,
+      });
+    }
+
+    // Source 5: financial_statement.entity_name (thin variant).
+    if (facts.doc_type === 'financial_statement' && facts.entity_name?.value) {
+      out.push({
+        filename: entry.filename,
+        source_field: 'financial_statement.entity_name',
+        raw_name: facts.entity_name.value,
+      });
+    }
+  }
+  return out;
+}
+
+function groupEntityNames(occurrences: EntityNameOccurrence[]): EntityNameGroup[] {
+  const groups: EntityNameGroup[] = [];
+  for (const occ of occurrences) {
+    const folded = foldEntityName(occ.raw_name);
+    if (!folded) continue;
+    let attached = false;
+    for (const g of groups) {
+      if (
+        g.canonical_name === folded ||
+        levenshtein(g.canonical_name, folded) <= ENTITY_LEVENSHTEIN_THRESHOLD
+      ) {
+        g.occurrences.push(occ);
+        attached = true;
+        break;
+      }
+    }
+    if (!attached) {
+      groups.push({ canonical_name: folded, occurrences: [occ] });
+    }
+  }
+  return groups;
+}
+
+/** Foreign-parent detection: does any entry carry an authorized board_resolution? */
+function detectForeignParent(memory: TypedMemory): {
+  foreign_name_folded: string;
+  authorizes_us_investment: boolean;
+} | null {
+  for (const entry of iterMemoryEntries(memory)) {
+    const fc = entry.foreignCorporate;
+    if (!fc) continue;
+    if (fc.foreign_doc_subtype !== 'board_resolution') continue;
+    const name = fc.entity_legal_name_ascii?.value;
+    const authorizes = fc.authorizes_us_investment?.value;
+    if (typeof name === 'string' && name.length > 0) {
+      return {
+        foreign_name_folded: foldEntityName(name),
+        authorizes_us_investment: authorizes === true,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Reconcile Tab D entity coherence: when the matter contains formation
+ * docs + petition forms + leases + payroll + financial statements, every
+ * named entity MUST describe the same legal person. Drift = severity 4.
+ *
+ * Levenshtein ≤ 2 merges near-duplicates ("wise guys deli" vs
+ * "wise guy's deli"). A foreign-parent / US-subsidiary pattern (foreign
+ * corporate board_resolution.authorizes_us_investment === true) is an
+ * accepted multi-group case — no conflict fires.
+ */
+export function reconcileEntityCoherence(memory: TypedMemory): EntityCoherenceResult {
+  const occurrences = collectEntityNameOccurrences(memory);
+  if (occurrences.length === 0) {
+    return {
+      verdict: 'no_entity_evidence',
+      groups: [],
+      canonical_name: null,
+      foreign_parent_name: null,
+      us_subsidiary_name: null,
+    };
+  }
+  const groups = groupEntityNames(occurrences);
+  if (groups.length === 1) {
+    return {
+      verdict: 'single_entity',
+      groups,
+      canonical_name: groups[0].canonical_name,
+      foreign_parent_name: null,
+      us_subsidiary_name: null,
+    };
+  }
+
+  const foreign = detectForeignParent(memory);
+  if (foreign && foreign.authorizes_us_investment) {
+    const parentGroup = groups.find(
+      (g) =>
+        g.canonical_name === foreign.foreign_name_folded ||
+        levenshtein(g.canonical_name, foreign.foreign_name_folded) <=
+          ENTITY_LEVENSHTEIN_THRESHOLD,
+    );
+    const usGroup = groups.find((g) => g !== parentGroup);
+    if (parentGroup && usGroup) {
+      return {
+        verdict: 'parent_subsidiary',
+        groups,
+        canonical_name: null,
+        foreign_parent_name: parentGroup.canonical_name,
+        us_subsidiary_name: usGroup.canonical_name,
+      };
+    }
+  }
+
+  return {
+    verdict: 'name_drift',
+    groups,
+    canonical_name: null,
+    foreign_parent_name: null,
+    us_subsidiary_name: null,
+  };
+}
+
 /**
  * Compute the drafter's defensive-paragraph cues from the typed memory.
  * Pure / deterministic — exported for tests.
@@ -1910,6 +2133,7 @@ export async function aggregateTypedMemoryToE2(
   real_estate_buyer_mismatch_results: RealEstateBuyerMismatchAuditRow[];
   incentive_recipient_mismatch_results: IncentiveRecipientMismatchAuditRow[];
   substantiality_recon_results: SubstantialityReconResult[];
+  entity_coherence_results: EntityCoherenceResult[];
 }> {
   const memoryBlock = memoryToPromptText(memory);
   const inventoryBlock = buildDocInventoryWithAliases(memory, options?.aliases);
@@ -2132,6 +2356,79 @@ export async function aggregateTypedMemoryToE2(
         fact_b_doc: {
           value:
             substantialityRecon.evidence_doc[0]?.filename ?? null,
+          source_page: null,
+          source_quote: null,
+          confidence: 1,
+        },
+        fact_b_page: {
+          value: null,
+          source_page: null,
+          source_quote: null,
+          confidence: 1,
+        },
+      });
+    }
+  }
+
+  // Tab D entity coherence: every named entity across formation docs +
+  // petition forms + leases + payroll + financial statements should
+  // describe the same legal person. Drift = severity 4. A foreign
+  // parent / US subsidiary pattern (board_resolution authorizing US
+  // investment) is an accepted multi-group case — no conflict fires.
+  // Idempotent on (conflict_type, sorted distinct_names hash).
+  const entityCoherence = reconcileEntityCoherence(memory);
+  if (entityCoherence.verdict === 'name_drift') {
+    const distinctNames = entityCoherence.groups
+      .map((g) => g.canonical_name)
+      .sort()
+      .join('|');
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'entity_name_drift' &&
+        c.description.value?.includes(distinctNames),
+    );
+    if (!alreadyLogged) {
+      const groupsSummary = entityCoherence.groups
+        .map(
+          (g) =>
+            `"${g.canonical_name}" (${g.occurrences
+              .map((o) => `${o.filename}:${o.source_field}`)
+              .join(', ')})`,
+        )
+        .join('; ');
+      parsed.data.conflict_register.push({
+        description: {
+          value: `Entity name drift across ${entityCoherence.groups.length} distinct identities [${distinctNames}]. Groups: ${groupsSummary}. Verify that every formation_doc / petitioner_name / lessee / employer_name / financial_statement.entity_name describes the same legal entity, or document the parent / subsidiary relationship via a board_resolution authorizing US investment.`,
+          source_page: null,
+          source_quote: '[deterministic Tab D coherence gate]',
+          confidence: 1,
+        },
+        conflict_type: {
+          value: 'entity_name_drift',
+          source_page: null,
+          source_quote: '[deterministic Tab D coherence gate]',
+          confidence: 1,
+        },
+        severity: {
+          value: 4,
+          source_page: null,
+          source_quote: '[deterministic Tab D coherence gate]',
+          confidence: 1,
+        },
+        fact_a_doc: {
+          value: entityCoherence.groups[0]?.occurrences[0]?.filename ?? null,
+          source_page: null,
+          source_quote: null,
+          confidence: 1,
+        },
+        fact_a_page: {
+          value: null,
+          source_page: null,
+          source_quote: null,
+          confidence: 1,
+        },
+        fact_b_doc: {
+          value: entityCoherence.groups[1]?.occurrences[0]?.filename ?? null,
           source_page: null,
           source_quote: null,
           confidence: 1,
@@ -3030,5 +3327,6 @@ export async function aggregateTypedMemoryToE2(
     real_estate_buyer_mismatch_results: realEstateBuyerRows,
     incentive_recipient_mismatch_results: incentiveRecipientRows,
     substantiality_recon_results: [substantialityRecon],
+    entity_coherence_results: [entityCoherence],
   };
 }
