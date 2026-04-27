@@ -13,18 +13,17 @@ export type {
   EB1CFacts,
 } from './schema';
 
-type CommonIngestFields = {
+export interface IngestSuccess {
   filename: string;
   pageCount: number;
   detection_confidence: number;
   detection_reasoning: string;
+  caseFacts: CaseFacts;
   draft?: string;
   draftError?: { code: string; message: string };
   review?: ReviewReport;
   reviewError?: { code: string; message: string };
-};
-
-export type IngestSuccess = CommonIngestFields & CaseFacts;
+}
 
 export interface IngestFailure {
   filename: string;
@@ -82,13 +81,13 @@ export async function ingestPdf(buffer: Buffer, filename: string): Promise<Inges
 
   try {
     const { caseFacts } = await extractFactsByCaseType(caseType, pdf.text);
-    const common: CommonIngestFields = {
+    return {
       filename,
       pageCount: pdf.pageCount,
       detection_confidence: detectionConfidence,
       detection_reasoning: detectionReasoning,
+      caseFacts,
     };
-    return { ...common, ...caseFacts };
   } catch (e: unknown) {
     return {
       filename,

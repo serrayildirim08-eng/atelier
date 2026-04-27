@@ -1,5 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+import { getAnthropic } from '@/lib/anthropic';
 import { DetectionSchema, type Detection } from './schema';
 
 const SYSTEM_PROMPT = `You are an immigration paralegal performing fast case-type triage on a client's case folder. Read the document samples and decide which one of four visa types the case is. Return a structured detection result.
@@ -25,11 +25,7 @@ Output rules:
 - evidence_quotes: 1–3 short verbatim quotes (each ≤30 words) from the documents that justify the choice.
 - If the documents show MULTIPLE filing types (e.g. an E-2 followed by an EB-1C amendment), pick the type that the COVER LETTER / PETITION MEMO is currently arguing — that is the active case. Note ambiguity in reasoning.`;
 
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) _client = new Anthropic();
-  return _client;
-}
+const DETECTION_FORMAT = zodOutputFormat(DetectionSchema);
 
 const PER_FILE_CHARS = 4000;
 const MAX_FILES = 3;
@@ -54,13 +50,15 @@ export async function detectCaseType(samples: DetectionInput[]): Promise<Detecti
     )
     .join('\n\n---\n\n');
 
-  const response = await client().messages.parse({
+  const response = await getAnthropic().messages.parse({
     model: 'claude-haiku-4-5',
     max_tokens: 2000,
-    system: SYSTEM_PROMPT,
+    system: [
+      { type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } },
+    ],
     messages: [{ role: 'user', content: trimmed }],
     output_config: {
-      format: zodOutputFormat(DetectionSchema),
+      format: DETECTION_FORMAT,
     },
   });
 

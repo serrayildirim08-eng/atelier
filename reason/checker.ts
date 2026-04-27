@@ -1,11 +1,7 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
-import type { CaseFacts } from '@/ingest/schema';
+import { getAnthropic } from '@/lib/anthropic';
+import type { CaseFacts, CaseType } from '@/ingest/schema';
 import { ReviewReportSchema, type ReviewReport } from './schema';
-
-/* ---------------------------------------------------------------------- */
-/* Shared review framework                                                */
-/* ---------------------------------------------------------------------- */
 
 const SHARED_REVIEW_FRAMEWORK = `Conduct four checks and produce a structured review report.
 
@@ -50,10 +46,8 @@ For every dollar amount, date, name, address, ownership percentage, or other rep
   - not_ready: critical errors that require restarting sections.
 - element labels: use exactly the labels listed in the per-case-type block below, or "general" for findings that don't map to a specific element/criterion.`;
 
-/* ---------------------------------------------------------------------- */
-/* E-2 reviewer prompt                                                    */
-/* ---------------------------------------------------------------------- */
-
+// E-2 reviewer — Authority cascade: INA § 101(a)(15)(E)(ii); 8 CFR § 214.2(e); 9 FAM 402.9;
+// USCIS Policy Manual Vol. 2 Part G; Matter of Walsh and Pollard; Matter of Ho by analogy.
 const E2_SYSTEM_PROMPT = `You are a senior US immigration attorney conducting a pre-submission review of a draft E-2 Treaty Investor visa cover letter. Catch errors and weaknesses BEFORE filing. The legal cascade: INA § 101(a)(15)(E)(ii); 8 CFR § 214.2(e); 9 FAM 402.9; USCIS Policy Manual Vol. 2 Part G; Matter of Walsh and Pollard; Matter of Ho by analogy.
 
 You receive: (1) a Facts JSON extracted from source documents (each value carrying source_page, source_quote, confidence) and (2) the Draft cover letter.
@@ -80,10 +74,8 @@ ${SHARED_REVIEW_FRAMEWORK}
 - Date bracket: incorporation → EIN → bank account → wires → lease → buildout → first hire → operating start → filing — flag any out-of-order events (especially lease commencing AFTER filing, EIN issued AFTER lease signed, first payroll AFTER extension RFE).
 - 2025-2026 trend: PA-2025-16 discretionary factors not addressed; 1099-only hiring plans; absentee franchise structures.`;
 
-/* ---------------------------------------------------------------------- */
-/* EB-1A reviewer prompt                                                  */
-/* ---------------------------------------------------------------------- */
-
+// EB-1A reviewer — Authority cascade: INA § 203(b)(1)(A); 8 CFR § 204.5(h);
+// Kazarian v. USCIS, 596 F.3d 1115 (9th Cir. 2010); USCIS Policy Manual Vol. 6 Part F Ch. 2.
 const EB1A_SYSTEM_PROMPT = `You are a senior US immigration attorney conducting a pre-submission review of a draft EB-1A (Alien of Extraordinary Ability) I-140 petition memorandum. Catch errors and weaknesses BEFORE filing. The legal cascade: INA § 203(b)(1)(A); 8 CFR § 204.5(h); Kazarian v. USCIS, 596 F.3d 1115 (9th Cir. 2010); USCIS Policy Manual Vol. 6 Part F Ch. 2.
 
 You receive: (1) a Facts JSON extracted from source documents (each value carrying source_page, source_quote, confidence) and (2) the Draft cover letter.
@@ -116,10 +108,8 @@ ${SHARED_REVIEW_FRAMEWORK}
 - Citation counts: claimed totals not reconciled to Google Scholar / Web of Science; ex-self-citation not addressed when USCIS demands it; co-authorship dilution on 100+-author papers.
 - High salary (Criterion 9): comparison group not appropriate (e.g., comparing to all software engineers when claim is computer-vision specialist).`;
 
-/* ---------------------------------------------------------------------- */
-/* EB-1B reviewer prompt                                                  */
-/* ---------------------------------------------------------------------- */
-
+// EB-1B reviewer — Authority cascade: INA § 203(b)(1)(B); 8 CFR § 204.5(i);
+// USCIS Policy Manual Vol. 6 Part F Ch. 3.
 const EB1B_SYSTEM_PROMPT = `You are a senior US immigration attorney conducting a pre-submission review of a draft EB-1B (Outstanding Professor or Researcher) I-140 petition memorandum. Catch errors and weaknesses BEFORE filing. The legal cascade: INA § 203(b)(1)(B); 8 CFR § 204.5(i); USCIS Policy Manual Vol. 6 Part F Ch. 3.
 
 You receive: (1) a Facts JSON extracted from source documents and (2) the Draft cover letter.
@@ -147,10 +137,8 @@ ${SHARED_REVIEW_FRAMEWORK}
 - Criteria support: USCIS uses 8 CFR 204.5(i)(3)(i) standards similar to (h)(3) — same red flags as EB-1A on awards / membership / published material / contributions / authorship / judging.
 - Expert letters: same patterns as EB-1A; particular weight on arms-length senior faculty at OTHER institutions; flag if all letters come from current institution / dissertation supervisors.`;
 
-/* ---------------------------------------------------------------------- */
-/* EB-1C reviewer prompt                                                  */
-/* ---------------------------------------------------------------------- */
-
+// EB-1C reviewer — Authority cascade: INA § 203(b)(1)(C); INA § 101(a)(44); 8 CFR § 204.5(j);
+// USCIS Policy Manual Vol. 6 Part F Ch. 5.
 const EB1C_SYSTEM_PROMPT = `You are a senior US immigration attorney conducting a pre-submission review of a draft EB-1C (Multinational Manager or Executive) I-140 petition memorandum. Catch errors and weaknesses BEFORE filing. The legal cascade: INA § 203(b)(1)(C); INA § 101(a)(44); 8 CFR § 204.5(j); USCIS Policy Manual Vol. 6 Part F Ch. 5.
 
 You receive: (1) a Facts JSON extracted from source documents and (2) the Draft cover letter.
@@ -175,32 +163,18 @@ ${SHARED_REVIEW_FRAMEWORK}
 - Calendar gaps: 1-year-abroad window is calculated incorrectly (e.g., excluding L-1 admission window).
 - 2025–2026 trend: USCIS has been particularly aggressive on EB-1C qualifying-capacity narratives; flag any role description that reads as "first-line supervisor" or where the beneficiary supervises mostly contractors.`;
 
-/* ---------------------------------------------------------------------- */
-/* SDK plumbing                                                            */
-/* ---------------------------------------------------------------------- */
+const SYSTEM_PROMPTS: Record<CaseType, string> = {
+  E2: E2_SYSTEM_PROMPT,
+  EB1A: EB1A_SYSTEM_PROMPT,
+  EB1B: EB1B_SYSTEM_PROMPT,
+  EB1C: EB1C_SYSTEM_PROMPT,
+};
 
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) _client = new Anthropic();
-  return _client;
-}
+const REVIEW_FORMAT = zodOutputFormat(ReviewReportSchema);
 
 export interface ReviewResult {
   report: ReviewReport;
   usage: { input_tokens: number; output_tokens: number };
-}
-
-function systemPromptFor(caseFacts: CaseFacts): string {
-  switch (caseFacts.case_type) {
-    case 'E2':
-      return E2_SYSTEM_PROMPT;
-    case 'EB1A':
-      return EB1A_SYSTEM_PROMPT;
-    case 'EB1B':
-      return EB1B_SYSTEM_PROMPT;
-    case 'EB1C':
-      return EB1C_SYSTEM_PROMPT;
-  }
 }
 
 export async function checkDraft(
@@ -208,15 +182,22 @@ export async function checkDraft(
   draft: string,
 ): Promise<ReviewResult> {
   const factsJson = JSON.stringify(caseFacts.facts, null, 2);
-  const response = await client().messages.parse({
+
+  const response = await getAnthropic().messages.parse({
     model: 'claude-opus-4-7',
     max_tokens: 16000,
     thinking: { type: 'adaptive' },
     output_config: {
       effort: 'high',
-      format: zodOutputFormat(ReviewReportSchema),
+      format: REVIEW_FORMAT,
     },
-    system: systemPromptFor(caseFacts),
+    system: [
+      {
+        type: 'text',
+        text: SYSTEM_PROMPTS[caseFacts.case_type],
+        cache_control: { type: 'ephemeral' },
+      },
+    ],
     messages: [
       {
         role: 'user',

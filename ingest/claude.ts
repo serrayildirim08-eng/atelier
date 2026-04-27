@@ -1,5 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
+import { getAnthropic } from '@/lib/anthropic';
 import {
   E2FactsSchema,
   EB1AFactsSchema,
@@ -7,15 +7,7 @@ import {
   EB1CFactsSchema,
   type CaseType,
   type CaseFacts,
-  type E2Facts,
-  type EB1AFacts,
-  type EB1BFacts,
-  type EB1CFacts,
 } from './schema';
-
-/* ---------------------------------------------------------------------- */
-/* Shared prompt fragments                                                */
-/* ---------------------------------------------------------------------- */
 
 const SHARED_PROVENANCE_RULES = `Provenance rules — non-negotiable for every leaf field:
 
@@ -28,10 +20,8 @@ const SHARED_PROVENANCE_RULES = `Provenance rules — non-negotiable for every l
 7. Arrays: include every distinct entry the source supports. Empty arrays are fine when the source has nothing.
 8. red_flags: a free-form list of forensic concerns you noticed during extraction (date order issues, name spelling variants, unresolved currency, suspicious gaps, etc.). Each entry is a short sentence with source_page+source_quote when applicable.`;
 
-/* ---------------------------------------------------------------------- */
-/* E-2 system prompt                                                      */
-/* ---------------------------------------------------------------------- */
-
+// E-2 — Authority cascade: INA § 101(a)(15)(E)(ii); 8 CFR § 214.2(e); 9 FAM 402.9;
+// USCIS Policy Manual Vol. 2 Part G; Matter of Walsh and Pollard (BIA 1988); Matter of Ho by analogy.
 const E2_SYSTEM_PROMPT = `You are a senior immigration paralegal at Akalan Immigration Law performing forensic fact extraction from an E-2 Treaty Investor visa case folder.
 
 Authority cascade (the briefing the agent reasons from):
@@ -71,10 +61,8 @@ ${SHARED_PROVENANCE_RULES}
 
 Output the structured E2 facts. Do not narrate. Do not add commentary outside the schema.`;
 
-/* ---------------------------------------------------------------------- */
-/* EB-1A system prompt                                                    */
-/* ---------------------------------------------------------------------- */
-
+// EB-1A — Authority cascade: INA § 203(b)(1)(A); 8 CFR § 204.5(h); Kazarian v. USCIS,
+// 596 F.3d 1115 (9th Cir. 2010); USCIS Policy Manual Vol. 6 Part F Ch. 2.
 const EB1A_SYSTEM_PROMPT = `You are a senior immigration paralegal at Akalan Immigration Law performing forensic fact extraction from an EB-1A (Alien of Extraordinary Ability) case folder.
 
 Authority cascade:
@@ -122,10 +110,8 @@ Forensic red_flags to surface:
 
 ${SHARED_PROVENANCE_RULES}`;
 
-/* ---------------------------------------------------------------------- */
-/* EB-1B system prompt                                                    */
-/* ---------------------------------------------------------------------- */
-
+// EB-1B — Authority cascade: INA § 203(b)(1)(B); 8 CFR § 204.5(i);
+// USCIS Policy Manual Vol. 6 Part F Ch. 3.
 const EB1B_SYSTEM_PROMPT = `You are a senior immigration paralegal at Akalan Immigration Law performing forensic fact extraction from an EB-1B (Outstanding Professor or Researcher) case folder.
 
 Authority cascade:
@@ -160,10 +146,8 @@ Forensic red_flags to surface:
 
 ${SHARED_PROVENANCE_RULES}`;
 
-/* ---------------------------------------------------------------------- */
-/* EB-1C system prompt                                                    */
-/* ---------------------------------------------------------------------- */
-
+// EB-1C — Authority cascade: INA § 203(b)(1)(C); INA § 101(a)(44); 8 CFR § 204.5(j);
+// USCIS Policy Manual Vol. 6 Part F Ch. 5; Matter of Z-A-, Inc. (AAO 2016).
 const EB1C_SYSTEM_PROMPT = `You are a senior immigration paralegal at Akalan Immigration Law performing forensic fact extraction from an EB-1C (Multinational Manager or Executive) case folder.
 
 Authority cascade:
@@ -207,67 +191,40 @@ Forensic red_flags to surface:
 
 ${SHARED_PROVENANCE_RULES}`;
 
-/* ---------------------------------------------------------------------- */
-/* SDK plumbing                                                            */
-/* ---------------------------------------------------------------------- */
+const SYSTEM_PROMPTS: Record<CaseType, string> = {
+  E2: E2_SYSTEM_PROMPT,
+  EB1A: EB1A_SYSTEM_PROMPT,
+  EB1B: EB1B_SYSTEM_PROMPT,
+  EB1C: EB1C_SYSTEM_PROMPT,
+};
 
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) _client = new Anthropic();
-  return _client;
-}
+const FORMATS = {
+  E2: zodOutputFormat(E2FactsSchema),
+  EB1A: zodOutputFormat(EB1AFactsSchema),
+  EB1B: zodOutputFormat(EB1BFactsSchema),
+  EB1C: zodOutputFormat(EB1CFactsSchema),
+} as const;
 
 export interface ExtractionUsage {
   input_tokens: number;
   output_tokens: number;
 }
 
-interface ExtractionConfig<TFacts> {
-  system_prompt: string;
-  schema: Parameters<typeof zodOutputFormat>[0];
-  validate: (parsed: unknown) => TFacts;
-}
-
-function configFor(case_type: CaseType): ExtractionConfig<unknown> {
-  switch (case_type) {
-    case 'E2':
-      return {
-        system_prompt: E2_SYSTEM_PROMPT,
-        schema: E2FactsSchema,
-        validate: (p) => p as E2Facts,
-      };
-    case 'EB1A':
-      return {
-        system_prompt: EB1A_SYSTEM_PROMPT,
-        schema: EB1AFactsSchema,
-        validate: (p) => p as EB1AFacts,
-      };
-    case 'EB1B':
-      return {
-        system_prompt: EB1B_SYSTEM_PROMPT,
-        schema: EB1BFactsSchema,
-        validate: (p) => p as EB1BFacts,
-      };
-    case 'EB1C':
-      return {
-        system_prompt: EB1C_SYSTEM_PROMPT,
-        schema: EB1CFactsSchema,
-        validate: (p) => p as EB1CFacts,
-      };
-  }
-}
-
 export async function extractFactsByCaseType(
   case_type: CaseType,
   pdfText: string,
 ): Promise<{ caseFacts: CaseFacts; usage: ExtractionUsage }> {
-  const cfg = configFor(case_type);
-
-  const response = await client().messages.parse({
+  const response = await getAnthropic().messages.parse({
     model: 'claude-sonnet-4-6',
     max_tokens: 16000,
     thinking: { type: 'adaptive' },
-    system: cfg.system_prompt,
+    system: [
+      {
+        type: 'text',
+        text: SYSTEM_PROMPTS[case_type],
+        cache_control: { type: 'ephemeral' },
+      },
+    ],
     messages: [
       {
         role: 'user',
@@ -275,7 +232,7 @@ export async function extractFactsByCaseType(
       },
     ],
     output_config: {
-      format: zodOutputFormat(cfg.schema),
+      format: FORMATS[case_type],
     },
   });
 
@@ -283,21 +240,12 @@ export async function extractFactsByCaseType(
     throw new Error(`Extractor for ${case_type} did not match the schema`);
   }
 
-  const facts = cfg.validate(response.parsed_output);
-  const usage: ExtractionUsage = {
-    input_tokens: response.usage.input_tokens,
-    output_tokens: response.usage.output_tokens,
+  const caseFacts = { case_type, facts: response.parsed_output } as CaseFacts;
+  return {
+    caseFacts,
+    usage: {
+      input_tokens: response.usage.input_tokens,
+      output_tokens: response.usage.output_tokens,
+    },
   };
-
-  // The discriminated union requires the literal case_type tag inline.
-  switch (case_type) {
-    case 'E2':
-      return { caseFacts: { case_type: 'E2', facts: facts as E2Facts }, usage };
-    case 'EB1A':
-      return { caseFacts: { case_type: 'EB1A', facts: facts as EB1AFacts }, usage };
-    case 'EB1B':
-      return { caseFacts: { case_type: 'EB1B', facts: facts as EB1BFacts }, usage };
-    case 'EB1C':
-      return { caseFacts: { case_type: 'EB1C', facts: facts as EB1CFacts }, usage };
-  }
 }

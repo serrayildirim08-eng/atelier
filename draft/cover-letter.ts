@@ -1,15 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk';
-import type {
-  CaseFacts,
-  E2Facts,
-  EB1AFacts,
-  EB1BFacts,
-  EB1CFacts,
-} from '@/ingest/schema';
-
-/* ---------------------------------------------------------------------- */
-/* Shared drafting rules                                                  */
-/* ---------------------------------------------------------------------- */
+import { getAnthropic } from '@/lib/anthropic';
+import type { CaseFacts, CaseType } from '@/ingest/schema';
 
 const SHARED_DRAFTING_RULES = `Drafting rules — strict (a real attorney will sign and file this; hallucinated citations or invented facts cost the firm sanctions):
 
@@ -31,10 +21,8 @@ const HEADER_TEMPLATE = `Letter structure:
 - Closing paragraph requesting favorable adjudication.
 - Signature block placeholder for the attorney of record.`;
 
-/* ---------------------------------------------------------------------- */
-/* E-2 drafter prompt                                                     */
-/* ---------------------------------------------------------------------- */
-
+// E-2 — drafter authority allowlist: INA § 101(a)(15)(E)(ii); 8 CFR § 214.2(e); 9 FAM 402.9;
+// USCIS Policy Manual Vol. 2 Part G; Matter of Walsh and Pollard (BIA 1988); Matter of Ho by analogy.
 const E2_SYSTEM_PROMPT = `You are an immigration attorney drafting a cover letter to USCIS / a U.S. consulate in support of an E-2 Treaty Investor visa application for Akalan Immigration Law.
 
 AUTHORITIES — cite from this list only:
@@ -76,10 +64,8 @@ ${HEADER_TEMPLATE}
 
 ${SHARED_DRAFTING_RULES}`;
 
-/* ---------------------------------------------------------------------- */
-/* EB-1A drafter prompt                                                   */
-/* ---------------------------------------------------------------------- */
-
+// EB-1A — drafter authority allowlist: INA § 203(b)(1)(A); 8 CFR § 204.5(h); Kazarian v. USCIS,
+// 596 F.3d 1115 (9th Cir. 2010); USCIS Policy Manual Vol. 6 Part F Ch. 2.
 const EB1A_SYSTEM_PROMPT = `You are an immigration attorney drafting a cover letter / I-140 petition memorandum for an EB-1A (Alien of Extraordinary Ability) self-petition for Akalan Immigration Law.
 
 AUTHORITIES — cite from this list only:
@@ -128,10 +114,8 @@ ${HEADER_TEMPLATE}
 
 ${SHARED_DRAFTING_RULES}`;
 
-/* ---------------------------------------------------------------------- */
-/* EB-1B drafter prompt                                                   */
-/* ---------------------------------------------------------------------- */
-
+// EB-1B — drafter authority allowlist: INA § 203(b)(1)(B); 8 CFR § 204.5(i);
+// USCIS Policy Manual Vol. 6 Part F Ch. 3.
 const EB1B_SYSTEM_PROMPT = `You are an immigration attorney drafting a cover letter / I-140 petition memorandum for an EB-1B (Outstanding Professor or Researcher) employer-sponsored petition for Akalan Immigration Law.
 
 AUTHORITIES — cite from this list only:
@@ -166,10 +150,8 @@ ${HEADER_TEMPLATE}
 
 ${SHARED_DRAFTING_RULES}`;
 
-/* ---------------------------------------------------------------------- */
-/* EB-1C drafter prompt                                                   */
-/* ---------------------------------------------------------------------- */
-
+// EB-1C — drafter authority allowlist: INA § 203(b)(1)(C); INA § 101(a)(44); 8 CFR § 204.5(j);
+// USCIS Policy Manual Vol. 6 Part F Ch. 5; Matter of Z-A-, Inc. (AAO 2016).
 const EB1C_SYSTEM_PROMPT = `You are an immigration attorney drafting a cover letter / I-140 petition memorandum for an EB-1C (Multinational Manager or Executive) employer-sponsored petition for Akalan Immigration Law.
 
 AUTHORITIES — cite from this list only:
@@ -206,47 +188,35 @@ ${HEADER_TEMPLATE}
 
 ${SHARED_DRAFTING_RULES}`;
 
-/* ---------------------------------------------------------------------- */
-/* SDK plumbing                                                            */
-/* ---------------------------------------------------------------------- */
-
-let _client: Anthropic | null = null;
-function client(): Anthropic {
-  if (!_client) _client = new Anthropic();
-  return _client;
-}
+const SYSTEM_PROMPTS: Record<CaseType, string> = {
+  E2: E2_SYSTEM_PROMPT,
+  EB1A: EB1A_SYSTEM_PROMPT,
+  EB1B: EB1B_SYSTEM_PROMPT,
+  EB1C: EB1C_SYSTEM_PROMPT,
+};
 
 export interface DraftResult {
   letter: string;
   usage: { input_tokens: number; output_tokens: number };
 }
 
-function systemPromptFor(caseFacts: CaseFacts): string {
-  switch (caseFacts.case_type) {
-    case 'E2':
-      return E2_SYSTEM_PROMPT;
-    case 'EB1A':
-      return EB1A_SYSTEM_PROMPT;
-    case 'EB1B':
-      return EB1B_SYSTEM_PROMPT;
-    case 'EB1C':
-      return EB1C_SYSTEM_PROMPT;
-  }
-}
-
-function userMessageFor(caseFacts: CaseFacts): string {
-  const factsJson = JSON.stringify(caseFacts.facts, null, 2);
-  return `Draft the cover letter using the extracted facts below. Each value carries source_page (page in the client document), source_quote (verbatim phrase), and confidence (0–1).\n\n\`\`\`json\n${factsJson}\n\`\`\``;
-}
-
 export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResult> {
-  const response = await client().messages.create({
+  const factsJson = JSON.stringify(caseFacts.facts, null, 2);
+  const userMessage = `Draft the cover letter using the extracted facts below. Each value carries source_page (page in the client document), source_quote (verbatim phrase), and confidence (0–1).\n\n\`\`\`json\n${factsJson}\n\`\`\``;
+
+  const response = await getAnthropic().messages.create({
     model: 'claude-opus-4-7',
     max_tokens: 16000,
     thinking: { type: 'adaptive' },
     output_config: { effort: 'high' },
-    system: systemPromptFor(caseFacts),
-    messages: [{ role: 'user', content: userMessageFor(caseFacts) }],
+    system: [
+      {
+        type: 'text',
+        text: SYSTEM_PROMPTS[caseFacts.case_type],
+        cache_control: { type: 'ephemeral' },
+      },
+    ],
+    messages: [{ role: 'user', content: userMessage }],
   });
 
   let letter = '';
@@ -263,19 +233,4 @@ export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResul
       output_tokens: response.usage.output_tokens,
     },
   };
-}
-
-// Backward-compat helper for callers that still pass legacy E2Facts.
-// Wraps it in the new discriminated-union shape.
-export function asE2CaseFacts(facts: E2Facts): CaseFacts {
-  return { case_type: 'E2', facts };
-}
-export function asEB1ACaseFacts(facts: EB1AFacts): CaseFacts {
-  return { case_type: 'EB1A', facts };
-}
-export function asEB1BCaseFacts(facts: EB1BFacts): CaseFacts {
-  return { case_type: 'EB1B', facts };
-}
-export function asEB1CCaseFacts(facts: EB1CFacts): CaseFacts {
-  return { case_type: 'EB1C', facts };
 }

@@ -26,10 +26,9 @@ function isFieldLeaf(v: unknown): v is FieldProvenance {
 interface IngestResult {
   filename: string;
   pageCount: number;
-  case_type?: CaseType;
+  caseFacts?: { case_type: CaseType; facts: Record<string, unknown> };
   detection_confidence?: number;
   detection_reasoning?: string;
-  facts?: Record<string, unknown>;
   draft?: string;
   draftError?: { code: string; message: string };
   review?: ReviewReport;
@@ -166,7 +165,7 @@ export default function Page() {
       <div
         onDragOver={(e) => {
           e.preventDefault();
-          setDragActive(true);
+          if (!dragActive) setDragActive(true);
         }}
         onDragLeave={() => setDragActive(false)}
         onDrop={onDrop}
@@ -238,7 +237,8 @@ function ResultCard({ result }: { result: IngestResult }) {
       </div>
     );
   }
-  if (!result.facts || !result.case_type) return null;
+  if (!result.caseFacts) return null;
+  const { case_type, facts } = result.caseFacts;
 
   return (
     <div className="border rounded p-4 bg-white">
@@ -257,10 +257,10 @@ function ResultCard({ result }: { result: IngestResult }) {
         <span
           className={
             'shrink-0 inline-block text-xs px-2 py-1 rounded border font-medium ' +
-            CASE_TYPE_STYLE[result.case_type]
+            CASE_TYPE_STYLE[case_type]
           }
         >
-          {CASE_TYPE_LABEL[result.case_type]}
+          {CASE_TYPE_LABEL[case_type]}
           {typeof result.detection_confidence === 'number' && (
             <span className="ml-2 font-normal text-[10px] opacity-75">
               {result.detection_confidence.toFixed(2)}
@@ -269,7 +269,7 @@ function ResultCard({ result }: { result: IngestResult }) {
         </span>
       </div>
 
-      <FactsViewer facts={result.facts} />
+      <FactsViewer facts={facts} />
 
       <DraftSection result={result} />
       <ReviewSection result={result} />
@@ -296,7 +296,9 @@ function FactSection({ label, value }: { label: string; value: unknown }) {
     return (
       <div>
         <div className="text-xs font-medium uppercase text-gray-500 mb-1">{label}</div>
-        <FactRow field={value} />
+        <div className="border rounded">
+          <FactRowInline field={value} />
+        </div>
       </div>
     );
   }
@@ -422,14 +424,6 @@ function ArrayItem({
   return (
     <div className="text-sm">
       [{index}] {String(item)}
-    </div>
-  );
-}
-
-function FactRow({ field }: { field: FieldProvenance }) {
-  return (
-    <div className="border rounded">
-      <FactRowInline field={field} />
     </div>
   );
 }
