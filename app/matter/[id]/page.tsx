@@ -7,6 +7,7 @@ import { OperationsExpenditureTable } from '@/app/components/operations-expendit
 import { ConflictRegister } from '@/app/components/conflict-register';
 import { AuthorityCiteCheck } from '@/app/components/authority-cite-check';
 import { DocumentInventory } from '@/app/components/document-inventory';
+import { GeneratePanel } from '@/app/components/generate-panel';
 import type { E2Facts } from '@/ingest';
 import type { CitationVerifyResult } from '@/lib/verify/types';
 
@@ -136,6 +137,8 @@ export default async function MatterPage({
       </div>
 
       <main className="px-8 pb-16 pt-2 grid gap-10">
+        <GeneratePanel matterId={id} />
+
         <section className="border border-rule paper-recess">
           <header className="px-7 py-3 flex items-baseline justify-between border-b border-rule-strong">
             <div className="flex items-baseline gap-3">
