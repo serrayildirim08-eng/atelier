@@ -34,9 +34,19 @@ import {
   GOVERNMENT_DOC_SUBTYPE_LABELS,
   type GovernmentDocFacts,
 } from './extractors/government-doc.schema';
+import type { PassportFactsRich } from './extractors/passport.schema';
+import type { I94Facts } from './extractors/i94.schema';
+import type { VisaStampFacts } from './extractors/visa-stamp.schema';
+import {
+  VITAL_RECORDS_SUBTYPE_LABELS,
+  type VitalRecordsFacts,
+} from './extractors/vital-records.schema';
 
 /** Tolerance for the manual §4.5 quality gate (USD). */
 const CONSIDERATION_GATE_TOLERANCE_USD = 100;
+
+/** Manual §3.1 — passport must be valid for ≥ 6 months from filing. */
+const PASSPORT_VALIDITY_MIN_DAYS = 180;
 
 /** Iterate every PerPdfResult in the typed memory regardless of grouping. */
 function* iterMemoryEntries(memory: TypedMemory): Generator<PerPdfResult> {
@@ -90,6 +100,10 @@ Cross-document gates (in addition to the per-element rules above):
 - Manual §5.2.1 (FX validation gate). When the typed memory contains a wire-confirmation with wire_subtype='international_wire_with_fx', |source_amount × exchange_rate − target_amount| / target_amount MUST be ≤ 1% (0.01). Mismatch = severity 3 conflict_register entry with conflict_type='fx_rate_drift'. Populate fact_a_doc with the wire filename. The infrastructure also runs this gate deterministically after your output; logging the conflict here is preferred so the narrative reflects it.
 - Manual §5.4 (SOF chain reconstruction). Use the BANK RECEIPTS, WIRE CONFIRMATIONS, and GOVERNMENT DOCUMENTS blocks to populate source_of_funds chain entries. A multi_installment bank receipt's total_received_amount sums the property-sale proceeds (compare against title_deed if both present); an international_wire_with_fx records the §5.2.1 conversion; a usd_only_wire / corporate_funding records the §5.2.3 close-of-chain deployment.
 - Manual §5.1.2 Tapu defensive paragraph. When a government document with government_doc_subtype='title_deed' appears in the typed memory, the drafter MUST insert the Tapu defensive paragraph BEFORE citing the deed exhibit. The infrastructure surfaces this requirement as a separate defensive_paragraphs_required.tapu_explanation flag in the aggregator output; you do not need to log it as a conflict_register entry — populate elements_evidence narratives accordingly so the drafter has the cue.
+- Manual §3.1 (Passport validity gate). When a rich passport extraction is present, its date_of_expiration MUST be ≥ 6 months from the filing date. Mismatch = severity 3 conflict_register entry with conflict_type='passport_expires_soon'. The infrastructure runs this gate deterministically; logging the conflict here is optional but helpful for narrative coherence.
+- Manual §3.4 (I-94 status gate). When a rich I-94 extraction is present and admit_until_date is a real date (not D/S), it MUST be ≥ filing_date. Mismatch = severity 5 conflict_register entry with conflict_type='status_violation_at_filing'. The infrastructure runs this gate deterministically.
+- Manual §12.3 / §12.4 (Translation certification gate). When a rich vital-records extraction is present and certified_translation_present.value is false, the dependent eligibility exhibit lacks a competent translator's certification. This is a severity 3 conflict_register entry with conflict_type='translation_certification_missing'. The infrastructure runs this gate deterministically.
+- Manual §3.1 / §15 (Name reconciliation). The rich passport extraction now provides full_name_native AND full_name_ascii. Use full_name_ascii for filing-bound text (cover letter, forms). When a vital-records or government-doc extraction lists ASCII names that DO NOT match the passport ASCII form, log a severity 2 'name_transliteration_drift' conflict so the attorney can review the chosen spelling.
 
 Provenance carry-over:
 - Every leaf field in the output schema carries source_page, source_quote, confidence.
@@ -139,6 +153,10 @@ function memoryToPromptText(memory: TypedMemory): string {
   const bankReceiptEntries: { filename: string; pageCount: number; bankReceipt: BankReceiptFacts }[] = [];
   const wireEntries: { filename: string; pageCount: number; wireConfirmation: WireConfirmationFacts }[] = [];
   const govDocEntries: { filename: string; pageCount: number; governmentDoc: GovernmentDocFacts }[] = [];
+  const passportEntries: { filename: string; pageCount: number; passport: PassportFactsRich }[] = [];
+  const i94Entries: { filename: string; pageCount: number; i94: I94Facts }[] = [];
+  const visaStampEntries: { filename: string; pageCount: number; visaStamp: VisaStampFacts }[] = [];
+  const vitalRecordsEntries: { filename: string; pageCount: number; vitalRecords: VitalRecordsFacts }[] = [];
 
   for (const entry of iterMemoryEntries(memory)) {
     if (entry.contract) {
@@ -167,6 +185,34 @@ function memoryToPromptText(memory: TypedMemory): string {
         filename: entry.filename,
         pageCount: entry.pageCount,
         governmentDoc: entry.governmentDoc,
+      });
+    }
+    if (entry.passport) {
+      passportEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        passport: entry.passport,
+      });
+    }
+    if (entry.i94) {
+      i94Entries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        i94: entry.i94,
+      });
+    }
+    if (entry.visaStamp) {
+      visaStampEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        visaStamp: entry.visaStamp,
+      });
+    }
+    if (entry.vitalRecords) {
+      vitalRecordsEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        vitalRecords: entry.vitalRecords,
       });
     }
   }
@@ -216,6 +262,45 @@ function memoryToPromptText(memory: TypedMemory): string {
       .join('\n\n');
     sections.push(
       `## GOVERNMENT DOCUMENTS (rich extraction) — ${govDocEntries.length} entr${govDocEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (passportEntries.length > 0) {
+    const body = passportEntries
+      .map((e) => `### ${e.filename} (page count: ${e.pageCount})\n${JSON.stringify(e.passport, null, 2)}`)
+      .join('\n\n');
+    sections.push(
+      `## PASSPORTS (rich extraction) — ${passportEntries.length} entr${passportEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (i94Entries.length > 0) {
+    const body = i94Entries
+      .map((e) => `### ${e.filename} (page count: ${e.pageCount})\n${JSON.stringify(e.i94, null, 2)}`)
+      .join('\n\n');
+    sections.push(
+      `## I-94 RECORDS (rich extraction) — ${i94Entries.length} entr${i94Entries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (visaStampEntries.length > 0) {
+    const body = visaStampEntries
+      .map((e) => `### ${e.filename} (page count: ${e.pageCount})\n${JSON.stringify(e.visaStamp, null, 2)}`)
+      .join('\n\n');
+    sections.push(
+      `## VISA STAMPS / I-797 (rich extraction) — ${visaStampEntries.length} entr${visaStampEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (vitalRecordsEntries.length > 0) {
+    const body = vitalRecordsEntries
+      .map((e) => {
+        const label = VITAL_RECORDS_SUBTYPE_LABELS[e.vitalRecords.vital_record_subtype];
+        return `### ${e.filename} — ${label} (page count: ${e.pageCount})\n${JSON.stringify(e.vitalRecords, null, 2)}`;
+      })
+      .join('\n\n');
+    sections.push(
+      `## VITAL RECORDS (rich extraction) — ${vitalRecordsEntries.length} entr${vitalRecordsEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
     );
   }
 
@@ -421,13 +506,175 @@ function findFxWireProvenance(
   return { page: null, quote: null };
 }
 
+/**
+ * One row from the manual §3.1 passport validity gate. ok=false when the
+ * passport will expire within 6 months of filing_date; ok=true with
+ * days_until_expiry=null when expiry could not be parsed.
+ */
+export interface PassportValidityAuditRow {
+  filename: string;
+  ok: boolean;
+  expiry_iso: string | null;
+  days_until_expiry: number | null;
+  source_page: number | null;
+  source_quote: string | null;
+}
+
+/** Manual §3.1 passport validity gate — pure / deterministic. */
+export function runPassportValidityGate(
+  memory: TypedMemory,
+  filingDate: Date,
+): PassportValidityAuditRow[] {
+  const rows: PassportValidityAuditRow[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.passport) continue;
+    const expiryStr = entry.passport.date_of_expiration.value;
+    const sourcePage = entry.passport.date_of_expiration.source_page;
+    const sourceQuote = entry.passport.date_of_expiration.source_quote;
+    if (!expiryStr) {
+      rows.push({
+        filename: entry.filename,
+        ok: true,
+        expiry_iso: null,
+        days_until_expiry: null,
+        source_page: sourcePage,
+        source_quote: sourceQuote,
+      });
+      continue;
+    }
+    const expiry = new Date(expiryStr);
+    if (Number.isNaN(expiry.getTime())) {
+      rows.push({
+        filename: entry.filename,
+        ok: true,
+        expiry_iso: expiryStr,
+        days_until_expiry: null,
+        source_page: sourcePage,
+        source_quote: sourceQuote,
+      });
+      continue;
+    }
+    const days = Math.floor((expiry.getTime() - filingDate.getTime()) / 86_400_000);
+    rows.push({
+      filename: entry.filename,
+      ok: days >= PASSPORT_VALIDITY_MIN_DAYS,
+      expiry_iso: expiryStr,
+      days_until_expiry: days,
+      source_page: sourcePage,
+      source_quote: sourceQuote,
+    });
+  }
+  return rows;
+}
+
+/**
+ * One row from the manual §3.4 I-94 status gate. ok=false when the
+ * Beneficiary's admit_until_date precedes filing_date (status violation).
+ * ok=true when admit_until is in the future, when D/S is in effect, or
+ * when admit_until could not be parsed.
+ */
+export interface I94StatusAuditRow {
+  filename: string;
+  ok: boolean;
+  admit_until_iso: string | null;
+  duration_of_status: boolean;
+  source_page: number | null;
+  source_quote: string | null;
+}
+
+/** Manual §3.4 I-94 status-violation gate — pure / deterministic. */
+export function runI94StatusGate(
+  memory: TypedMemory,
+  filingDate: Date,
+): I94StatusAuditRow[] {
+  const rows: I94StatusAuditRow[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.i94) continue;
+    const admitUntil = entry.i94.admit_until_date.value;
+    const dosMarker = entry.i94.duration_of_status_marker.value === true;
+    const sourcePage = entry.i94.admit_until_date.source_page;
+    const sourceQuote = entry.i94.admit_until_date.source_quote;
+    if (dosMarker || !admitUntil) {
+      rows.push({
+        filename: entry.filename,
+        ok: true,
+        admit_until_iso: admitUntil,
+        duration_of_status: dosMarker,
+        source_page: sourcePage,
+        source_quote: sourceQuote,
+      });
+      continue;
+    }
+    const admit = new Date(admitUntil);
+    if (Number.isNaN(admit.getTime())) {
+      rows.push({
+        filename: entry.filename,
+        ok: true,
+        admit_until_iso: admitUntil,
+        duration_of_status: false,
+        source_page: sourcePage,
+        source_quote: sourceQuote,
+      });
+      continue;
+    }
+    rows.push({
+      filename: entry.filename,
+      ok: admit.getTime() >= filingDate.getTime(),
+      admit_until_iso: admitUntil,
+      duration_of_status: false,
+      source_page: sourcePage,
+      source_quote: sourceQuote,
+    });
+  }
+  return rows;
+}
+
+/**
+ * One row from the manual §12.3 / §12.4 translation-certification gate.
+ * ok=false when certified_translation_present.value === false; null /
+ * unknown values are not treated as failures (the upstream extractor
+ * couldn't determine).
+ */
+export interface TranslationGateAuditRow {
+  filename: string;
+  vital_record_subtype: string;
+  ok: boolean;
+  certified_translation_present: boolean | null;
+  translator_name: string | null;
+  source_page: number | null;
+  source_quote: string | null;
+}
+
+/** Manual §12.3 / §12.4 translation-certification gate — pure / deterministic. */
+export function runTranslationGate(memory: TypedMemory): TranslationGateAuditRow[] {
+  const rows: TranslationGateAuditRow[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.vitalRecords) continue;
+    const present = entry.vitalRecords.certified_translation_present.value;
+    rows.push({
+      filename: entry.filename,
+      vital_record_subtype: entry.vitalRecords.vital_record_subtype,
+      ok: present !== false,
+      certified_translation_present: present,
+      translator_name: entry.vitalRecords.translator_name.value,
+      source_page: entry.vitalRecords.certified_translation_present.source_page,
+      source_quote: entry.vitalRecords.certified_translation_present.source_quote,
+    });
+  }
+  return rows;
+}
+
 export async function aggregateTypedMemoryToE2(
   memory: TypedMemory,
+  options?: { filingDate?: Date },
 ): Promise<{
   caseFacts: E2Facts;
   usage: AggregateUsage;
   defensive_paragraphs_required: DefensiveParagraphsRequired;
   fx_gate_results: FxGateAuditRow[];
+  passport_validity_results: PassportValidityAuditRow[];
+  i94_status_results: I94StatusAuditRow[];
+  translation_gate_results: TranslationGateAuditRow[];
 }> {
   const memoryBlock = memoryToPromptText(memory);
   const userMessage = `${USER_INSTRUCTION}\n\n# Typed memory\n\n${memoryBlock}\n\nRespond with ONLY a single JSON object matching the E2FactsSchema. No prose, no markdown fences, no commentary.`;
@@ -436,10 +683,18 @@ export async function aggregateTypedMemoryToE2(
   // parameters per schema. E2FactsSchema has ~176 (every Field<T> leaf is a
   // 4-way nullable). Use messages.create + manual JSON parse + Zod validate
   // — same pattern as ingest/claude.ts extractFactsByCaseType.
+  // Adaptive thinking is kept (cross-document reconciliation is genuinely
+  // multi-step: source-of-funds chains, ownership reconciliation, conflict
+  // detection across heterogeneous sources). Effort is bounded to 'low'
+  // because the §4.5 deterministic gate below covers the highest-stakes
+  // failure (contract vs I-129E investment drift) and the conflict_register
+  // severity rubric in the system prompt does most of the constraining.
+  // This trades roughly 5-15K extra thinking tokens for ~$0.10-$0.20/case.
   const response = await getAnthropic().messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 16000,
     thinking: { type: 'adaptive' },
+    output_config: { effort: 'low' },
     system: [
       {
         type: 'text',
@@ -609,6 +864,177 @@ export async function aggregateTypedMemoryToE2(
     });
   }
 
+  // Manual §3.1 passport validity gate (≥ 6 months from filing).
+  // filing_date defaults to "now" — the typical pipeline treats the
+  // ingest run as proxy for filing day. Caller can override via options.
+  const filingDate = options?.filingDate ?? new Date();
+  const passportRows = runPassportValidityGate(memory, filingDate);
+  for (const row of passportRows) {
+    if (row.ok) continue;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'passport_expires_soon' &&
+        c.fact_a_doc.value === row.filename,
+    );
+    if (alreadyLogged) continue;
+    parsed.data.conflict_register.push({
+      description: {
+        value: `Passport expires ${row.expiry_iso ?? 'unknown'} — ${row.days_until_expiry ?? '?'} days from filing (manual §3.1 requires ≥ ${PASSPORT_VALIDITY_MIN_DAYS} days).`,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      conflict_type: {
+        value: 'passport_expires_soon',
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      severity: {
+        value: 3,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      fact_a_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_a_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+    });
+  }
+
+  // Manual §3.4 I-94 status-violation gate (admit_until_date ≥ filing_date).
+  const i94Rows = runI94StatusGate(memory, filingDate);
+  for (const row of i94Rows) {
+    if (row.ok) continue;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'status_violation_at_filing' &&
+        c.fact_a_doc.value === row.filename,
+    );
+    if (alreadyLogged) continue;
+    parsed.data.conflict_register.push({
+      description: {
+        value: `I-94 admit-until ${row.admit_until_iso ?? 'unknown'} precedes filing date — Beneficiary is out of status at filing (manual §3.4).`,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      conflict_type: {
+        value: 'status_violation_at_filing',
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      severity: {
+        value: 5,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      fact_a_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_a_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+    });
+  }
+
+  // Manual §12.3 / §12.4 translation-certification gate.
+  const translationRows = runTranslationGate(memory);
+  for (const row of translationRows) {
+    if (row.ok) continue;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'translation_certification_missing' &&
+        c.fact_a_doc.value === row.filename,
+    );
+    if (alreadyLogged) continue;
+    parsed.data.conflict_register.push({
+      description: {
+        value: `Vital record (${row.vital_record_subtype}) lacks a competent translator's certification — manual §12 quality gate failed.`,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      conflict_type: {
+        value: 'translation_certification_missing',
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      severity: {
+        value: 3,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      fact_a_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_a_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+    });
+  }
+
   return {
     caseFacts: parsed.data,
     usage: {
@@ -617,5 +1043,8 @@ export async function aggregateTypedMemoryToE2(
     },
     defensive_paragraphs_required: computeDefensiveParagraphsRequired(memory),
     fx_gate_results: fxRows,
+    passport_validity_results: passportRows,
+    i94_status_results: i94Rows,
+    translation_gate_results: translationRows,
   };
 }
