@@ -89,7 +89,7 @@ Cross-document gates (in addition to the per-element rules above):
 - Membership-interest-transfer's effective_date_role and the executive_role_granted feed E5 develop-and-direct (manual §8.7); use them to populate elements_evidence.develop_and_direct_basis when present.
 - Manual §5.2.1 (FX validation gate). When the typed memory contains a wire-confirmation with wire_subtype='international_wire_with_fx', |source_amount × exchange_rate − target_amount| / target_amount MUST be ≤ 1% (0.01). Mismatch = severity 3 conflict_register entry with conflict_type='fx_rate_drift'. Populate fact_a_doc with the wire filename. The infrastructure also runs this gate deterministically after your output; logging the conflict here is preferred so the narrative reflects it.
 - Manual §5.4 (SOF chain reconstruction). Use the BANK RECEIPTS, WIRE CONFIRMATIONS, and GOVERNMENT DOCUMENTS blocks to populate source_of_funds chain entries. A multi_installment bank receipt's total_received_amount sums the property-sale proceeds (compare against title_deed if both present); an international_wire_with_fx records the §5.2.1 conversion; a usd_only_wire / corporate_funding records the §5.2.3 close-of-chain deployment.
-- Manual §5.1.2 Tapu defensive paragraph. When a government document with government_doc_subtype='title_deed' appears in the typed memory, the drafter MUST insert the Tapu defensive paragraph BEFORE citing the deed exhibit. The infrastructure surfaces this requirement as a separate `defensive_paragraphs_required.tapu_explanation` flag in the aggregator output; you do not need to log it as a conflict_register entry — populate elements_evidence narratives accordingly so the drafter has the cue.
+- Manual §5.1.2 Tapu defensive paragraph. When a government document with government_doc_subtype='title_deed' appears in the typed memory, the drafter MUST insert the Tapu defensive paragraph BEFORE citing the deed exhibit. The infrastructure surfaces this requirement as a separate defensive_paragraphs_required.tapu_explanation flag in the aggregator output; you do not need to log it as a conflict_register entry — populate elements_evidence narratives accordingly so the drafter has the cue.
 
 Provenance carry-over:
 - Every leaf field in the output schema carries source_page, source_quote, confidence.
@@ -546,11 +546,76 @@ export async function aggregateTypedMemoryToE2(
     }
   }
 
+  // Manual §5.2.1 FX validation gate: deterministic backstop. For every
+  // international_wire_with_fx whose source × rate disagrees with the
+  // target beyond FX_GATE_TOLERANCE, append a severity-3 conflict.
+  // Idempotent: skips if the aggregator already logged the same
+  // conflict_type for the same document.
+  const fxRows = runFxValidationGate(memory);
+  for (const row of fxRows) {
+    if (row.ok) continue;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'fx_rate_drift' &&
+        c.fact_a_doc.value === row.filename,
+    );
+    if (alreadyLogged) continue;
+    const driftPct =
+      row.relative_drift != null ? (row.relative_drift * 100).toFixed(2) : 'n/a';
+    const provenance = findFxWireProvenance(memory, row.filename);
+    parsed.data.conflict_register.push({
+      description: {
+        value: `FX validation gate failed: |source ${row.source_amount ?? '?'} ${row.source_currency ?? ''} × rate ${row.exchange_rate ?? '?'} − target ${row.target_amount ?? '?'} ${row.target_currency ?? ''}| / target = ${driftPct}% (tolerance ${(FX_GATE_TOLERANCE * 100).toFixed(0)}%). Manual §5.2.1 gate.`,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      conflict_type: {
+        value: 'fx_rate_drift',
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      severity: {
+        value: 3,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      fact_a_doc: {
+        value: row.filename,
+        source_page: provenance.page,
+        source_quote: provenance.quote,
+        confidence: 1,
+      },
+      fact_a_page: {
+        value: provenance.page,
+        source_page: provenance.page,
+        source_quote: provenance.quote,
+        confidence: 1,
+      },
+      fact_b_doc: {
+        value: row.filename,
+        source_page: provenance.page,
+        source_quote: provenance.quote,
+        confidence: 1,
+      },
+      fact_b_page: {
+        value: provenance.page,
+        source_page: provenance.page,
+        source_quote: provenance.quote,
+        confidence: 1,
+      },
+    });
+  }
+
   return {
     caseFacts: parsed.data,
     usage: {
       input_tokens: response.usage.input_tokens,
       output_tokens: response.usage.output_tokens,
     },
+    defensive_paragraphs_required: computeDefensiveParagraphsRequired(memory),
+    fx_gate_results: fxRows,
   };
 }
