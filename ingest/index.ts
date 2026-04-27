@@ -1,5 +1,6 @@
 import { extractPdfText } from './pdf';
 import { extractFactsByCaseType } from './claude';
+import { extractFactsViaVision } from './vision';
 import { detectCaseType } from './detect';
 import type { CaseFacts, CaseType, E2Facts, EB1AFacts, EB1BFacts, EB1CFacts } from './schema';
 import type { ReviewReport } from '@/reason';
@@ -48,18 +49,6 @@ export async function ingestPdf(buffer: Buffer, filename: string): Promise<Inges
     };
   }
 
-  if (pdf.looksLikeScan) {
-    return {
-      filename,
-      pageCount: pdf.pageCount,
-      error: {
-        code: 'scan_not_supported',
-        message:
-          'PDF appears to be a scan (very low text density). Vision fallback is the next phase.',
-      },
-    };
-  }
-
   let caseType: CaseType;
   let detectionConfidence: number;
   let detectionReasoning: string;
@@ -67,7 +56,9 @@ export async function ingestPdf(buffer: Buffer, filename: string): Promise<Inges
     const detection = await detectCaseType([{ filename, text: pdf.text }]);
     caseType = detection.case_type;
     detectionConfidence = detection.confidence;
-    detectionReasoning = detection.reasoning;
+    detectionReasoning = pdf.looksLikeScan
+      ? `${detection.reasoning} [Note: PDF appears scanned; detection ran on sparse OCR-like text.]`
+      : detection.reasoning;
   } catch (e: unknown) {
     return {
       filename,
@@ -80,7 +71,9 @@ export async function ingestPdf(buffer: Buffer, filename: string): Promise<Inges
   }
 
   try {
-    const { caseFacts } = await extractFactsByCaseType(caseType, pdf.text);
+    const { caseFacts } = pdf.looksLikeScan
+      ? await extractFactsViaVision(buffer, caseType)
+      : await extractFactsByCaseType(caseType, pdf.text);
     return {
       filename,
       pageCount: pdf.pageCount,
@@ -93,7 +86,7 @@ export async function ingestPdf(buffer: Buffer, filename: string): Promise<Inges
       filename,
       pageCount: pdf.pageCount,
       error: {
-        code: 'extraction_failed',
+        code: pdf.looksLikeScan ? 'vision_extraction_failed' : 'extraction_failed',
         message: e instanceof Error ? e.message : String(e),
       },
     };

@@ -192,14 +192,24 @@ Forensic red_flags to surface:
 
 ${SHARED_PROVENANCE_RULES}`;
 
-const SYSTEM_PROMPTS: Record<CaseType, string> = {
+/**
+ * Per-case-type extraction system prompts. Exported so the vision-fallback
+ * path in ingest/vision.ts can reuse the exact same case-type doctrine
+ * when sending images instead of text to Claude.
+ */
+export const SYSTEM_PROMPTS: Record<CaseType, string> = {
   E2: E2_SYSTEM_PROMPT,
   EB1A: EB1A_SYSTEM_PROMPT,
   EB1B: EB1B_SYSTEM_PROMPT,
   EB1C: EB1C_SYSTEM_PROMPT,
 };
 
-const FORMATS = {
+/**
+ * Per-case-type Zod schema formats. Exported alongside SYSTEM_PROMPTS so
+ * vision.ts can construct a structured-output extraction call without
+ * rebuilding the map.
+ */
+export const FORMATS = {
   E2: zodOutputFormat(E2FactsSchema),
   EB1A: zodOutputFormat(EB1AFactsSchema),
   EB1B: zodOutputFormat(EB1BFactsSchema),
