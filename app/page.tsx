@@ -206,6 +206,10 @@ export default function Page() {
   const [selectedEntryKey, setSelectedEntryKey] = useState<string | null>(null);
   const [entryLabels, setEntryLabels] = useState<Record<string, string>>({});
   const [dashboardOverrides, setDashboardOverrides] = useState<Record<string, string>>({});
+  // In-flight draft text streamed from the route during Phase 3. Cleared
+  // when the closing `result` event lands (which carries the server-
+  // authoritative final draft). DraftPane reads result.draft ?? this.
+  const [streamingDraft, setStreamingDraft] = useState<string>('');
 
   useEffect(() => {
     setIsElectron(typeof window !== 'undefined' && !!window.akalan?.pickFolder);
@@ -304,6 +308,7 @@ export default function Page() {
     setTypedMemory({});
     setPerPdfCount({ done: 0, total: 0 });
     setMatterRoot(rootPath);
+    setStreamingDraft('');
 
     try {
       const res = await fetch('/api/ingest-path', {
@@ -375,9 +380,25 @@ export default function Page() {
               return { ...prev, [bucket]: [...list, entry] };
             });
             setPerPdfCount((prev) => ({ done: prev.done + 1, total: prev.total }));
+          } else if (evt.type === 'draft_delta') {
+            // Streaming draft: accumulate into a sidecar state. The
+            // closing `result` event lands with the server-authoritative
+            // assembled draft, at which point the streaming buffer is
+            // cleared. DraftPane reads result.draft ?? streamingDraft so
+            // the user sees text as it's written.
+            const delta = (evt.delta as string) ?? '';
+            if (delta) setStreamingDraft((prev) => prev + delta);
+          } else if (evt.type === 'draft_done') {
+            // No-op for now — the closing `result` event arrives shortly
+            // with the full assembled draft and clears streamingDraft.
+          } else if (evt.type === 'draft_error') {
+            // The closing `result` event will carry the draftError too;
+            // we don't need to mutate state here. Keeping the branch so
+            // unknown-event-type warnings stay quiet.
           } else if (evt.type === 'result') {
             collected.push(evt.result as IngestResult);
             setResults([...collected]);
+            setStreamingDraft('');
             if (collected.length === 1) setSelectedIdx(0);
           } else if (evt.type === 'done') {
             setProgress(null);
@@ -448,6 +469,7 @@ export default function Page() {
           matterRoot={matterRoot}
           entryLabels={entryLabels}
           onOpenMatter={() => setMatterOverlayOpen(true)}
+          streamingDraft={streamingDraft}
         />
         <Marginalia result={selected} loading={loading} />
       </main>
@@ -495,14 +517,11 @@ function Header({ now }: { now: Date }) {
   });
 
   return (
-    <header className="grid grid-cols-[1fr_auto_1fr] items-center px-6 paper-grain border-b border-rule">
-      <div className="flex items-center gap-3">
-        <span className="sigil" aria-hidden>A</span>
-        <div className="flex items-baseline gap-2.5 leading-none">
-          <span className="font-display text-[1.05rem] tracking-wide">akalan</span>
-          <span className="text-rule-strong">·</span>
-          <span className="display-italic text-[1.05rem] text-rubric">atelier</span>
-        </div>
+    <header className="grid grid-cols-[1fr_auto_1fr] items-center px-6 paper-grain border-b-[1.5px] border-ink">
+      <div className="flex items-center">
+        <span className="font-display text-[46px] font-semibold tracking-[-0.035em] text-ink leading-none">
+          atelier<span className="italic">.</span>
+        </span>
       </div>
 
       <div className="flex items-center gap-3 px-3 py-1 border border-rule paper-recess text-[0.78rem] text-graphite hover:border-ink-2 transition-colors cursor-text">
@@ -724,6 +743,7 @@ function Dossier({
   matterRoot,
   entryLabels,
   onOpenMatter,
+  streamingDraft,
 }: {
   result: IngestResult | undefined;
   tab: DossierTab;
@@ -735,6 +755,7 @@ function Dossier({
   matterRoot: string | null;
   entryLabels: Record<string, string>;
   onOpenMatter: () => void;
+  streamingDraft?: string;
 }) {
   const memoryHasEntries = Object.values(typedMemory).some(
     (list) => Array.isArray(list) && list.length > 0,
@@ -775,7 +796,7 @@ function Dossier({
             onOpenMatter={onOpenMatter}
           />
         )}
-        {tab === 'draft' && <DraftPane result={result} />}
+        {tab === 'draft' && <DraftPane result={result} streamingDraft={streamingDraft} />}
         {tab === 'review' && <ReviewPane result={result} />}
         {tab === 'log' && <LogPane result={result} />}
       </div>
@@ -1521,7 +1542,13 @@ function FactLine({ field, compact }: { field: FieldProvenance; compact?: boolea
 /* Draft pane                                                              */
 /* ---------------------------------------------------------------------- */
 
-function DraftPane({ result }: { result: IngestResult }) {
+function DraftPane({
+  result,
+  streamingDraft,
+}: {
+  result: IngestResult;
+  streamingDraft?: string;
+}) {
   const [copied, setCopied] = useState(false);
 
   if (result.draftError) {
@@ -1540,7 +1567,12 @@ function DraftPane({ result }: { result: IngestResult }) {
     );
   }
 
-  if (!result.draft) {
+  // Server-authoritative draft when present; otherwise the in-flight
+  // streaming buffer (paragraphs land live as the model writes). The
+  // streaming buffer is cleared when the closing `result` event lands.
+  const text = result.draft || streamingDraft || '';
+
+  if (!text) {
     return (
       <div className="px-9 py-12 text-center">
         <div className="dinkus mb-6">⁂</div>
@@ -1553,7 +1585,7 @@ function DraftPane({ result }: { result: IngestResult }) {
 
   const onCopy = async () => {
     try {
-      await navigator.clipboard.writeText(result.draft!);
+      await navigator.clipboard.writeText(text);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
@@ -1562,7 +1594,7 @@ function DraftPane({ result }: { result: IngestResult }) {
   };
 
   // Split paragraphs for editorial typesetting
-  const paragraphs = result.draft.split(/\n\s*\n/).filter((p) => p.trim().length > 0);
+  const paragraphs = text.split(/\n\s*\n/).filter((p) => p.trim().length > 0);
 
   return (
     <div className="px-9 py-7 fade-in">
@@ -2102,14 +2134,11 @@ function StatusBar({
 
 function DragOverlay() {
   return (
-    <div
-      className="absolute inset-0 pointer-events-none grid place-items-center fade-in"
-      style={{ background: 'rgba(241, 233, 214, 0.92)' }}
-    >
+    <div className="absolute inset-0 pointer-events-none grid place-items-center fade-in bg-paper/95">
       <div className="text-center pointer-events-none">
         <div className="dinkus mb-6">⁂</div>
-        <div className="font-display italic text-[3rem] text-rubric leading-none">
-          Release to deposit.
+        <div className="font-display text-[28px] font-medium text-ink leading-none">
+          release to deposit.
         </div>
         <div className="mt-4 smcp text-graphite text-[0.78rem]">
           ※ pdfs · folders · exhibits

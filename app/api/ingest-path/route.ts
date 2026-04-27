@@ -17,7 +17,7 @@ import {
 } from '@/ingest/extractors/subtype-detect';
 import type { E2CaseSubtype } from '@/ingest/extractors/subtype-detect.schema';
 import { extractPdfText } from '@/ingest/pdf';
-import { draftCoverLetter } from '@/draft';
+import { draftCoverLetterStream } from '@/draft';
 import { checkDraft } from '@/reason';
 
 export const runtime = 'nodejs';
@@ -219,9 +219,30 @@ export async function POST(request: Request): Promise<Response> {
       // subtype call, so this is typically a no-op await.
       const e2Subtype = await e2SubtypePromise;
 
+      // Load attorney-accepted filename aliases for this matter, if any.
+      // The rename API persists them at db/filename-aliases.json keyed by
+      // matter_id (the matter folder basename). Best-effort — a missing
+      // file just means no aliases yet and the aggregator falls back to
+      // suggested_filename / raw filenames.
+      const aliasesPath =
+        process.env.FILENAME_ALIASES_PATH ?? 'db/filename-aliases.json';
+      let aliases: Record<string, { alias: string }> = {};
+      try {
+        const aliasRaw = await fs.readFile(aliasesPath, 'utf8');
+        const aliasParsed = JSON.parse(aliasRaw) as Record<
+          string,
+          Record<string, { alias: string }>
+        >;
+        aliases = aliasParsed[matterName] ?? {};
+      } catch {
+        aliases = {};
+      }
+
       let result: IngestResult;
       try {
-        const { caseFacts } = await aggregateTypedMemoryToE2(memory);
+        const { caseFacts } = await aggregateTypedMemoryToE2(memory, {
+          aliases,
+        });
         result = {
           filename: matterName,
           pageCount: totalPages,
@@ -259,17 +280,30 @@ export async function POST(request: Request): Promise<Response> {
         total: pdfPaths.length,
       });
 
+      // Streaming drafter: text deltas flow to the UI as they're written
+      // (~30 s wall-clock for a 16K-token letter; first paragraph in 3-5 s).
+      // We still assemble the full letter server-side from the final-event
+      // payload so the downstream reviewer + the closing `result` event
+      // get the same authoritative text the deltas built up.
       try {
-        const drafted = await draftCoverLetter(result.caseFacts);
-        result = { ...result, draft: drafted.letter };
+        let draft = '';
+        for await (const event of draftCoverLetterStream(result.caseFacts)) {
+          if (event.type === 'text_delta') {
+            draft += event.delta;
+            send(controller, { type: 'draft_delta', delta: event.delta });
+          } else {
+            draft = event.letter;
+          }
+        }
+        result = { ...result, draft };
+        send(controller, { type: 'draft_done' });
       } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
         result = {
           ...result,
-          draftError: {
-            code: 'draft_failed',
-            message: e instanceof Error ? e.message : String(e),
-          },
+          draftError: { code: 'draft_failed', message },
         };
+        send(controller, { type: 'draft_error', message });
       }
 
       // Phase 4 — review (Sonnet)

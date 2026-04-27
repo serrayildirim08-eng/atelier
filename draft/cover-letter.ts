@@ -247,20 +247,36 @@ export interface DraftResult {
   usage: { input_tokens: number; output_tokens: number };
 }
 
-export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResult> {
+/** Streaming events emitted by `draftCoverLetterStream`. */
+export type DraftStreamEvent =
+  | { type: 'text_delta'; delta: string }
+  | { type: 'final'; letter: string; usage: { input_tokens: number; output_tokens: number } };
+
+/**
+ * Streaming variant of `draftCoverLetter`. Yields incremental text deltas
+ * as the model writes the cover letter, then a final event with the
+ * fully-assembled letter and token usage.
+ *
+ * Why streaming here: the drafter emits 16K tokens of cover letter at
+ * Sonnet/Opus rates — wall-clock ~30 s. Streaming surfaces the first
+ * paragraph in 3-5 s, which is the largest perceived-latency win in the
+ * roadmap. Thinking deltas are intentionally not forwarded — they're not
+ * the cover letter and would confuse the UI.
+ */
+export async function* draftCoverLetterStream(
+  caseFacts: CaseFacts,
+): AsyncGenerator<DraftStreamEvent, void, unknown> {
   const model = DRAFTER_MODEL[caseFacts.case_type];
   // Facts JSON lives in the system array (not the user message) so it sits
   // on its own cache breakpoint. The byte-identical JSON.stringify(facts,
   // null, 2) shape is shared with reason/checker.ts so a within-call retry
   // (or repeated drafter run on the same facts) hits the cache prefix
-  // instead of re-paying the input rate. 5m TTL is the right horizon: the
-  // draft-then-review chain completes in minutes, and 5m cache_creation is
-  // cheaper than 1h ($3.75/MTok vs $6/MTok on Sonnet 4.6).
+  // instead of re-paying the input rate.
   const factsJson = JSON.stringify(caseFacts.facts, null, 2);
   const factsBlock = `## Extracted facts (each value carries source_page, source_quote, confidence)\n\n\`\`\`json\n${factsJson}\n\`\`\``;
   const userMessage = `Draft the cover letter using the facts in the system context.`;
 
-  const response = await getAnthropic().messages.create({
+  const stream = getAnthropic().messages.stream({
     model,
     max_tokens: 16000,
     thinking: { type: 'adaptive' },
@@ -280,8 +296,18 @@ export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResul
     messages: [{ role: 'user', content: userMessage }],
   });
 
+  for await (const event of stream) {
+    if (
+      event.type === 'content_block_delta' &&
+      event.delta.type === 'text_delta'
+    ) {
+      yield { type: 'text_delta', delta: event.delta.text };
+    }
+  }
+
+  const final = await stream.finalMessage();
   let letter = '';
-  for (const block of response.content) {
+  for (const block of final.content) {
     if (block.type === 'text') {
       letter += (letter ? '\n\n' : '') + block.text;
     }
@@ -291,14 +317,32 @@ export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResul
     stage: 'draft',
     model,
     case_type: caseFacts.case_type,
-    usage: response.usage,
+    usage: final.usage,
   });
 
-  return {
+  yield {
+    type: 'final',
     letter,
     usage: {
-      input_tokens: response.usage.input_tokens,
-      output_tokens: response.usage.output_tokens,
+      input_tokens: final.usage.input_tokens,
+      output_tokens: final.usage.output_tokens,
     },
   };
+}
+
+/**
+ * Non-streaming wrapper around `draftCoverLetterStream`. Drains the
+ * stream and returns the assembled DraftResult. Used by tests and any
+ * caller that doesn't need incremental delivery.
+ */
+export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResult> {
+  let letter = '';
+  let usage = { input_tokens: 0, output_tokens: 0 };
+  for await (const event of draftCoverLetterStream(caseFacts)) {
+    if (event.type === 'final') {
+      letter = event.letter;
+      usage = event.usage;
+    }
+  }
+  return { letter, usage };
 }
