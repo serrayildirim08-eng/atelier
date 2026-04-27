@@ -1,0 +1,58 @@
+{
+  "_meta": {
+    "comment": "Per-case-type authority allowlist. Cited in the SKILL.md authority cascades and the draft/cover-letter.ts AUTHORITIES blocks. Stem-match: an allowlist entry like '8 CFR § 214.2(e)' matches deeper subsections '(e)(12)', '(e)(14)', etc. Add new authorities to the relevant case_type. Case-law entries match either the case name OR the reporter citation.",
+    "last_verified": "2026-04-27"
+  },
+  "E2": {
+    "statutes": ["INA § 101(a)(15)(E)(ii)"],
+    "regulations": ["8 CFR § 214.2(e)"],
+    "agency": ["9 FAM 402.9", "USCIS PM Vol. 2 Pt. G"],
+    "case_law": [
+      {
+        "name": "Matter of Walsh and Pollard",
+        "reporters": ["20 I&N Dec. 60"],
+        "court": "BIA",
+        "year": 1988
+      },
+      {
+        "name": "Matter of Ho",
+        "reporters": ["22 I&N Dec. 206"],
+        "court": "Assoc. Comm'r",
+        "year": 1998
+      }
+    ]
+  },
+  "EB1A": {
+    "statutes": ["INA § 203(b)(1)(A)"],
+    "regulations": ["8 CFR § 204.5(h)"],
+    "agency": ["USCIS PM Vol. 6 Pt. F Ch. 2"],
+    "case_law": [
+      {
+        "name": "Kazarian v. USCIS",
+        "reporters": ["596 F.3d 1115"],
+        "court": "9th Cir.",
+        "year": 2010
+      }
+    ]
+  },
+  "EB1B": {
+    "statutes": ["INA § 203(b)(1)(B)"],
+    "regulations": ["8 CFR § 204.5(i)"],
+    "agency": ["USCIS PM Vol. 6 Pt. F Ch. 3"],
+    "case_law": []
+  },
+  "EB1C": {
+    "statutes": ["INA § 203(b)(1)(C)", "INA § 101(a)(44)"],
+    "regulations": ["8 CFR § 204.5(j)"],
+    "agency": ["USCIS PM Vol. 6 Pt. F Ch. 5"],
+    "case_law": [
+      {
+        "name": "Matter of Z-A-, Inc.",
+        "reporters": [],
+        "court": "AAO",
+        "year": 2016,
+        "note": "AAO non-precedent — verifier routes any uncheckable AAO citation to human_review_queue (per ccc-doctrine attorney-supremacy rule)."
+      }
+    ]
+  }
+}

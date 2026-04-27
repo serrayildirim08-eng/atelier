@@ -4,6 +4,7 @@ import { extractFactsViaVision } from './vision';
 import { detectCaseType } from './detect';
 import type { CaseFacts, CaseType, E2Facts, EB1AFacts, EB1BFacts, EB1CFacts } from './schema';
 import type { ReviewReport } from '@/reason';
+import type { VerifyReport } from '@/lib/verify';
 
 export type {
   CaseType,
@@ -22,8 +23,11 @@ export interface IngestSuccess {
   caseFacts: CaseFacts;
   draft?: string;
   draftError?: { code: string; message: string };
+  verify_report?: VerifyReport;
   review?: ReviewReport;
   reviewError?: { code: string; message: string };
+  source_pdfs?: string[];
+  scanned_pdfs?: string[];
 }
 
 export interface IngestFailure {
@@ -33,6 +37,117 @@ export interface IngestFailure {
 }
 
 export type IngestResult = IngestSuccess | IngestFailure;
+
+/**
+ * Treat a folder of PDFs as a single matter (one client, one case).
+ * Concatenates the text of every PDF with [doc: <relpath>] markers, runs
+ * detect once, extracts once. Caller is responsible for draft/review.
+ *
+ * Scanned PDFs are skipped from the merged text (vision fallback would
+ * blow the context budget at matter scale) and reported in scanned_pdfs.
+ */
+export async function ingestMatter(
+  matterName: string,
+  pdfs: { relPath: string; buffer: Buffer }[],
+): Promise<IngestResult> {
+  if (pdfs.length === 0) {
+    return {
+      filename: matterName,
+      pageCount: 0,
+      error: { code: 'no_pdfs', message: 'No PDFs in folder.' },
+    };
+  }
+
+  const docs: { relPath: string; text: string; pages: number; scanned: boolean }[] = [];
+  for (const { relPath, buffer } of pdfs) {
+    try {
+      const parsed = await extractPdfText(buffer);
+      docs.push({
+        relPath,
+        text: parsed.text,
+        pages: parsed.pageCount,
+        scanned: parsed.looksLikeScan,
+      });
+    } catch (e: unknown) {
+      docs.push({
+        relPath,
+        text: `[parse_failed: ${e instanceof Error ? e.message : String(e)}]`,
+        pages: 0,
+        scanned: false,
+      });
+    }
+  }
+
+  const sourcePdfs = docs.map((d) => d.relPath);
+  const scannedPdfs = docs.filter((d) => d.scanned).map((d) => d.relPath);
+  const totalPages = docs.reduce((acc, d) => acc + d.pages, 0);
+
+  const usable = docs.filter((d) => !d.scanned);
+  if (usable.length === 0) {
+    return {
+      filename: matterName,
+      pageCount: totalPages,
+      source_pdfs: sourcePdfs,
+      scanned_pdfs: scannedPdfs,
+      error: {
+        code: 'all_scanned',
+        message:
+          'Every PDF in this folder appears to be a scan (very low text density). Vision fallback at matter scale is not yet supported.',
+      },
+    };
+  }
+
+  const merged = usable
+    .map((d) => `=== DOCUMENT: ${d.relPath} ===\n\n${d.text}`)
+    .join('\n\n');
+
+  const samples = usable.slice(0, 3).map((d) => ({ filename: d.relPath, text: d.text }));
+
+  let caseType: CaseType;
+  let detectionConfidence: number;
+  let detectionReasoning: string;
+  try {
+    const detection = await detectCaseType(samples);
+    caseType = detection.case_type;
+    detectionConfidence = detection.confidence;
+    detectionReasoning = detection.reasoning;
+  } catch (e: unknown) {
+    return {
+      filename: matterName,
+      pageCount: totalPages,
+      source_pdfs: sourcePdfs,
+      scanned_pdfs: scannedPdfs,
+      error: {
+        code: 'detection_failed',
+        message: e instanceof Error ? e.message : String(e),
+      },
+    };
+  }
+
+  try {
+    const { caseFacts } = await extractFactsByCaseType(caseType, merged);
+    return {
+      filename: matterName,
+      pageCount: totalPages,
+      detection_confidence: detectionConfidence,
+      detection_reasoning: detectionReasoning,
+      caseFacts,
+      source_pdfs: sourcePdfs,
+      scanned_pdfs: scannedPdfs,
+    };
+  } catch (e: unknown) {
+    return {
+      filename: matterName,
+      pageCount: totalPages,
+      source_pdfs: sourcePdfs,
+      scanned_pdfs: scannedPdfs,
+      error: {
+        code: 'extraction_failed',
+        message: e instanceof Error ? e.message : String(e),
+      },
+    };
+  }
+}
 
 export async function ingestPdf(buffer: Buffer, filename: string): Promise<IngestResult> {
   let pdf;

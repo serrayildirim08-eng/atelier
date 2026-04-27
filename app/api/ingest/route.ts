@@ -1,6 +1,7 @@
 import { ingestPdf, type IngestResult } from '@/ingest';
 import { draftCoverLetter } from '@/draft';
 import { checkDraft } from '@/reason';
+import { postDraft } from '@/lib/verify';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -77,8 +78,13 @@ export async function POST(request: Request): Promise<Response> {
         };
       }
 
+      // Verify Phase B (deterministic — no I/O): citation allowlist + lint.
+      // Gives the reviewer pass concrete spans to fix instead of re-deriving.
+      const verifyReport = postDraft(letter, result.caseFacts.case_type);
+      result = { ...result, verify_report: verifyReport };
+
       try {
-        const reviewed = await checkDraft(result.caseFacts, letter);
+        const reviewed = await checkDraft(result.caseFacts, letter, verifyReport);
         return { ...result, review: reviewed.report };
       } catch (e: unknown) {
         return {

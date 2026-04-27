@@ -44,8 +44,10 @@ next-env.d.ts
 # usage telemetry (lib/usage-log.ts append-only JSONL)
 db/cost.jsonl
 
-# claude code session state
-.claude/
+# claude code session state — ignore everything in .claude/ except shared skills
+.claude/*
+!.claude/skills
+!.claude/skills/**
 
 # electron build output
 dist-electron/

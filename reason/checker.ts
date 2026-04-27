@@ -3,6 +3,8 @@ import { getAnthropic } from '@/lib/anthropic';
 import { logAnthropicUsage } from '@/lib/usage-log';
 import type { CaseFacts, CaseType } from '@/ingest/schema';
 import { ReviewReportSchema, type ReviewReport } from './schema';
+import type { VerifyReport } from '@/lib/verify';
+import { reportToReviewerPrompt } from '@/lib/verify';
 
 const SHARED_REVIEW_FRAMEWORK = `Conduct five checks and produce a structured review report.
 
@@ -232,8 +234,15 @@ export interface ReviewResult {
 export async function checkDraft(
   caseFacts: CaseFacts,
   draft: string,
+  verifyReport?: VerifyReport,
 ): Promise<ReviewResult> {
   const factsJson = JSON.stringify(caseFacts.facts, null, 2);
+  // Verify Phase B (deterministic regex + per-case-type allowlist) runs
+  // before this call. If a report is present, append it to the user prompt
+  // so the reviewer focuses on flagged spans rather than re-deriving the
+  // same checks. The system prompt remains cacheable (verify lives only in
+  // the user message, which is per-request anyway).
+  const verifySection = verifyReport ? `\n\n${reportToReviewerPrompt(verifyReport)}` : '';
 
   const response = await getAnthropic().messages.parse({
     model: 'claude-opus-4-7',
@@ -253,7 +262,7 @@ export async function checkDraft(
     messages: [
       {
         role: 'user',
-        content: `Review this ${caseFacts.case_type} cover letter draft against the source facts.\n\n## Facts (each value carries source_page, source_quote, confidence)\n\n\`\`\`json\n${factsJson}\n\`\`\`\n\n## Draft cover letter\n\n${draft}`,
+        content: `Review this ${caseFacts.case_type} cover letter draft against the source facts.\n\n## Facts (each value carries source_page, source_quote, confidence)\n\n\`\`\`json\n${factsJson}\n\`\`\`\n\n## Draft cover letter\n\n${draft}${verifySection}`,
       },
     ],
   });
