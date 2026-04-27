@@ -581,9 +581,20 @@ export interface TypedExtractInput {
 
 const MAX_TEXT_CHARS = 60_000;
 
+/**
+ * Optional per-PDF timing log. Off by default; set DEBUG_INGEST_TIMING=1
+ * (or any truthy value) to print `[ingest-timing] <file> parse=Xms
+ * haiku=Yms rich=Zms total=Wms` for each non-cached PDF. Cache hits are
+ * not logged — the whole point of the cache is they're free. Useful
+ * when investigating ingest-time complaints without sprinkling
+ * console.timers around the code.
+ */
+const TIMING_ENABLED = !!process.env.DEBUG_INGEST_TIMING;
+
 export async function classifyAndExtractOnePdf(
   input: TypedExtractInput,
 ): Promise<PerPdfResult> {
+  const t0 = TIMING_ENABLED ? Date.now() : 0;
   // Content-hash dedup: byte-identical PDFs (translation pairs left as
   // originals, email-attachment forwards, sync copies) skip the Haiku call
   // and the rich extractors. Errors are not cached upstream so we don't
@@ -595,6 +606,7 @@ export async function classifyAndExtractOnePdf(
   }
 
   let parsed;
+  const tParse0 = TIMING_ENABLED ? Date.now() : 0;
   try {
     parsed = await extractPdfText(input.buffer);
   } catch (e: unknown) {
@@ -660,6 +672,7 @@ export async function classifyAndExtractOnePdf(
   // front-only truncation drops the latter. Char-based heuristic — no
   // countTokens round-trip on the per-PDF path (we have N PDFs/case).
   const text = sampleLongText(parsed.text, MAX_TEXT_CHARS);
+  const parseMs = TIMING_ENABLED ? Date.now() - tParse0 : 0;
 
   const userMessage = `## Filename\n${input.filename}\n\n## Document text (pages delimited by [page N] markers)\n\n${text}\n\nRespond with ONLY a single JSON object matching the doc_type-discriminated PerPdfFacts schema. No prose, no markdown fences.`;
 
@@ -667,6 +680,7 @@ export async function classifyAndExtractOnePdf(
   // params across 17 variants — exceeds Anthropic's structured-output cap
   // (16 union params). Use manual JSON parse + Zod validate, same pattern
   // as ingest/claude.ts extractFactsByCaseType.
+  const tHaiku0 = TIMING_ENABLED ? Date.now() : 0;
   let response;
   try {
     response = await getAnthropic().messages.create({
@@ -742,6 +756,9 @@ export async function classifyAndExtractOnePdf(
   // first-pass facts and surface the second-pass error at telemetry
   // level. The cross-extractor gates (consideration drift, FX validation,
   // Tapu defensive flag) all run in the aggregator.
+  const haikuMs = TIMING_ENABLED ? Date.now() - tHaiku0 : 0;
+  const tRich0 = TIMING_ENABLED ? Date.now() : 0;
+
   const richInput = {
     filename: input.filename,
     text,
@@ -1100,6 +1117,15 @@ export async function classifyAndExtractOnePdf(
     incentiveDocument,
   };
   writePdfCache(hash, entry);
+
+  if (TIMING_ENABLED) {
+    const richMs = Date.now() - tRich0;
+    const totalMs = Date.now() - t0;
+    console.warn(
+      `[ingest-timing] ${input.filename} parse=${parseMs}ms haiku=${haikuMs}ms rich=${richMs}ms total=${totalMs}ms pages=${parsed.pageCount}`,
+    );
+  }
+
   return { filename: input.filename, ...entry };
 }
 
