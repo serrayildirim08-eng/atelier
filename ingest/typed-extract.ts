@@ -233,12 +233,17 @@ const FOREIGN_CORPORATE_FILENAME_RE =
 /**
  * Image-bearing PDF pages (signature pages, apostille stamps, consular
  * seals, passport photos, other). Routes when the PDF is a pure scan
- * (looksLikeScan=true) OR the filename hints at an image artifact. The
- * router handles both signals; the filename pattern below is one of two
- * triggers checked at fan-out time.
+ * (looksLikeScan=true) OR the filename hints at an image-only artifact
+ * with HIGH specificity. The earlier broad pattern (photo|signature|
+ * stamp|seal|...) over-matched: most files named *passport* or
+ * *signature* still have extractable text and don't need the vision
+ * pass — the rich passport / contract / vital-record extractors already
+ * cover the substantive fields. Restrict the filename hint to apostille
+ * + consular-seal artifacts which DO need vision and aren't otherwise
+ * extracted.
  */
 const IMAGE_PHOTO_FILENAME_RE =
-  /(photo|signature|stamp|apostille|seal|imza|fotoğraf|fotograf|mühür|muhur)/i;
+  /(apostille|consular[-_\s]?seal|notary[-_\s]?seal)/i;
 
 /* ---------------------------------------------------------------------- */
 /* Batch 6 — customer-commitment / real-estate / incentive extractors      */
@@ -1130,5 +1135,9 @@ export function getTypedExtractConcurrency(): number {
   const raw = process.env.TYPED_EXTRACT_CONCURRENCY;
   const parsed = raw ? Number.parseInt(raw, 10) : NaN;
   if (Number.isFinite(parsed) && parsed >= 1 && parsed <= 50) return parsed;
-  return 5;
+  // Default 8 lanes. Each lane is one Haiku call (per-PDF classify+
+  // extract) plus up to a handful of rich-extractor sub-calls. At
+  // typical Anthropic Tier-2+ ITPM ceilings 8 fits comfortably; bump
+  // via TYPED_EXTRACT_CONCURRENCY env var if your tier allows more.
+  return 8;
 }

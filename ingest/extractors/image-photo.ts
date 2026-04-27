@@ -85,7 +85,13 @@ Edge cases:
 
 Output: ONE JSON object matching the ImagePhotoFacts schema. No prose, no commentary, no markdown fences.`;
 
-const MAX_VISION_PAGES = 20;
+// 4 pages is enough for every image_subtype this extractor classifies:
+// passport-photo / signature-page / apostille-stamp / consular-seal /
+// other-image. The previous 20-page ceiling was sized for full document
+// scans, but image-photo emits a single image_subtype regardless of how
+// many pages we render — extra pages were token-burn with no classifier
+// signal added.
+const MAX_VISION_PAGES = 4;
 const RENDER_SCALE = 2.0;
 
 export interface ImagePhotoExtractInput {
@@ -146,7 +152,14 @@ export async function extractImagePhoto(
   let response;
   try {
     response = await getAnthropic().messages.create({
-      model: 'claude-sonnet-4-6',
+      // Haiku 4.5 is sufficient for image_subtype classification — it's
+      // a 5-class decision (passport_photo / signature_page /
+      // apostille_stamp / consular_seal / other_image) plus a few flat
+      // booleans + verbatim overlay text. Sonnet's reasoning depth was
+      // not measurably different on this task and cost ~5× more per
+      // call. The aggregator (Sonnet) reasons over these labels later;
+      // per-PDF classification stays cheap.
+      model: 'claude-haiku-4-5',
       max_tokens: 2000,
       system: [
         {
@@ -206,7 +219,7 @@ export async function extractImagePhoto(
 
   logAnthropicUsage({
     stage: 'extract',
-    model: 'claude-sonnet-4-6',
+    model: 'claude-haiku-4-5',
     case_type: 'E2',
     usage: response.usage,
   });
