@@ -1,39 +1,40 @@
 @import "tailwindcss";
 
 @theme {
-  /* Paper / ink — warm cream and ink-black, no pure white anywhere */
-  --color-paper: #F1E9D6;
-  --color-paper-2: #E8DEC4;
-  --color-paper-3: #D9CCAB;
-  --color-paper-deep: #C9B98E;
+  /* Concrete & jet — pure monochrome, no warm undertone, light surface */
+  --color-paper: #FAFAFA;
+  --color-paper-2: #F0F0F0;
+  --color-paper-3: #E5E5E5;
+  --color-paper-deep: #D4D4D4;
 
-  --color-ink: #1B1815;
-  --color-ink-2: #3A332A;
-  --color-graphite: #6B6356;
-  --color-graphite-soft: #8E8675;
+  --color-ink: #0A0A0A;
+  --color-ink-2: #1F1F1F;
+  --color-graphite: #404040;
+  --color-graphite-soft: #595959;
 
-  /* Marks — used sparingly */
-  --color-rubric: #8B2A2A;       /* oxblood: critical, brand */
-  --color-rubric-soft: #B85050;
-  --color-ochre: #A8741D;        /* warnings, minor */
-  --color-verdant: #3D5A3F;      /* ready, clean */
-  --color-seal: #6B4423;         /* umber, accents */
+  /* Marks — collapsed to monochrome; weight + tracking carry hierarchy */
+  --color-rubric: #0A0A0A;       /* brand/critical = jet, no chromatic accent */
+  --color-rubric-soft: #1F1F1F;
+  --color-ochre: #404040;        /* warning tier collapses to graphite */
+  --color-verdant: #404040;      /* OK tier collapses to graphite */
+  --color-seal: #1F1F1F;
 
   /* Hairlines */
-  --color-rule: rgba(27, 24, 21, 0.14);
-  --color-rule-strong: rgba(27, 24, 21, 0.32);
+  --color-rule: rgba(10, 10, 10, 0.10);
+  --color-rule-strong: rgba(10, 10, 10, 0.32);
 
-  /* Type stack */
-  --font-display: var(--font-display), "Newsreader", "Iowan Old Style", Georgia, serif;
-  --font-body: var(--font-body), "Source Serif 4", "Source Serif Pro", Georgia, serif;
-  --font-mono: var(--font-mono), "JetBrains Mono", "IBM Plex Mono", ui-monospace, monospace;
+  /* Type stack — system-first sans, no serif fallback */
+  --font-display: -apple-system, "Helvetica Neue", "Inter", system-ui, sans-serif;
+  --font-body: -apple-system, "Helvetica Neue", "Inter", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Berkeley Mono", Menlo, monospace;
 }
 
 html, body {
   background: var(--color-paper);
   color: var(--color-ink);
   font-family: var(--font-body);
-  font-feature-settings: "ss01" 1, "ss02" 1, "kern" 1;
+  font-weight: 500;
+  font-feature-settings: "kern" 1;
   font-optical-sizing: auto;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -48,41 +49,44 @@ html, body {
   font-variant-numeric: tabular-nums;
 }
 
-/* True small caps with confident tracking */
+/* Mono technical labels — ALL CAPS, weight + tracking carry hierarchy */
 .smcp {
-  font-variant-caps: all-small-caps;
-  letter-spacing: 0.12em;
-  font-weight: 500;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-weight: 600;
 }
 
-/* Display italic — used for moments */
+/* Italic — reserved for the wordmark period and rare emphasis. Not a hierarchy carrier. */
 .display-italic {
   font-family: var(--font-display);
   font-style: italic;
-  font-weight: 400;
+  font-weight: 600;
   letter-spacing: -0.005em;
 }
 
-/* Drop cap on empty state */
+/* Drop cap on empty state — heavy jet, no serif italic */
 .drop-cap::first-letter {
   font-family: var(--font-display);
-  font-style: italic;
-  font-size: 5.2em;
+  font-weight: 700;
+  font-size: 4.6em;
   line-height: 0.78;
   float: left;
   padding: 0.06em 0.1em 0 0;
-  color: var(--color-rubric);
+  color: var(--color-ink);
+  letter-spacing: -0.04em;
 }
 
-/* Typographic dinkus divider */
+/* Dinkus divider — mono jet, heavy tracking */
 .dinkus {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0.9rem;
-  color: var(--color-graphite-soft);
-  font-family: var(--font-display);
-  font-size: 0.95rem;
+  color: var(--color-graphite);
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
   letter-spacing: 0.4em;
 }
 .dinkus::before, .dinkus::after {
@@ -95,8 +99,8 @@ html, body {
 .paper-grain {
   background-color: var(--color-paper);
   background-image:
-    radial-gradient(circle at 1px 1px, rgba(27,24,21,0.022) 1px, transparent 0),
-    radial-gradient(circle at 3px 4px, rgba(27,24,21,0.014) 1px, transparent 0);
+    radial-gradient(circle at 1px 1px, rgba(10,10,10,0.024) 1px, transparent 0),
+    radial-gradient(circle at 3px 4px, rgba(10,10,10,0.016) 1px, transparent 0);
   background-size: 4px 4px, 7px 7px;
 }
 
@@ -109,12 +113,12 @@ html, body {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(27, 24, 21, 0.18);
+  background: rgba(10, 10, 10, 0.20);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 999px;
 }
-::-webkit-scrollbar-thumb:hover { background-color: rgba(27, 24, 21, 0.36); background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background-color: rgba(10, 10, 10, 0.40); background-clip: content-box; }
 
 /* Reveal */
 @keyframes fadeUp {
@@ -129,31 +133,31 @@ html, body {
 }
 .fade-in { animation: fadeIn 200ms ease-out both; }
 
-/* Selection — oxblood underline tint */
-::selection { background: rgba(139, 42, 42, 0.22); color: var(--color-ink); }
+/* Selection — jet wash on ink */
+::selection { background: rgba(10, 10, 10, 0.16); color: var(--color-ink); }
 
-/* Focus ring — restrained, in oxblood */
+/* Focus ring — jet, heavier */
 *:focus-visible {
-  outline: 1.5px solid var(--color-rubric);
+  outline: 1.5px solid var(--color-ink);
   outline-offset: 2px;
 }
 
-/* Wax-seal sigil for brand mark — built with type, no asset */
+/* Sigil — heavy mono mark, no asset */
 .sigil {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 1.65rem;
   height: 1.65rem;
-  border: 1px solid var(--color-ink);
+  border: 1.5px solid var(--color-ink);
   background: var(--color-paper);
-  font-family: var(--font-display);
-  font-style: italic;
-  font-weight: 500;
-  font-size: 0.95rem;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.85rem;
   color: var(--color-ink);
   border-radius: 0;
   position: relative;
+  letter-spacing: 0;
 }
 .sigil::before {
   content: "";
@@ -169,20 +173,23 @@ html, body {
   line-height: 1.55;
   color: var(--color-ink-2);
   font-family: var(--font-body);
+  font-weight: 500;
 }
 
-/* Footnote-style citation */
+/* Mono citation footnote — heavy, tracked, uppercase */
 .cite {
   font-family: var(--font-mono);
   font-size: 0.66rem;
   color: var(--color-graphite);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.18em;
+  font-weight: 600;
+  text-transform: uppercase;
   vertical-align: 1px;
 }
 
-/* Subtle inset rule — used at top of dossier */
+/* Subtle inset rule — jet hairline gradient */
 .brass-rule {
-  height: 1px;
+  height: 1.5px;
   background: linear-gradient(
     to right,
     transparent 0,

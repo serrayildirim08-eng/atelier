@@ -50,6 +50,22 @@ import {
   type CredentialFacts,
 } from './extractors/credential.schema';
 import type { RecommendationLetterFacts } from './extractors/recommendation-letter.schema';
+import {
+  PAYROLL_SUBTYPE_LABELS,
+  type PayrollFacts,
+} from './extractors/payroll.schema';
+import {
+  TAX_RETURN_SUBTYPE_LABELS,
+  TAX_BALANCE_SHEET_GATE_TOLERANCE,
+  hasScheduleL,
+  type TaxReturnFacts,
+} from './extractors/tax-return.schema';
+import {
+  FINANCIAL_STATEMENT_SUBTYPE_LABELS,
+  PL_TAX_GATE_TOLERANCE_USD,
+  hasPlNetIncome,
+  type FinancialStatementFacts,
+} from './extractors/financial-statement.schema';
 
 /** Tolerance for the manual §4.5 quality gate (USD). */
 const CONSIDERATION_GATE_TOLERANCE_USD = 100;
@@ -116,6 +132,9 @@ Cross-document gates (in addition to the per-element rules above):
 - Manual §3.4 (I-94 status gate). When a rich I-94 extraction is present and admit_until_date is a real date (not D/S), it MUST be ≥ filing_date. Mismatch = severity 5 conflict_register entry with conflict_type='status_violation_at_filing'. The infrastructure runs this gate deterministically.
 - Manual §12.3 / §12.4 (Translation certification gate). When a rich vital-records extraction is present and certified_translation_present.value is false, the dependent eligibility exhibit lacks a competent translator's certification. This is a severity 3 conflict_register entry with conflict_type='translation_certification_missing'. The infrastructure runs this gate deterministically.
 - Manual §3.1 / §15 (Name reconciliation). The rich passport extraction now provides full_name_native AND full_name_ascii. Use full_name_ascii for filing-bound text (cover letter, forms). When a vital-records or government-doc extraction lists ASCII names that DO NOT match the passport ASCII form, log a severity 2 'name_transliteration_drift' conflict so the attorney can review the chosen spelling.
+- Manual §9 / §4 (Tax balance sheet vs investment gate). When the typed memory contains a tax-return with tax_return_subtype ∈ {form_1120, form_1120s, form_1065} AND the I-129 E Supplement's investment_amount_usd is known, |schedule_l_total_assets_end − I-129E investment_amount_usd| / I-129E investment_amount_usd MUST be ≤ 25% (0.25). Mismatch = severity 3 conflict_register entry with conflict_type='tax_balance_sheet_drift'. Populate fact_a_doc with the tax-return filename and fact_b_doc with the I-129E filename. The infrastructure runs this gate deterministically.
+- Manual §9 (P&L vs tax-return net-income gate). When the typed memory contains a P&L (or combined_statements) AND a tax-return for the same tax_year, the P&L net_income_amount and the tax-return net_income_or_loss_amount MUST agree within $1,000. Mismatch = severity 3 conflict_register entry with conflict_type='pl_tax_net_income_drift'. Populate fact_a_doc with the P&L filename and fact_b_doc with the tax-return filename. The infrastructure runs this gate deterministically.
+- Manual §9 (Marginality evidence). When the typed memory contains a payroll_register or employee_list with employee_count_excluding_beneficiary ≥ 1, the Petitioner is presumed to employ ≥1 U.S. worker beyond the Beneficiary — the §9 marginality narrative is supportable. The infrastructure surfaces this as marginality_evidence_present.us_workers_employed=true alongside the case facts; populate elements_evidence.more_than_marginal_basis accordingly. When no payroll evidence is present AND the enterprise is a solo Beneficiary investor, log a severity 3-4 'marginality_unsupported' conflict.
 
 Provenance carry-over:
 - Every leaf field in the output schema carries source_page, source_quote, confidence.
@@ -248,6 +267,9 @@ function memoryToPromptText(memory: TypedMemory): string {
   const cvEntries: { filename: string; pageCount: number; cv: CvFacts }[] = [];
   const credentialEntries: { filename: string; pageCount: number; credential: CredentialFacts }[] = [];
   const recommendationLetterEntries: { filename: string; pageCount: number; recommendationLetter: RecommendationLetterFacts }[] = [];
+  const payrollEntries: { filename: string; pageCount: number; payroll: PayrollFacts }[] = [];
+  const taxReturnEntries: { filename: string; pageCount: number; taxReturn: TaxReturnFacts }[] = [];
+  const financialStatementEntries: { filename: string; pageCount: number; financialStatement: FinancialStatementFacts }[] = [];
 
   for (const entry of iterMemoryEntries(memory)) {
     if (entry.contract) {
@@ -339,6 +361,27 @@ function memoryToPromptText(memory: TypedMemory): string {
         filename: entry.filename,
         pageCount: entry.pageCount,
         recommendationLetter: entry.recommendationLetter,
+      });
+    }
+    if (entry.payroll) {
+      payrollEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        payroll: entry.payroll,
+      });
+    }
+    if (entry.taxReturn) {
+      taxReturnEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        taxReturn: entry.taxReturn,
+      });
+    }
+    if (entry.financialStatement) {
+      financialStatementEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        financialStatement: entry.financialStatement,
       });
     }
   }
@@ -475,6 +518,42 @@ function memoryToPromptText(memory: TypedMemory): string {
       .join('\n\n');
     sections.push(
       `## RECOMMENDATION LETTERS (rich extraction) — ${recommendationLetterEntries.length} entr${recommendationLetterEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (payrollEntries.length > 0) {
+    const body = payrollEntries
+      .map((e) => {
+        const label = PAYROLL_SUBTYPE_LABELS[e.payroll.payroll_subtype];
+        return `### ${e.filename} — ${label} (page count: ${e.pageCount})\n${JSON.stringify(e.payroll, null, 2)}`;
+      })
+      .join('\n\n');
+    sections.push(
+      `## PAYROLL (rich extraction) — ${payrollEntries.length} entr${payrollEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (taxReturnEntries.length > 0) {
+    const body = taxReturnEntries
+      .map((e) => {
+        const label = TAX_RETURN_SUBTYPE_LABELS[e.taxReturn.tax_return_subtype];
+        return `### ${e.filename} — ${label} (page count: ${e.pageCount})\n${JSON.stringify(e.taxReturn, null, 2)}`;
+      })
+      .join('\n\n');
+    sections.push(
+      `## TAX RETURNS (rich extraction) — ${taxReturnEntries.length} entr${taxReturnEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
+    );
+  }
+
+  if (financialStatementEntries.length > 0) {
+    const body = financialStatementEntries
+      .map((e) => {
+        const label = FINANCIAL_STATEMENT_SUBTYPE_LABELS[e.financialStatement.statement_subtype];
+        return `### ${e.filename} — ${label} (page count: ${e.pageCount})\n${JSON.stringify(e.financialStatement, null, 2)}`;
+      })
+      .join('\n\n');
+    sections.push(
+      `## FINANCIAL STATEMENTS (rich extraction) — ${financialStatementEntries.length} entr${financialStatementEntries.length === 1 ? 'y' : 'ies'}\n\n${body}`,
     );
   }
 
@@ -1060,6 +1139,211 @@ export function runCredentialVerifiabilityGate(
   return rows;
 }
 
+/**
+ * Marginality evidence cues derived deterministically from the typed
+ * memory. Sibling to `DefensiveParagraphsRequired` — different semantic
+ * axis (defensive paragraphs vs. evidence presence), so it lives in its
+ * own object. The drafter consults this to decide whether the §9
+ * "more than marginal" narrative is supportable from the file.
+ */
+export interface MarginalityEvidencePresent {
+  /**
+   * True when the typed memory contains at least one payroll_register or
+   * employee_list with employee_count_excluding_beneficiary ≥ 1. Indicates
+   * the Petitioner employs ≥1 U.S. worker beyond the Beneficiary, which
+   * supports the §9 marginality narrative under 9 FAM 402.9-6(D).
+   */
+  us_workers_employed: boolean;
+}
+
+/** Compute marginality cues from the typed memory. Pure / deterministic. */
+export function computeMarginalityEvidencePresent(
+  memory: TypedMemory,
+): MarginalityEvidencePresent {
+  let usWorkersEmployed = false;
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.payroll) continue;
+    if (
+      entry.payroll.payroll_subtype !== 'payroll_register' &&
+      entry.payroll.payroll_subtype !== 'employee_list'
+    ) {
+      continue;
+    }
+    const count = entry.payroll.employee_count_excluding_beneficiary.value;
+    if (count != null && count >= 1) {
+      usWorkersEmployed = true;
+      break;
+    }
+  }
+  return { us_workers_employed: usWorkersEmployed };
+}
+
+/**
+ * One row from the manual §9 / §4 tax-balance-sheet vs investment gate.
+ * ok=false when |schedule_l_total_assets_end − I-129E investment_amount| /
+ * I-129E investment_amount exceeds TAX_BALANCE_SHEET_GATE_TOLERANCE (25%).
+ * ok=true with relative_drift=null when the gate cannot run (one input
+ * missing).
+ */
+export interface TaxBalanceSheetAuditRow {
+  filename: string;
+  ok: boolean;
+  relative_drift: number | null;
+  schedule_l_total_assets_end: number | null;
+  i129e_investment_usd: number | null;
+  source_page: number | null;
+  source_quote: string | null;
+}
+
+/** Manual §9 / §4 tax-balance-sheet gate — pure / deterministic. */
+export function runTaxBalanceSheetGate(
+  memory: TypedMemory,
+): TaxBalanceSheetAuditRow[] {
+  // Pull the I-129 E Supplement investment amount once; the gate compares
+  // every Schedule-L-bearing tax return against it.
+  let i129eAmount: number | null = null;
+  for (const entry of iterMemoryEntries(memory)) {
+    if (entry.facts?.doc_type !== 'uscis_or_dos_form') continue;
+    const formId = entry.facts.form_id.value ?? '';
+    if (!/i[-\s]?129\s*e/i.test(formId)) continue;
+    const amount = entry.facts.investment_amount_usd.value;
+    if (amount != null) {
+      i129eAmount = amount;
+      break;
+    }
+  }
+
+  const rows: TaxBalanceSheetAuditRow[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.taxReturn) continue;
+    if (!hasScheduleL(entry.taxReturn)) continue;
+    const eoy = entry.taxReturn.schedule_l_total_assets_end.value;
+    const sourcePage = entry.taxReturn.schedule_l_total_assets_end.source_page;
+    const sourceQuote = entry.taxReturn.schedule_l_total_assets_end.source_quote;
+
+    if (eoy == null || i129eAmount == null || i129eAmount === 0) {
+      rows.push({
+        filename: entry.filename,
+        ok: true,
+        relative_drift: null,
+        schedule_l_total_assets_end: eoy,
+        i129e_investment_usd: i129eAmount,
+        source_page: sourcePage,
+        source_quote: sourceQuote,
+      });
+      continue;
+    }
+    const drift = Math.abs(eoy - i129eAmount) / Math.abs(i129eAmount);
+    rows.push({
+      filename: entry.filename,
+      ok: drift <= TAX_BALANCE_SHEET_GATE_TOLERANCE,
+      relative_drift: drift,
+      schedule_l_total_assets_end: eoy,
+      i129e_investment_usd: i129eAmount,
+      source_page: sourcePage,
+      source_quote: sourceQuote,
+    });
+  }
+  return rows;
+}
+
+/**
+ * One row from the manual §9 P&L-vs-tax-return net-income gate. Pairs
+ * each P&L (or combined_statements) with the tax-return covering the
+ * matching tax year; ok=false when |net_income drift| > $1,000.
+ */
+export interface PlTaxNetIncomeAuditRow {
+  pl_filename: string;
+  tax_filename: string;
+  tax_year: string;
+  ok: boolean;
+  drift_usd: number | null;
+  pl_net_income: number | null;
+  tax_net_income: number | null;
+  source_page: number | null;
+  source_quote: string | null;
+}
+
+/**
+ * Pull the YYYY year from a P&L period_end (ISO YYYY-MM-DD), the
+ * combined_statements period_end, or null if not parseable. The tax
+ * return uses tax_year directly.
+ */
+function plYearFromFinancialStatement(
+  facts: FinancialStatementFacts,
+): string | null {
+  if (!hasPlNetIncome(facts)) return null;
+  const periodEnd = facts.period_end.value;
+  if (!periodEnd) return null;
+  const match = /^(\d{4})/.exec(periodEnd);
+  return match ? match[1] : null;
+}
+
+/** Manual §9 P&L vs tax-return net-income gate — pure / deterministic. */
+export function runPlTaxNetIncomeGate(
+  memory: TypedMemory,
+): PlTaxNetIncomeAuditRow[] {
+  // Index tax returns by tax_year.value for cheap lookup. The tax-return
+  // schema stores tax_year as a Field<string>, so we read .value.
+  const taxByYear = new Map<
+    string,
+    { filename: string; netIncome: number | null }
+  >();
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.taxReturn) continue;
+    const year = entry.taxReturn.tax_year.value;
+    if (!year) continue;
+    if (taxByYear.has(year)) continue;
+    taxByYear.set(year, {
+      filename: entry.filename,
+      netIncome: entry.taxReturn.net_income_or_loss_amount.value,
+    });
+  }
+
+  const rows: PlTaxNetIncomeAuditRow[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.financialStatement) continue;
+    if (!hasPlNetIncome(entry.financialStatement)) continue;
+    const year = plYearFromFinancialStatement(entry.financialStatement);
+    if (!year) continue;
+    const taxRow = taxByYear.get(year);
+    if (!taxRow) continue;
+
+    const plNet = entry.financialStatement.net_income_amount.value;
+    const taxNet = taxRow.netIncome;
+    const sourcePage = entry.financialStatement.net_income_amount.source_page;
+    const sourceQuote = entry.financialStatement.net_income_amount.source_quote;
+
+    if (plNet == null || taxNet == null) {
+      rows.push({
+        pl_filename: entry.filename,
+        tax_filename: taxRow.filename,
+        tax_year: year,
+        ok: true,
+        drift_usd: null,
+        pl_net_income: plNet,
+        tax_net_income: taxNet,
+        source_page: sourcePage,
+        source_quote: sourceQuote,
+      });
+      continue;
+    }
+    const drift = Math.abs(plNet - taxNet);
+    rows.push({
+      pl_filename: entry.filename,
+      tax_filename: taxRow.filename,
+      tax_year: year,
+      ok: drift <= PL_TAX_GATE_TOLERANCE_USD,
+      drift_usd: drift,
+      pl_net_income: plNet,
+      tax_net_income: taxNet,
+      source_page: sourcePage,
+      source_quote: sourceQuote,
+    });
+  }
+  return rows;
+}
+
 export async function aggregateTypedMemoryToE2(
   memory: TypedMemory,
   options?: { filingDate?: Date; aliases?: Record<string, FilenameAlias> },
@@ -1067,6 +1351,7 @@ export async function aggregateTypedMemoryToE2(
   caseFacts: E2Facts;
   usage: AggregateUsage;
   defensive_paragraphs_required: DefensiveParagraphsRequired;
+  marginality_evidence_present: MarginalityEvidencePresent;
   fx_gate_results: FxGateAuditRow[];
   passport_validity_results: PassportValidityAuditRow[];
   i94_status_results: I94StatusAuditRow[];
@@ -1075,6 +1360,8 @@ export async function aggregateTypedMemoryToE2(
   cv_title_drift_results: CvTitleDriftAuditRow[];
   personal_reference_results: PersonalReferenceAuditRow[];
   credential_verifiability_results: CredentialVerifiabilityAuditRow[];
+  tax_balance_sheet_results: TaxBalanceSheetAuditRow[];
+  pl_tax_net_income_results: PlTaxNetIncomeAuditRow[];
 }> {
   const memoryBlock = memoryToPromptText(memory);
   const inventoryBlock = buildDocInventoryWithAliases(memory, options?.aliases);
@@ -1690,6 +1977,129 @@ export async function aggregateTypedMemoryToE2(
     });
   }
 
+  // Manual §9 / §4 tax-balance-sheet gate: deterministic backstop.
+  // |Schedule L EOY assets − I-129E investment_amount_usd| / I-129E
+  // investment_amount_usd > 25% → severity-3 conflict. Idempotent:
+  // skip when same conflict_type + fact_a_doc already logged.
+  const taxBalanceSheetRows = runTaxBalanceSheetGate(memory);
+  for (const row of taxBalanceSheetRows) {
+    if (row.ok) continue;
+    if (row.relative_drift == null) continue;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'tax_balance_sheet_drift' &&
+        c.fact_a_doc.value === row.filename,
+    );
+    if (alreadyLogged) continue;
+    const driftPct = (row.relative_drift * 100).toFixed(2);
+    const tolerancePct = (TAX_BALANCE_SHEET_GATE_TOLERANCE * 100).toFixed(0);
+    parsed.data.conflict_register.push({
+      description: {
+        value: `Tax-return Schedule L total assets EOY USD ${row.schedule_l_total_assets_end?.toFixed(2) ?? '?'} disagrees with I-129 E Supplement investment USD ${row.i129e_investment_usd?.toFixed(2) ?? '?'} (drift ${driftPct}%, tolerance ${tolerancePct}%). Manual §9 gate.`,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      conflict_type: {
+        value: 'tax_balance_sheet_drift',
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      severity: {
+        value: 3,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      fact_a_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_a_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_doc: {
+        value: row.filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+    });
+  }
+
+  // Manual §9 P&L vs tax-return net-income gate: deterministic backstop.
+  // |P&L net_income − tax-return net_income_or_loss| > $1,000 for the
+  // matching tax year → severity-3 conflict. Idempotent on
+  // (conflict_type, fact_a_doc=pl, fact_b_doc=tax).
+  const plTaxNetIncomeRows = runPlTaxNetIncomeGate(memory);
+  for (const row of plTaxNetIncomeRows) {
+    if (row.ok) continue;
+    if (row.drift_usd == null) continue;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'pl_tax_net_income_drift' &&
+        c.fact_a_doc.value === row.pl_filename &&
+        c.fact_b_doc.value === row.tax_filename,
+    );
+    if (alreadyLogged) continue;
+    parsed.data.conflict_register.push({
+      description: {
+        value: `P&L net income USD ${row.pl_net_income?.toFixed(2) ?? '?'} disagrees with tax-return net income USD ${row.tax_net_income?.toFixed(2) ?? '?'} for tax year ${row.tax_year} (drift USD ${row.drift_usd.toFixed(2)}, tolerance USD ${PL_TAX_GATE_TOLERANCE_USD}). Manual §9 gate.`,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      conflict_type: {
+        value: 'pl_tax_net_income_drift',
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      severity: {
+        value: 3,
+        source_page: null,
+        source_quote: '[deterministic post-aggregation gate]',
+        confidence: 1,
+      },
+      fact_a_doc: {
+        value: row.pl_filename,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_a_page: {
+        value: row.source_page,
+        source_page: row.source_page,
+        source_quote: row.source_quote,
+        confidence: 1,
+      },
+      fact_b_doc: {
+        value: row.tax_filename,
+        source_page: null,
+        source_quote: null,
+        confidence: 1,
+      },
+      fact_b_page: {
+        value: null,
+        source_page: null,
+        source_quote: null,
+        confidence: 1,
+      },
+    });
+  }
+
   return {
     caseFacts: parsed.data,
     usage: {
@@ -1697,6 +2107,7 @@ export async function aggregateTypedMemoryToE2(
       output_tokens: response.usage.output_tokens,
     },
     defensive_paragraphs_required: computeDefensiveParagraphsRequired(memory),
+    marginality_evidence_present: computeMarginalityEvidencePresent(memory),
     fx_gate_results: fxRows,
     passport_validity_results: passportRows,
     i94_status_results: i94Rows,
@@ -1705,5 +2116,7 @@ export async function aggregateTypedMemoryToE2(
     cv_title_drift_results: cvDriftRows,
     personal_reference_results: personalRefRows,
     credential_verifiability_results: credentialRows,
+    tax_balance_sheet_results: taxBalanceSheetRows,
+    pl_tax_net_income_results: plTaxNetIncomeRows,
   };
 }
