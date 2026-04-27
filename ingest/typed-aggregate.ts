@@ -194,16 +194,17 @@ Do NOT include any extra top-level keys not in E2FactsSchema. The schema's top-l
 
 DOCUMENT INVENTORY WITH ALIASES (read this section first):
 
-The user message includes a DOCUMENT INVENTORY block listing each PDF's raw filename, its classified doc_type, the canonical \`suggested_filename\` from the document-classifier-renamer, and (when applied) the attorney-accepted alias. The inventory is the source of truth for how to NAME documents in source_quote.
+The user message includes a DOCUMENT INVENTORY block listing each PDF's raw filename, its classified doc_type, the human-readable slot-based \`display_name\` (Title Case, diacritics preserved, dot-separated), the kebab-ASCII \`suggested_filename\`, and (when applied) the attorney-accepted alias. The inventory is the source of truth for how to NAME documents in source_quote.
 
-When source_quote prefixes a quote with a filename, use this priority order:
+When source_quote prefixes a quote with a filename, use this 4-tier priority order:
 1. If an applied alias exists for the PDF, use the alias (e.g., "[kacar-salih-passport-bio-page.pdf p.2] John Doe, born 1985-03-10").
-2. Otherwise, if a suggested_filename exists with confidence ≥ 0.7, use the suggested_filename.
-3. Otherwise, use the raw filename as it appeared in the typed memory.
+2. Otherwise, if a display_name exists with confidence ≥ 0.5, use the display_name (slot-based, diacritic-preserved — the human-readable form the attorney sees in the dashboard).
+3. Otherwise, if a suggested_filename exists with confidence ≥ 0.7, use the suggested_filename (kebab ASCII).
+4. Otherwise, use the raw filename as it appeared in the typed memory.
 
-Apply the same priority everywhere a filename appears in the unified output: source_quote prefixes on every Field<T>, conflict_register fact_a_doc / fact_b_doc, source_of_funds.origin_evidence, investment.items.evidence_doc. The drafter downstream cites by these names; using the alias means the cover letter ships with attorney-readable references like "(Exhibit: Kacar-Salih Passport Bio Page)" instead of "(Exhibit: 1709245687.pdf)".
+Apply the same priority everywhere a filename appears in the unified output: source_quote prefixes on every Field<T>, conflict_register fact_a_doc / fact_b_doc, source_of_funds.origin_evidence, investment.items.evidence_doc. The drafter downstream cites by these names; using the display_name means the cover letter ships with attorney-readable references like "(Exhibit: Salih Kaçar · Türkiye · Passport bio page)" instead of "(Exhibit: 1709245687.pdf)".
 
-When NO alias is applied AND suggested_filename confidence is below 0.7, you may flag the entry in conflict_register at severity 1-2 (cosmetic, conflict_type='filename_uncanonical') so the attorney sees it in the dashboard, but do NOT block on this — uncanonical filenames are workflow noise, not a substantive RFE risk.
+When NO alias is applied AND BOTH display_name confidence < 0.5 AND suggested_filename confidence is below 0.7, you may flag the entry in conflict_register at severity 1-2 (cosmetic, conflict_type='filename_uncanonical') so the attorney sees it in the dashboard, but do NOT block on this — uncanonical filenames are workflow noise, not a substantive RFE risk.
 
 Output: ONE JSON object matching E2FactsSchema. No prose, no commentary, no markdown fences. Begin your response with { and end with }.`;
 
@@ -224,9 +225,9 @@ export interface FilenameAlias {
  * Build the DOCUMENT INVENTORY WITH ALIASES block surfaced into the
  * aggregator's user prompt. Renders one row per raw PDF filename in the
  * typed memory; columns are: pdf_path | doc_type | applied_alias |
- * suggested_filename | suggestion_confidence. The system prompt's
- * priority rules (alias → suggested_filename @ ≥0.7 → raw) reference
- * this table.
+ * display_name | suggested_filename | suggestion_confidence. The system
+ * prompt's 4-tier priority rules (alias → display_name @ ≥0.5 →
+ * suggested_filename @ ≥0.7 → raw) reference this table.
  */
 function buildDocInventoryWithAliases(
   memory: TypedMemory,
@@ -236,6 +237,7 @@ function buildDocInventoryWithAliases(
     pdf_path: string;
     doc_type: string;
     applied_alias: string;
+    display_name: string;
     suggested_filename: string;
     suggestion_confidence: string;
   };
@@ -246,10 +248,15 @@ function buildDocInventoryWithAliases(
       ? (entry.facts as { suggested_filename?: { value: string | null; confidence: number | null } })
           .suggested_filename
       : null;
+    const dn = entry.facts && 'display_name' in entry.facts
+      ? (entry.facts as { display_name?: { value: string | null; confidence: number | null } })
+          .display_name
+      : null;
     rows.push({
       pdf_path: entry.filename,
       doc_type: docType,
       applied_alias: aliases[entry.filename]?.alias ?? '—',
+      display_name: dn?.value ?? '—',
       suggested_filename: sf?.value ?? '—',
       suggestion_confidence:
         sf?.confidence != null ? sf.confidence.toFixed(2) : '—',
@@ -258,12 +265,12 @@ function buildDocInventoryWithAliases(
   if (rows.length === 0) return '';
 
   const header =
-    '| pdf_path | doc_type | applied alias | suggested_filename | suggestion confidence |\n' +
-    '| --- | --- | --- | --- | --- |';
+    '| pdf_path | doc_type | applied alias | display_name | suggested_filename | suggestion confidence |\n' +
+    '| --- | --- | --- | --- | --- | --- |';
   const body = rows
     .map(
       (r) =>
-        `| ${r.pdf_path} | ${r.doc_type} | ${r.applied_alias} | ${r.suggested_filename} | ${r.suggestion_confidence} |`,
+        `| ${r.pdf_path} | ${r.doc_type} | ${r.applied_alias} | ${r.display_name} | ${r.suggested_filename} | ${r.suggestion_confidence} |`,
     )
     .join('\n');
 

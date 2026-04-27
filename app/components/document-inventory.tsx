@@ -4,11 +4,23 @@
  * Biographic Info). Each tab shows a stack of mock PDF thumbnails;
  * once the ingest pipeline writes back per-tab classifications the
  * `documents` prop becomes the source of truth.
+ *
+ * Display naming: each thumbnail shows the slot-based human-readable
+ * `display_name` (Title Case, diacritics preserved) with the raw on-disk
+ * filename rendered below in graphite small text for traceability. Disk
+ * filenames are NEVER modified — display_name is pure metadata.
  */
 
 interface DocStub {
+  /** Raw on-disk filename. Always shown as the small graphite trailer. */
   filename: string;
   pages: number;
+  /**
+   * Human-readable display name. Optional because the legacy mock TABS
+   * below predate the slot-based naming convention; when absent the
+   * raw filename is used as the primary label too.
+   */
+  display_name?: string;
 }
 
 interface Tab {
@@ -201,6 +213,13 @@ export function DocumentInventory() {
 
 function Thumbnail({ doc }: { doc: DocStub }) {
   const lines = Math.min(8, Math.max(3, Math.floor(doc.pages / 2) + 3));
+  // 4-tier render priority: alias > display_name > suggested_filename
+  // > raw filename. The matter API resolves alias/display/suggested
+  // server-side and ships display_name already populated with the
+  // winning value; here we just fall back to raw if absent.
+  const primary = doc.display_name && doc.display_name.length > 0
+    ? doc.display_name
+    : doc.filename;
   return (
     <div className="group cursor-pointer">
       <div
@@ -222,11 +241,16 @@ function Thumbnail({ doc }: { doc: DocStub }) {
         <div className="absolute left-0 top-0 h-2 w-full bg-rule/40" />
       </div>
       <div
-        className="mt-1.5 font-mono text-[0.7rem] text-ink-2 tabular-nums truncate"
+        className="mt-1.5 font-display text-[0.78rem] text-ink-2 leading-snug line-clamp-2"
         title={doc.filename}
       >
-        {doc.filename}
+        {primary}
       </div>
+      {doc.display_name && doc.display_name.length > 0 && (
+        <small className="block mt-0.5 font-mono text-[0.62rem] text-graphite-soft tabular-nums truncate">
+          {doc.filename}
+        </small>
+      )}
     </div>
   );
 }

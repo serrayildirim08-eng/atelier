@@ -245,6 +245,9 @@ export function getMockTypedMemory(_id: string): TypedMemory {
         facts: partial({
           doc_type: 'uscis_or_dos_form',
           suggested_filename: tinyField('aegean-atelier-i-129-petition.pdf'),
+          display_name: tinyField(
+            'Mehmet Demir · USCIS · Form I-129 · signed 2026-01-04.pdf',
+          ),
           form_id: tinyField('I-129'),
         }),
       },
@@ -254,6 +257,9 @@ export function getMockTypedMemory(_id: string): TypedMemory {
         facts: partial({
           doc_type: 'uscis_or_dos_form',
           suggested_filename: tinyField('aegean-atelier-i-129e-supplement.pdf'),
+          display_name: tinyField(
+            'Mehmet Demir · USCIS · Form I-129 E Supplement · investment USD 425,000 · 2026-01-04.pdf',
+          ),
           form_id: tinyField('I-129E'),
         }),
       },
@@ -265,6 +271,9 @@ export function getMockTypedMemory(_id: string): TypedMemory {
         facts: partial({
           doc_type: 'passport',
           suggested_filename: tinyField('demir-mehmet-tr-passport-bio-page.pdf'),
+          display_name: tinyField(
+            'Mehmet Demir · Türkiye · Passport bio page · expires 2031-08-30.pdf',
+          ),
         }),
       },
     ],
@@ -276,6 +285,9 @@ export function getMockTypedMemory(_id: string): TypedMemory {
           doc_type: 'formation_doc',
           suggested_filename: tinyField(
             'aegean-atelier-articles-of-organization.pdf',
+          ),
+          display_name: tinyField(
+            'Aegean Atelier Coffee LLC · Florida SOS · Articles of Organization · 2024-11-04.pdf',
           ),
         }),
       },
@@ -289,6 +301,9 @@ export function getMockTypedMemory(_id: string): TypedMemory {
           suggested_filename: tinyField(
             'demir-to-aegean-atelier-wire-2024-12-18.pdf',
           ),
+          display_name: tinyField(
+            'Mehmet Demir · Wells Fargo · Wire to Aegean Atelier · USD 290,000 · 2024-12-18.pdf',
+          ),
         }),
       },
     ],
@@ -300,6 +315,9 @@ export function getMockTypedMemory(_id: string): TypedMemory {
           doc_type: 'cover_letter',
           suggested_filename: tinyField(
             'akalan-cover-letter-aegean-atelier-2026-01-04.pdf',
+          ),
+          display_name: tinyField(
+            'Akalan Immigration · USCIS NSC · E-2 cover letter · 2026-01-04.pdf',
           ),
         }),
       },

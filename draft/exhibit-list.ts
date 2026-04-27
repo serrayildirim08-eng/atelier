@@ -18,11 +18,13 @@
  *     MITA on Tabs C/D/E) is an attorney decision; we surface the
  *     primary tab here and leave cross-references to the cover letter.
  *
- * Display name precedence: applied alias > suggested_filename > raw
+ * Display name precedence: applied alias > display_name (slot-based,
+ * diacritic-preserved) > suggested_filename (kebab ASCII) > raw
  * filename. The alias map is the per-matter sidecar at
  * db/filename-aliases.json maintained by app/api/matter/[id]/rename.
  */
 
+import { compareDisplayNameInTab } from '@/ingest/display-name';
 import type {
   DocType,
   PerPdfResult,
@@ -144,7 +146,7 @@ const DEPENDENT_FORM_RE = /^\s*i[-\s]?539a?\b/i;
 
 export interface ExhibitItem {
   filename: string;
-  /** Applied alias > suggested_filename > raw filename. */
+  /** Applied alias > display_name > suggested_filename > raw filename. */
   display_name: string;
   doc_type: DocType;
   page_count: number;
@@ -184,6 +186,8 @@ function pickDisplayName(
 ): string {
   const alias = aliases?.[filename];
   if (typeof alias === 'string' && alias.length > 0) return alias;
+  const display = facts?.display_name?.value;
+  if (typeof display === 'string' && display.length > 0) return display;
   const suggested = facts?.suggested_filename?.value;
   if (typeof suggested === 'string' && suggested.length > 0) return suggested;
   return filename;
@@ -257,10 +261,15 @@ export function buildExhibitList(inputs: ExhibitListInputs): ExhibitList {
     }
   }
 
-  // Sort each bucket by display_name for stable, human-readable output.
+  // Sort each bucket: by Entity (slot 1) → date desc (Period slot) →
+  // alphabetical on display_name. Tab order is the outer loop. The
+  // comparator parses the slots out of display_name; for items without
+  // a slot-shaped name (raw filenames, kebab fallbacks) entity collapses
+  // to the whole string and date defaults to '0000', so they tail-sort
+  // beneath properly-formatted items in the same bucket.
   for (const tab of TAB_ORDER) {
     buckets[tab].sort((a, b) =>
-      a.display_name.localeCompare(b.display_name, 'en'),
+      compareDisplayNameInTab(a.display_name, b.display_name),
     );
   }
 

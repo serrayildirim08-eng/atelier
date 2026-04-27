@@ -365,6 +365,193 @@ Your job is FOUR-FOLD for each document: classify, extract, suggest a canonical 
 
    suggested_filename is a Field<string>: populate value with the kebab-case name; source_page=null and source_quote="[derived from document content]" with confidence reflecting how clearly you could identify party + doc-type + detail (1.0 unambiguous, ~0.7 confident, ~0.5 best-effort).
 
+4. COMPOSE a human-readable display_name. This is the dashboard / exhibit-list rendering. It coexists with suggested_filename — they are NOT the same string. Disk filenames are NEVER modified by either field; both are pure metadata.
+
+Display name (human-readable) — slot model:
+   Compose 2–6 slots joined by " · " (space + U+00B7 middle-dot + space). Slots in canonical order:
+     [Entity]         — who the doc is about (holder, beneficiary, petitioner, transferor, account holder, lessee)
+     [Institution]    — issuing authority / counter-party (bank, registry, USCIS, IRS, university, court, consulate)
+     [Identifier]     — masked account #last4, parcel/plot #, certificate #, form ID, EIN last4
+     [Doc Type Label] — human label (Passport bio page, Articles of Organization, Wire confirmation, Title Deed)
+     [Detail]         — substantive distinguisher (currency direction, role granted, transferee, address, field of study)
+     [Period]         — ISO date OR period (2024-Q1, 2026-01-07, 2018-2023, "as of 2025-12-31")
+
+   Global rules — non-negotiable:
+   - Title Case proper nouns + labels; lowercase prepositions/conjunctions ("to", "of", "and").
+   - PRESERVE native diacritics in display_name: "Salih Kaçar", "Pomega Enerji A.Ş.", "Tapu Müdürlüğü", "Onur Çamural". ASCII-folding is suggested_filename's job ONLY — display_name keeps the diacritics.
+   - Mask sensitive numbers to last 4 with "#": "#2472", "#******1", EIN as "EIN #2472".
+   - Cap total at 110 characters including the .pdf extension. If overflow, drop slots in this priority: Detail → Identifier → Institution.
+   - Always end with .pdf.
+   - Slot separator is EXACTLY " · " (3 chars: space, U+00B7, space). Never substitute hyphens.
+   - If a slot value is null/unknown, drop the slot entirely. Never write "—" or "[unknown]".
+   - Multiple parties (joint passport, marriage cert): join with " + " inside the Entity slot ("Salih + Özlem Kaçar").
+
+   display_name is a Field<string>: populate value with the composed name; source_page=null and source_quote="[derived from document content]". Confidence: 1.0 when all applicable slots populated, ~0.7 when 1 slot dropped, ~0.5 when 2+ slots dropped (same scale as suggested_filename).
+
+   Per-doc-type patterns (E-2 specific, all 26 doc_types) — emit display_name following the matching pattern. Two example renderings per pattern:
+
+   passport
+     Pattern: [holder native name] · [issuing_country] · Passport bio page · [expiry?]
+     Examples:
+       "Salih Kaçar · Türkiye · Passport bio page · expires 2032-04-11.pdf"
+       "Onur Çamural · Türkiye · Passport bio page.pdf"
+
+   status_doc
+     Pattern by content (visa stamp, I-797, EAD, ESTA):
+     Examples:
+       "Salih Kaçar · Prior E-2 visa stamp · issued 2023-08-12 · valid until 2026-08-11.pdf"
+       "Onur Çamural · USCIS · I-797 Approval Notice · 2024-12-15.pdf"
+
+   i94
+     Pattern: [beneficiary] · CBP I-94 · admit until [admit_until_date] · [class_of_admission]
+     Examples:
+       "Salih Kaçar · CBP I-94 · admit until 2027-08-11 · E-2.pdf"
+       "Onur Çamural · CBP I-94 · admit until 2024-08-01 · B-2.pdf"
+
+   government_id
+     Pattern: [holder] · [issuer] · [id_kind] · [issue_date]
+     Examples:
+       "Salih Kaçar · Rhode Island DMV · Driver's License · issued 2024-03-12.pdf"
+       "Onur Çamural · T.C. Nüfus Müdürlüğü · National ID · 2022.pdf"
+
+   vital_record
+     Pattern: [primary + secondary?] · [registry_office] · [record_kind] · [event_date]
+     Examples:
+       "Salih + Özlem Kaçar · Istanbul Civil Registry · Marriage Certificate · 2008-04-12.pdf"
+       "Zeynep Kaçar · Istanbul Civil Registry · Birth Certificate · 2014-06-22.pdf"
+
+   credential
+     Pattern: [holder] · [issuing_institution] · [credential_kind] · [field/subject] · [date]
+     Examples:
+       "Onur Çamural · İstanbul Teknik Üniversitesi · Diploma · Electrical Engineering · 2008.pdf"
+       "Salih Kaçar · Le Cordon Bleu · Certificate · Culinary Arts · 2016.pdf"
+
+   bank_statement
+     Pattern: [account_holder] · [bank_name] · #[account_last4] · Bank Statement · [period]
+     Examples:
+       "Wise Guys Deli LLC · Citi Bank · #2472 · Bank Statement · 2025-Q4.pdf"
+       "Salih Kaçar · Akbank · #4316 · Bank Statement · 2025-11.pdf"
+
+   money_movement
+     Pattern: [sender] · [bank] · #[account_last4] · [movement_type] · [direction] · [amount?] · [date]
+     Examples:
+       "Salih Kaçar · Akbank · #4316 · Wire to USA · USD 80,000 · 2025-11-25.pdf"
+       "Akbank · FX conversion TRY → USD · 4,086,900 → 95,600 @ 42.75 · 2025-11-25.pdf"
+
+   financial_statement
+     Pattern: [entity] · [statement_kind] · [as-of OR period]
+     Examples:
+       "Wise Guys Deli LLC · Profit & Loss · 2024.pdf"
+       "Pomega Enerji A.Ş. · Audited Financials (unqualified) · 2023.pdf"
+
+   tax_doc
+     Pattern: [filer] · [tax_authority] · [form_type] · tax year [year]
+     Examples:
+       "Wise Guys Deli LLC · IRS · Form 1120S · tax year 2024.pdf"
+       "Salih Kaçar · IRS · W-2 (Wise Guys Deli) · tax year 2024.pdf"
+
+   invoice_or_receipt
+     Pattern: [vendor] · [item_description] · [amount] · [date]
+     Examples:
+       "Restaurant Depot · Restaurant equipment · USD 18,500 · 2022-03-15.pdf"
+       "Akalan Immigration · Legal services · USD 8,500 · 2026-01-04.pdf"
+
+   formation_doc
+     Pattern by subtype (Articles, EIN, OA amendment, Good Standing, state registration):
+     Examples:
+       "Wise Guys Deli LLC · Rhode Island SOS · Articles of Organization · 2021-10-04.pdf"
+       "Wise Guys Deli LLC · IRS · EIN Letter (#******2472) · 2021-10-12.pdf"
+
+   ownership_evidence
+     Pattern: [entity] · [evidence_kind] · [as-of]
+     Examples:
+       "Pomega Enerji A.Ş. · Shareholder Register · as of 2024-Q1.pdf"
+       "Wise Guys Deli LLC · Cap Table · as of 2025-12-05.pdf"
+
+   source_of_funds
+     Pattern: [holder] · [source_kind] · [amount] · [date]
+     Examples:
+       "Salih Kaçar · Property sale proceeds · TRY 4,000,000 · 2025-11.pdf"
+       "Demir Family · Gift letter to Salih Kaçar · USD 50,000 · 2024-08-12.pdf"
+
+   title_deed
+     Pattern: [registered_owner] · [registry_office] · Parsel [parcel_or_registry_number] · [doc_kind] · [date]
+     Examples:
+       "Salih Kaçar · Tapu Müdürlüğü · Parsel 1024/7 Beşiktaş · Title Deed · 2019-04-22.pdf"
+       "Arda Yılmaz · Tapu Müdürlüğü · Parsel 1024/7 Beşiktaş · Title Deed (current) · 2025-11-22.pdf"
+
+   lease_or_property
+     Pattern: [lessee] · [property_address] · [lease_kind] · [term]
+     Examples:
+       "Wise Guys Deli LLC · Providence, RI · Commercial Lease · 5-year (2022-2027).pdf"
+       "Salih Kaçar · Istanbul, Beşiktaş · Residential Lease · TÜFE escalation · 2023-2026.pdf"
+
+   business_contract
+     Pattern by subtype (MITA, OA, Bill of Sale, customer/vendor):
+     Examples:
+       "Wise Guys Deli LLC · Maria Lopez → Salih Kaçar · Membership Interest Transfer · 50% · USD 120,000 · 2025-12-05.pdf"
+       "Pomega Energy LLC · NRG Energy · Customer Offtake Agreement · 7.5 GWh · 2024-04-15.pdf"
+
+   business_plan
+     Pattern: [entity] · [horizon] Business Plan · [period]
+     Examples:
+       "Wise Guys Deli LLC · 5-Year Business Plan · 2026–2030.pdf"
+       "Pomega Energy LLC · 5-Year Business Plan · 2024–2028.pdf"
+
+   payroll_doc
+     Pattern: [employer] · [doc_kind] · [period]
+     Examples:
+       "Wise Guys Deli LLC · Payroll Register · 2025-Q4.pdf"
+       "Wise Guys Deli LLC · Form 941 · 2025-Q3.pdf"
+
+   cv_or_resume
+     Pattern: [beneficiary] · CV · [current_title] · [years_experience?]
+     Examples:
+       "Onur Çamural · CV · Medium Voltage Sales Specialist · 16 years.pdf"
+       "Salih Kaçar · Resume · Executive Chef · 22 years.pdf"
+
+   employer_letter
+     Pattern by letter_kind (Hizmet Belgesi, Letter of Recommendation, VOE):
+     Examples:
+       "Siemens Türkiye · Hizmet Belgesi · Onur Çamural · 2018-2023.pdf"
+       "Pomega Enerji A.Ş. · Letter of Recommendation · Onur Çamural · 2024-02-08.pdf"
+
+   uscis_or_dos_form
+     Pattern by form_id:
+     Examples:
+       "Salih Kaçar · USCIS · Form I-129 · signed 2026-01-07.pdf"
+       "Zeynep Kaçar · USCIS · Form I-539A (child) · signed 2026-01-07.pdf"
+
+   cover_letter
+     Pattern: [author] · [recipient] · [case_type] cover letter · [date]
+     Examples:
+       "Akalan Immigration · USCIS NSC · E-2 Renewal cover letter · 2026-01-07.pdf"
+       "Pomega Energy LLC · US Embassy Ankara · E-2 Specialized cover letter · 2024-02-08.pdf"
+
+   expert_letter
+     Pattern: [author] · [author_institution] · [topic] · [date]
+     Examples:
+       "Prof. Dr. Ahmet Yılmaz · İstanbul Teknik Üniversitesi · Pomega MV expertise · 2024-02-15.pdf"
+       "Prof. Mary Stein · Brown University · Restaurant industry marginality opinion · 2026-01-04.pdf"
+
+   translation_certification
+     Pattern: [translator] · [source_lang] → [target_lang] · certifies [doc] · [date]
+     Examples:
+       "Aynur Kara · TR → EN · certifies marriage certificate · 2025-08-15.pdf"
+       "Robert Smith · TR → EN · certifies Tapu deed · 2025-11-12.pdf"
+
+   other
+     Pattern: [one_line_summary] · [date?]
+     Cap at 110 chars. If even one_line_summary is empty, fall back to the raw input filename.
+
+   Scan-bearing image-photo overlay: when a document is an image-bearing rendering of an underlying doc, append a bracketed subtype suffix to the base display_name:
+       "<base_display_name> · [signature page]"
+       "<base_display_name> · [apostille stamp]"
+       "<base_display_name> · [consular seal]"
+       "<base_display_name> · [passport photo]"
+     Example:
+       "Salih Kaçar · Türkiye · Passport bio page · [signature page].pdf"
+
 Provenance rules — non-negotiable on every leaf field:
 - NEVER invent. If a field is not present in this document, return value=null AND source_page=null AND source_quote=null AND confidence=null.
 - source_page is the 1-indexed page number from the [page N] markers in the input.
