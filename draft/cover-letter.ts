@@ -103,10 +103,19 @@ Cite Kazarian, 596 F.3d at 1120 for the requirement that, after meeting the regu
 Use kazarian_step_two:
 - framework_invoked: lead the section with this language.
 - sustained_acclaim_evidence + risen_to_very_top_evidence: argue these.
-- comparison_cohort: define the field of comparison explicitly.
+- comparison_cohort: define the field of comparison explicitly (e.g., "computational immunologists globally", not "scientists").
 - recent_evidence_within_3_years: address temporal currency of the acclaim.
+- top_of_field_evidence: weave each item into the narrative — these are the specific factual anchors for the "very top" claim. Reference each with its source page.
+- peer_benchmarking: include a short benchmarking paragraph or table tying the beneficiary's metric to the field median and top-10% threshold per row, citing benchmark_source. Use the percentile_conclusion as the prose lead-in. Do NOT invent percentiles where the source provides none.
+- narrative_stress_test: if populated, work the counter-argument and response into the section directly — better to confront the USCIS objection than ignore it. If null, do NOT fabricate one.
 
-## VI. Conclusion
+If kazarian_step_two.peer_benchmarking is empty AND there is no top_of_field_evidence AND comparison_cohort is null, this is a step 2 failure waiting to happen — lead the section with [WEAK: Kazarian step 2 lacks peer benchmarking, top-of-field anchors, and comparison cohort; final-merits argument is conclusory].
+
+## VI. Evidence APS Summary (internal note)
+
+If evidence_aps is non-empty, include a short subsection summarizing the strongest evidence: list the top 3-5 items by aps_score (8-9 first), citing each by criterion_label. Skip if evidence_aps is empty.
+
+## VII. Conclusion
 Request favorable adjudication.
 
 If kazarian_step_two fields are null, lead Section V with [MISSING: Kazarian step 2 framework + sustained-acclaim argument + comparison cohort] — do NOT generate boilerplate final-merits prose without facts.
@@ -144,7 +153,21 @@ If fewer than 2 criteria are claimed, write [INSUFFICIENT CRITERIA: only <N> cla
 ## V. Expert Witness Letters — Independent Confirmation of Outstanding Stature
 Reference expert_letters. EB-1B places particular weight on letters from senior faculty at OTHER institutions. Note relationship_to_beneficiary and specificity_score. Use strongest_sentence verbatim where present.
 
-## VI. Conclusion
+## VI. International Recognition as Outstanding (8 CFR 204.5(i)(2))
+
+This is the overarching standard — the beneficiary must be recognized INTERNATIONALLY, not merely nationally, as outstanding in the specific academic area. Use the international_recognition block:
+- Walk through international_collaborators, invited_talks_abroad, foreign_grants_or_fellowships, visiting_appointments_abroad, international_editorial_or_advisory, foreign_media_coverage in narrative form. Cite each with its source page.
+- Weave top_of_field_evidence items as factual anchors.
+- peer_benchmarking: include a short benchmarking paragraph or table tying the beneficiary's metric to the field median and top-10% threshold per row, citing benchmark_source. Use percentile_conclusion as the prose lead-in. Do NOT invent percentiles.
+- narrative_stress_test: if populated, work the counter-argument and response into the section. If null, do NOT fabricate one.
+
+If international_recognition is mostly null (no collaborators, no talks abroad, no foreign grants, no foreign media), lead this section with [WEAK: International recognition not documented — file is at risk of failing the overarching "internationally recognized" standard].
+
+## VII. Evidence APS Summary (internal note)
+
+If evidence_aps is non-empty, include a short subsection listing the top 3-5 evidence items by aps_score (8-9 first), citing each by criterion_label. Skip if empty.
+
+## VIII. Conclusion
 Request favorable adjudication.
 
 ${HEADER_TEMPLATE}
@@ -177,8 +200,14 @@ Cite the standard: 1 of the 3 years immediately preceding admission, employed ab
 ## V. The Foreign Role Was in a Managerial or Executive Capacity (INA § 101(a)(44); 8 CFR 204.5(j)(2))
 Quote the statutory definitions of managerial and executive capacity verbatim on first use. Use foreign_role.title, span_of_control, percent_time_managerial, percent_time_executive, percent_time_other, and description. Make the percentage breakdown explicit. Address whether this is a personnel manager, function manager, or executive role.
 
+If subordinate_tier_table contains rows with side="foreign", include a brief subordinate analysis: list each direct report with title and tier, then state the conclusion (e.g., "the beneficiary supervised 2 managerial and 4 professional employees, satisfying the requirement that subordinates be supervisory, professional, or managerial under INA 101(a)(44)(A)(ii)").
+
 ## VI. The Offered U.S. Role Is in a Managerial or Executive Capacity (INA § 101(a)(44); 8 CFR 204.5(j)(2))
 Same structure as Section V using us_role. If the role is argued as a function manager, cite Matter of Z-A-, Inc. only if the input mentions function-manager doctrine; otherwise omit the cite.
+
+If subordinate_tier_table contains rows with side="us", include the same subordinate analysis for the U.S. role.
+
+If every U.S.-side row in subordinate_tier_table has tier="non-professional", FLAG inline: [WEAK: all U.S. direct reports are non-professional — USCIS will treat the beneficiary as a first-line supervisor under INA 101(a)(44)(A)(ii); add managerial / professional reports or pivot to function-manager doctrine].
 
 ## VII. Conclusion
 Request favorable adjudication.

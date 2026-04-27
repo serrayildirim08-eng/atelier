@@ -65,13 +65,8 @@ const RoleAnalysisSchema = z.object({
 });
 
 /**
- * Conflict register replaces unstructured red_flags arrays. Severity 1-5
- * with calibrated rubric — see ingest prompts for examples per level.
- *   1 cosmetic       diacritic difference (Çağlar / Caglar)
- *   2 clerical       DOB digit collision resolvable from passport
- *   3 factual_minor  small amount mismatch across paystub / W-2
- *   4 factual_material investment > $5K drift; defective translation; G-28 mismatch
- *   5 dispositive    DOB unresolvable from primary ID; investment leg unsupported
+ * Severity 1=cosmetic, 2=clerical, 3=factual_minor, 4=factual_material,
+ * 5=dispositive (HALT). Calibration examples live in the extract prompts.
  */
 const ConflictEntrySchema = z.object({
   description: Field(z.string()),
@@ -186,12 +181,24 @@ export type E2Facts = z.infer<typeof E2FactsSchema>;
 /* Need 3+ of 10 criteria, then survive Kazarian step 2 (final merits).  */
 /* ---------------------------------------------------------------------- */
 
+const PeerBenchmarkingSchema = z.object({
+  field_definition: Field(z.string()),
+  beneficiary_metric: Field(z.string()),
+  field_median: Field(z.string()),
+  field_top_10_percent: Field(z.string()),
+  benchmark_source: Field(z.string()),
+  percentile_conclusion: Field(z.string()),
+});
+
 const KazarianStepTwoSchema = z.object({
   framework_invoked: Field(z.string()),
   sustained_acclaim_evidence: Field(z.string()),
   risen_to_very_top_evidence: Field(z.string()),
   comparison_cohort: Field(z.string()),
   recent_evidence_within_3_years: Field(z.string()),
+  top_of_field_evidence: z.array(Field(z.string())),
+  peer_benchmarking: z.array(PeerBenchmarkingSchema),
+  narrative_stress_test: Field(z.string()),
 });
 
 const CitationCountsSchema = z.object({
@@ -231,6 +238,18 @@ const ThreeYearsExperienceSchema = z.object({
   positions: z.array(Field(z.string())),
 });
 
+const InternationalRecognitionSchema = z.object({
+  international_collaborators: Field(z.string()),
+  invited_talks_abroad: Field(z.string()),
+  foreign_grants_or_fellowships: Field(z.string()),
+  visiting_appointments_abroad: Field(z.string()),
+  international_editorial_or_advisory: Field(z.string()),
+  foreign_media_coverage: Field(z.string()),
+  top_of_field_evidence: z.array(Field(z.string())),
+  peer_benchmarking: z.array(PeerBenchmarkingSchema),
+  narrative_stress_test: Field(z.string()),
+});
+
 export const EB1BFactsSchema = z.object({
   beneficiary: BeneficiarySchema,
   petitioner: EB1BPetitionerSchema,
@@ -238,6 +257,7 @@ export const EB1BFactsSchema = z.object({
   permanent_position_type: Field(z.string()),
   claimed_criteria: z.array(ClaimedCriterionSchema),
   expert_letters: z.array(ExpertLetterSchema),
+  international_recognition: InternationalRecognitionSchema,
   evidence_aps: z.array(EvidenceAPSSchema),
   conflict_register: z.array(ConflictEntrySchema),
 });
@@ -268,6 +288,30 @@ const OneYearAbroadSchema = z.object({
   role_summary: Field(z.string()),
 });
 
+/**
+ * Subordinate tier classification per direct report. Drives the
+ * "first-line supervisor" analysis under INA 101(a)(44)(A)(ii) — if every
+ * direct report is non-professional, the beneficiary is presumptively a
+ * first-line supervisor and not a manager. Used for both foreign and U.S.
+ * roles in EB-1C (and parallel structures in L-1A if added later).
+ */
+const SubordinateEntrySchema = z.object({
+  name: Field(z.string()),
+  title: Field(z.string()),
+  tier: Field(
+    z.enum([
+      'managerial',
+      'supervisory',
+      'professional',
+      'non-professional',
+      'UNCLEAR',
+    ]),
+  ),
+  evidence: Field(z.string()),
+  source_doc: Field(z.string()),
+  side: Field(z.enum(['foreign', 'us'])),
+});
+
 export const EB1CFactsSchema = z.object({
   beneficiary: BeneficiarySchema,
   qualifying_relationship: QualifyingRelationshipSchema,
@@ -276,6 +320,7 @@ export const EB1CFactsSchema = z.object({
   foreign_role: RoleAnalysisSchema,
   us_role: RoleAnalysisSchema,
   functional_or_personnel_manager: Field(z.string()),
+  subordinate_tier_table: z.array(SubordinateEntrySchema),
   conflict_register: z.array(ConflictEntrySchema),
 });
 

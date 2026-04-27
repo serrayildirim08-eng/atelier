@@ -19,7 +19,15 @@ const SHARED_PROVENANCE_RULES = `Provenance rules — non-negotiable for every l
 5. Currency values are numbers in USD with symbols and commas stripped. If the source gives a foreign-currency amount, convert at the rate stated in the source (and note in source_quote); if no rate is stated, leave value=null and log a conflict_register entry.
 6. Dates: prefer ISO YYYY-MM-DD. If the source uses MM/DD/YYYY vs DD/MM/YYYY ambiguously and you cannot resolve, leave value=null and log a conflict_register entry.
 7. Arrays: include every distinct entry the source supports. Empty arrays are fine when the source has nothing.
-8. conflict_register: structured log of forensic conflicts and ambiguities. Each entry has:
+8. (EB-1A and EB-1B only) evidence_aps: score the strongest evidence items per claimed criterion. Sum three sub-components into a 3-9 raw APS score, then derive rfe_risk:
+   - probative_value: HIGH=3 (directly proves the regulatory criterion), MED=2 (supports but not dispositive), LOW=1 (contextual / background only).
+   - independence: STRONG=3 (third-party / objective source — peer-reviewed publication, government award database, arms-length expert letter), MOD=2 (semi-independent — collaborator letter, employer letter), WEAK=1 (self-asserted CV, personal statement).
+   - corroboration: CORR=3 (supported by 2+ independent sources), PARTIAL=2 (one supporting source), NONE=1 (standalone).
+   - aps_score = probative_value + independence + corroboration. Range 3-9 integer.
+   - rfe_risk derived map: APS 8-9 → LOW, APS 6-7 → MED, APS 3-5 → HIGH.
+   - Score the top ~5 strongest evidence items per case. Do NOT pad — if only 3 items qualify as substantive evidence, score 3. Do NOT score evidence items lacking a source quote (refuse the row and log a data-quality conflict instead).
+   - criterion_label: use the exact criterion_label string from claimed_criteria where applicable; for cross-cutting evidence (e.g., a high-impact contribution that supports multiple criteria), pick the strongest fit.
+9. conflict_register: structured log of forensic conflicts and ambiguities. Each entry has:
    - description: one short sentence stating what the conflict is.
    - conflict_type: short tag (e.g., "name_spelling_variant", "dob_format_ambiguity", "investment_amount_drift", "address_mismatch", "date_out_of_bracket_order", "currency_unresolved", "citation_count_discrepancy", "org_chart_vs_role_mismatch", "defective_translation", "g28_signature_mismatch", "ownership_below_treaty_threshold", "marginality_risk", "irrevocable_commitment_failure").
    - severity (1-5, calibrated rubric):
@@ -104,7 +112,15 @@ For each claimed criterion, summarize the evidence and list exhibit references. 
 
 Expert letters: extract one entry per recommendation/opinion letter. specificity_score is 'high' (cites specific papers/dates/named impact metrics), 'medium' (factual but general), 'low' (boilerplate or generic praise). relationship_to_beneficiary: 'collaborator' (co-authored papers, dissertation committee, current employer) | 'arms_length' (independent, never collaborated) | 'both' (collaborated on some, independent on others).
 
-Kazarian step 2: extract any explicit two-step framework language Akalan invoked, the sustained acclaim evidence, "risen to the very top" evidence, the comparison cohort defined (e.g., "top 1% of computational immunologists globally"), and whether the recent-evidence-within-3-years requirement is addressed.
+Kazarian step 2 (final merits): the qualitative analysis is where most EB-1A petitions are lost even after meeting 3+ criteria. Extract the full block:
+- framework_invoked: explicit two-step framework language Akalan invoked.
+- sustained_acclaim_evidence: text showing the acclaim is ongoing, not historical.
+- risen_to_very_top_evidence: text positioning the beneficiary at the very top of the field.
+- comparison_cohort: the field of comparison defined precisely (e.g., "top 1% of computational immunologists globally" — NOT "top scientists").
+- recent_evidence_within_3_years: whether and how temporal currency is addressed.
+- top_of_field_evidence: array of specific facts that anchor the "very top" claim — each entry one short verbatim phrase from the source (e.g., "named to MIT Tech Review's 35 Innovators Under 35 (2024)", "h-index 47, top 1% in computational biology per Scopus FNCI").
+- peer_benchmarking: per row, define field_definition (precise subfield), the beneficiary's metric, the field median and top-10% threshold, the benchmark_source (Google Scholar percentile, Scopus FNCI, BLS OES Level IV, Highly Cited Researcher list), and a percentile_conclusion (one sentence stating where the beneficiary sits — "approximately top 5% of US-based computational immunologists by citation impact"). Only include rows with a real benchmark in the source — do NOT guess medians.
+- narrative_stress_test: one short paragraph stating the strongest counter-argument USCIS could make in final merits ("even assuming three criteria are met, the totality...") and the response. If no such stress test is found in Akalan's notes, leave null.
 
 Citation counts: claimed total, Google Scholar total (if cited), ex-self-citation count (USCIS often demands this), h-index claimed.
 
@@ -148,6 +164,17 @@ Permanent position type: 'tenure_track', 'tenured', 'permanent_research_faculty'
 
 Expert letters: same shape as EB-1A. EB-1B places particular weight on letters from senior faculty in the field at OTHER institutions (independent confirmation of outstanding stature).
 
+International recognition: EB-1B's overarching standard is recognition INTERNATIONALLY as outstanding in a specific academic area (8 CFR 204.5(i)(2)). This is the qualitative final-merits analog to Kazarian step 2. Extract:
+- international_collaborators: foreign co-authors, joint grants, named institutions abroad.
+- invited_talks_abroad: keynotes, plenaries, named lectures at foreign universities — list with venue and year if in source.
+- foreign_grants_or_fellowships: ERC, EU Horizon, Royal Society, Wellcome Trust, JSPS, DFG, etc.
+- visiting_appointments_abroad: visiting professor / scholar roles at foreign institutions.
+- international_editorial_or_advisory: editorial board / advisory board memberships for journals or organizations with international circulation.
+- foreign_media_coverage: any foreign-language press coverage of the research.
+- top_of_field_evidence: array of specific verbatim phrases that anchor the "outstanding" claim (e.g., "Highly Cited Researcher 2023 (Clarivate)", "Editor, Journal of X (impact factor 12.4)").
+- peer_benchmarking: same shape as EB-1A — per row, define the field, the beneficiary's metric, field median, top-10% threshold, benchmark_source, and percentile_conclusion. Only include rows where the source provides a real benchmark.
+- narrative_stress_test: one paragraph stating the strongest counter-argument USCIS could make against international recognition, and the response. Null if not found in Akalan's notes.
+
 Forensic conflicts to surface in conflict_register (severity per rubric in SHARED_PROVENANCE_RULES rule 8):
 - Petitioner is a private employer but the record does not document 3+ full-time researchers or major achievements. Severity 4-5.
 - Position offered is "visiting", "post-doctoral", or term-limited — not permanent. Severity 5 (dispositive on permanent-position element).
@@ -190,6 +217,23 @@ U.S. entity doing business: extract the evidence summary — must show actively 
 One year abroad: extract start_date, end_date, employer (foreign entity), and a role_summary. Must be within the 3 years immediately preceding the U.S. petition or, if the beneficiary is already in the U.S. as L-1, immediately preceding L-1 admission.
 
 functional_or_personnel_manager: if the role is managerial, classify whether the case argues function-manager doctrine, personnel-manager, or both. If executive only, write 'n_a_executive'.
+
+Subordinate tier table (subordinate_tier_table): for EACH direct report under the beneficiary in the role being argued (foreign role, U.S. role, or both), extract one row:
+- name: the subordinate's name as it appears in the org chart or employment letter.
+- title: the subordinate's title verbatim.
+- tier: classify per INA 101(a)(44)(A)(ii):
+  * managerial — manages others; has a managerial title with reports of their own.
+  * supervisory — supervises non-managerial workers (lead, foreman, team supervisor).
+  * professional — degree-required role (engineer, attorney, scientist, accountant); document the degree/license/JD in evidence.
+  * non-professional — clerical, sales, service, manual labor; no degree requirement.
+  * UNCLEAR — title or evidence does not let you classify with confidence; do NOT guess.
+- evidence: the specific evidence supporting the tier classification (degree on file, professional license, role description in employment letter). For UNCLEAR rows, state what is missing.
+- source_doc: the document the subordinate appears in (org chart, employment letter, payroll roster).
+- side: 'foreign' if the report is in the foreign role, 'us' if in the U.S. role.
+
+If every populated row in subordinate_tier_table has tier='non-professional' AND there are no managerial or professional reports for that side, this is the "first-line supervisor problem" — log a SEVERITY 4 conflict_register entry referencing INA 101(a)(44)(A)(ii). Do not silently extract.
+
+If the source describes contractors or 1099 workers as direct reports, classify them but note in evidence that they are non-employees — USCIS does not credit contractor supervision as managerial capacity.
 
 Forensic conflicts to surface in conflict_register (severity per rubric in SHARED_PROVENANCE_RULES rule 8):
 - Time-percentage breakdown not populated or doesn't sum to 100. Severity 3.
