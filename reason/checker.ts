@@ -236,12 +236,16 @@ export async function checkDraft(
   draft: string,
   verifyReport?: VerifyReport,
 ): Promise<ReviewResult> {
+  // Facts JSON lives in the system array (not the user message) so it sits
+  // on its own cache breakpoint, byte-identical to draft/cover-letter.ts.
+  // The 5m TTL matches the typical draft→review chain horizon.
   const factsJson = JSON.stringify(caseFacts.facts, null, 2);
+  const factsBlock = `## Extracted facts (each value carries source_page, source_quote, confidence)\n\n\`\`\`json\n${factsJson}\n\`\`\``;
+
   // Verify Phase B (deterministic regex + per-case-type allowlist) runs
   // before this call. If a report is present, append it to the user prompt
   // so the reviewer focuses on flagged spans rather than re-deriving the
-  // same checks. The system prompt remains cacheable (verify lives only in
-  // the user message, which is per-request anyway).
+  // same checks.
   const verifySection = verifyReport ? `\n\n${reportToReviewerPrompt(verifyReport)}` : '';
 
   // No `thinking` here: the reviewer is structured-output-shaped
@@ -261,11 +265,16 @@ export async function checkDraft(
         text: SYSTEM_PROMPTS[caseFacts.case_type],
         cache_control: { type: 'ephemeral', ttl: '1h' },
       },
+      {
+        type: 'text',
+        text: factsBlock,
+        cache_control: { type: 'ephemeral', ttl: '5m' },
+      },
     ],
     messages: [
       {
         role: 'user',
-        content: `Review this ${caseFacts.case_type} cover letter draft against the source facts.\n\n## Facts (each value carries source_page, source_quote, confidence)\n\n\`\`\`json\n${factsJson}\n\`\`\`\n\n## Draft cover letter\n\n${draft}${verifySection}`,
+        content: `Review this ${caseFacts.case_type} cover letter draft against the source facts in the system context.\n\n## Draft cover letter\n\n${draft}${verifySection}`,
       },
     ],
   });

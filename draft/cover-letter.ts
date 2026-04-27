@@ -231,8 +231,16 @@ export interface DraftResult {
 }
 
 export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResult> {
+  // Facts JSON lives in the system array (not the user message) so it sits
+  // on its own cache breakpoint. The byte-identical JSON.stringify(facts,
+  // null, 2) shape is shared with reason/checker.ts so a within-call retry
+  // (or repeated drafter run on the same facts) hits the cache prefix
+  // instead of re-paying the input rate. 5m TTL is the right horizon: the
+  // draft-then-review chain completes in minutes, and 5m cache_creation is
+  // cheaper than 1h ($3.75/MTok vs $6/MTok on Sonnet 4.6).
   const factsJson = JSON.stringify(caseFacts.facts, null, 2);
-  const userMessage = `Draft the cover letter using the extracted facts below. Each value carries source_page (page in the client document), source_quote (verbatim phrase), and confidence (0–1).\n\n\`\`\`json\n${factsJson}\n\`\`\``;
+  const factsBlock = `## Extracted facts (each value carries source_page, source_quote, confidence)\n\n\`\`\`json\n${factsJson}\n\`\`\``;
+  const userMessage = `Draft the cover letter using the facts in the system context.`;
 
   const response = await getAnthropic().messages.create({
     model: 'claude-sonnet-4-6',
@@ -244,6 +252,11 @@ export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResul
         type: 'text',
         text: SYSTEM_PROMPTS[caseFacts.case_type],
         cache_control: { type: 'ephemeral', ttl: '1h' },
+      },
+      {
+        type: 'text',
+        text: factsBlock,
+        cache_control: { type: 'ephemeral', ttl: '5m' },
       },
     ],
     messages: [{ role: 'user', content: userMessage }],
