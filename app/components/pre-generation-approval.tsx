@@ -1,17 +1,15 @@
 'use client';
 
 /**
- * Pre-generation approval modal. Drops on top of the dashboard when an
- * attorney clicks any "Generate" button. Workflow:
+ * Pre-generation approval modal. Workflow:
  *
- *   1. Open modal → POST /api/matter/[id]/preview { generator } → render
- *      facts_used + defensives + authorities + outline + cost.
- *   2. Attorney inline-edits any fact value (click → editable input →
- *      blur to commit).
- *   3. Footer: attorney initials (required) + [Reject] / [Approve].
- *   4. Submit → POST /api/matter/[id]/approve { preview_id, approved,
- *      attorney_initials, edits } → on approval, surface output_path
- *      and (optionally) output_inline.
+ *   1. Open → POST /api/matter/[id]/preview { generator } → render the
+ *      decision summary, risk register, structural outline, citations,
+ *      and implications. The 87-field source table is collapsed behind
+ *      "show all source fields" so the default surface is plain English.
+ *   2. Attorney can expand the advanced view and inline-edit any fact.
+ *   3. Footer: attorney initials (required) + [reject] / [approve & generate].
+ *   4. Submit → POST /api/matter/[id]/approve.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -26,13 +24,7 @@ interface ApprovalModalProps {
   open: boolean;
   matterId: string;
   generator: PreviewGenerator;
-  /** Optional generator-specific args forwarded to the preview endpoint. */
   args?: Record<string, unknown>;
-  /**
-   * Live case facts. When supplied, the modal posts them in the body of
-   * /preview and /approve so the server uses the freshly-ingested matter
-   * instead of falling back to getMockMatter / getMockTypedMemory.
-   */
   caseFacts?: unknown;
   typedMemory?: unknown;
   onClose: () => void;
@@ -72,13 +64,9 @@ export function PreGenerationApprovalModal(props: ApprovalModalProps) {
 
   useEffect(() => {
     if (!open) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPreview(null);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setEdits({});
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setError(null);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setInitials('');
 
     let cancelled = false;
@@ -158,7 +146,6 @@ export function PreGenerationApprovalModal(props: ApprovalModalProps) {
     }
   }
 
-  // Escape closes; clicking the backdrop also closes (unless submitting).
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -170,6 +157,9 @@ export function PreGenerationApprovalModal(props: ApprovalModalProps) {
 
   if (!open) return null;
 
+  const generatorTitle = formatGeneratorTitle(generator);
+  const decisionLines = preview ? deriveDecisionSummary(generator, preview.facts_used) : [];
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -178,146 +168,291 @@ export function PreGenerationApprovalModal(props: ApprovalModalProps) {
       }}
     >
       <div
-        className="bg-paper max-w-4xl w-full max-h-[90vh] overflow-y-auto border border-graphite/30 shadow-xl"
+        className="bg-paper max-w-3xl w-full max-h-[90vh] overflow-y-auto border border-rule-strong"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="px-9 py-7 border-b border-graphite/20">
-          <div className="flex items-baseline justify-between mb-2">
-            <div>
-              <div className="smcp text-[0.65rem] text-graphite">¶ pre-generation approval</div>
-              <div className="font-display italic text-[1.4rem] text-ink-2">
-                {generator.replace(/_/g, ' ')}
+        {/* Header */}
+        <div className="px-9 py-6 border-b border-rule">
+          <div className="flex items-start justify-between gap-6">
+            <div className="min-w-0">
+              <div className="smcp text-graphite-soft mb-1">approval</div>
+              <h2 className="text-title leading-tight break-words">{generatorTitle}</h2>
+              <div className="font-mono text-meta text-graphite mt-1.5 truncate">
+                matter <span className="text-ink-2">{matterId}</span>
               </div>
             </div>
             <button
               onClick={onClose}
-              className="font-mono text-[0.85rem] text-ink-2 px-3 py-1 border border-graphite/40 hover:bg-ink hover:text-paper transition-colors disabled:opacity-50"
               disabled={submitting}
               aria-label="Close approval modal"
+              className="smcp px-3 py-2 border border-ink-2 hover:bg-ink hover:text-paper transition-colors disabled:opacity-50 shrink-0"
             >
-              ✕ close (Esc)
+              cancel · esc
             </button>
-          </div>
-          <div className="font-mono text-[0.7rem] text-graphite">
-            matter: {matterId}{' '}
-            {preview && (
-              <>
-                · est. {preview.estimated_output_length_tokens.toLocaleString()} tokens · est. $
-                {preview.estimated_cost_usd.toFixed(3)}
-              </>
-            )}
           </div>
         </div>
 
-        <div className="px-9 py-6 space-y-7">
-          {loading && <div className="font-display italic text-graphite">Building preview…</div>}
+        {/* Body */}
+        <div className="px-9 py-7 grid gap-9">
+          {loading && <div className="text-body text-graphite">Building preview…</div>}
           {error && (
-            <div className="border border-rose-300 bg-rose-50 text-rose-900 px-4 py-3 font-mono text-[0.75rem]">
+            <div className="border border-ink-2 paper-recess px-4 py-3 font-mono text-meta text-ink">
+              <span className="smcp text-ink mr-2">error</span>
               {error}
             </div>
           )}
 
           {preview && (
             <>
-              <FactsTable
-                facts={preview.facts_used}
-                edits={edits}
-                onEdit={(path, value) =>
-                  setEdits((prev) => ({ ...prev, [path]: value }))
-                }
-              />
+              {decisionLines.length > 0 && (
+                <ApprovalSection title="decision">
+                  <ul className="grid gap-1.5">
+                    {decisionLines.map((line, i) => (
+                      <li key={i} className="text-body text-ink-2 leading-relaxed">
+                        {line}
+                      </li>
+                    ))}
+                  </ul>
+                </ApprovalSection>
+              )}
+
+              {preview.conflicts_to_flag_in_output.length > 0 && (
+                <ApprovalSection
+                  title="risk register"
+                  count={preview.conflicts_to_flag_in_output.length}
+                  countLabel={
+                    preview.conflicts_to_flag_in_output.length === 1 ? 'flag' : 'flags'
+                  }
+                >
+                  <ConflictList items={preview.conflicts_to_flag_in_output} />
+                </ApprovalSection>
+              )}
+
+              {preview.structural_outline.length > 0 && (
+                <ApprovalSection title="structural outline">
+                  <ol className="grid gap-2.5">
+                    {preview.structural_outline.map((s) => (
+                      <li
+                        key={s.roman}
+                        className="grid grid-cols-[2.6rem_1fr] items-baseline gap-x-3"
+                      >
+                        <span className="font-mono text-meta text-graphite tabular-nums">
+                          {s.roman}.
+                        </span>
+                        <div>
+                          <div className="text-body text-ink-2">{s.heading}</div>
+                          {s.one_line_summary && (
+                            <div className="text-meta text-graphite mt-0.5">
+                              {s.one_line_summary}
+                            </div>
+                          )}
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </ApprovalSection>
+              )}
 
               {preview.defensive_paragraphs_required.length > 0 && (
-                <Section title="Defensive paragraphs required">
-                  <div className="flex flex-wrap gap-2">
+                <ApprovalSection
+                  title="defensive paragraphs"
+                  count={preview.defensive_paragraphs_required.length}
+                >
+                  <ul className="grid gap-1">
                     {preview.defensive_paragraphs_required.map((d) => (
-                      <span
-                        key={d}
-                        title={d}
-                        className="inline-block border border-graphite/40 px-2 py-1 font-mono text-[0.7rem]"
-                      >
+                      <li key={d} className="font-mono text-meta text-ink-2">
                         {d}
-                      </span>
+                      </li>
                     ))}
-                  </div>
-                </Section>
+                  </ul>
+                </ApprovalSection>
               )}
 
               {preview.authorities_to_cite.length > 0 && (
-                <Section title="Authorities to cite">
-                  <ul className="font-mono text-[0.75rem] space-y-1">
+                <ApprovalSection
+                  title="authorities cited"
+                  count={preview.authorities_to_cite.length}
+                >
+                  <ul className="grid gap-1 font-mono text-meta text-ink-2">
                     {preview.authorities_to_cite.map((a) => (
                       <li key={a}>{a}</li>
                     ))}
                   </ul>
-                </Section>
+                </ApprovalSection>
               )}
 
-              {preview.conflicts_to_flag_in_output.length > 0 && (
-                <Section title="Conflicts to flag in output">
-                  <ConflictList items={preview.conflicts_to_flag_in_output} />
-                </Section>
-              )}
+              <ApprovalSection title="implications">
+                <dl className="grid grid-cols-[8rem_1fr] gap-y-1 gap-x-4">
+                  <dt className="text-meta text-graphite">cost</dt>
+                  <dd className="font-mono text-meta text-ink-2 tabular-nums">
+                    ≈ ${preview.estimated_cost_usd.toFixed(3)}
+                  </dd>
+                  <dt className="text-meta text-graphite">tokens</dt>
+                  <dd className="font-mono text-meta text-ink-2 tabular-nums">
+                    ≈ {preview.estimated_output_length_tokens.toLocaleString()}
+                  </dd>
+                  <dt className="text-meta text-graphite">facts used</dt>
+                  <dd className="font-mono text-meta text-ink-2 tabular-nums">
+                    {preview.facts_used.length}
+                  </dd>
+                </dl>
+              </ApprovalSection>
 
-              {preview.structural_outline.length > 0 && (
-                <Section title="Structural outline">
-                  <ol className="space-y-2">
-                    {preview.structural_outline.map((s) => (
-                      <li key={s.roman}>
-                        <details>
-                          <summary className="cursor-pointer font-mono text-[0.75rem]">
-                            <span className="font-bold mr-2">{s.roman}.</span>
-                            {s.heading}
-                          </summary>
-                          <div className="ml-6 mt-1 font-display italic text-[0.85rem] text-ink-2">
-                            {s.one_line_summary}
-                          </div>
-                        </details>
-                      </li>
-                    ))}
-                  </ol>
-                </Section>
+              {preview.facts_used.length > 0 && (
+                <details className="border-t border-rule pt-4">
+                  <summary className="cursor-pointer smcp text-graphite hover:text-ink select-none">
+                    show all {preview.facts_used.length} source fields
+                  </summary>
+                  <div className="mt-4">
+                    <FactsTable
+                      facts={preview.facts_used}
+                      edits={edits}
+                      onEdit={(path, value) =>
+                        setEdits((prev) => ({ ...prev, [path]: value }))
+                      }
+                    />
+                  </div>
+                </details>
               )}
             </>
           )}
         </div>
 
-        <div className="px-9 py-5 border-t border-graphite/20 flex items-center justify-between gap-4">
+        {/* Footer */}
+        <div className="px-9 py-5 border-t border-rule flex items-center justify-between gap-4">
           <input
             type="text"
             value={initials}
             onChange={(e) => setInitials(e.target.value)}
-            placeholder="Attorney initials (e.g., S.Y.)"
-            className="border border-graphite/40 px-3 py-2 font-mono text-[0.8rem] flex-1"
+            placeholder="attorney initials"
+            className="border border-rule-strong px-3 py-2 font-mono text-meta flex-1 max-w-[14rem] focus:outline-none focus:border-ink"
             disabled={submitting}
             maxLength={12}
           />
-          <button
-            onClick={() => submit(false)}
-            disabled={!preview || submitting}
-            className="border border-rose-300 bg-rose-50 text-rose-900 px-4 py-2 font-mono text-[0.75rem] disabled:opacity-50"
-          >
-            Reject
-          </button>
-          <button
-            onClick={() => submit(true)}
-            disabled={!preview || submitting}
-            className="border border-graphite/40 bg-ink-2 text-paper px-4 py-2 font-mono text-[0.75rem] disabled:opacity-50"
-          >
-            Approve and generate
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => submit(false)}
+              disabled={!preview || submitting}
+              className="smcp px-4 py-2 border border-rule-strong text-graphite hover:border-ink hover:text-ink transition-colors disabled:opacity-40"
+            >
+              reject
+            </button>
+            <button
+              onClick={() => submit(true)}
+              disabled={!preview || submitting}
+              className="smcp px-4 py-2 bg-ink text-paper border border-ink hover:bg-ink-2 transition-colors disabled:opacity-40"
+            >
+              approve &amp; generate
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function Section(props: { title: string; children: React.ReactNode }) {
+function formatGeneratorTitle(generator: string): string {
+  return generator
+    .replace(/_/g, ' ')
+    .split(' ')
+    .map((w) => (w.length === 0 ? w : w[0].toUpperCase() + w.slice(1)))
+    .join(' ');
+}
+
+/**
+ * Plain-English summary of what the generator will produce, derived from
+ * facts_used. Cover-letter-aware today; falls back to a generic line for
+ * other generators until per-generator templating lands.
+ */
+function deriveDecisionSummary(
+  generator: string,
+  facts: PreviewFactRow[],
+): string[] {
+  const get = (path: string) => {
+    const row = facts.find((f) => f.field_path === path);
+    return row?.value == null ? null : String(row.value);
+  };
+  const fmtUSD = (s: string | null): string | null => {
+    if (s === null) return null;
+    const n = Number(s);
+    if (!Number.isFinite(n)) return s;
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      maximumFractionDigits: 0,
+    }).format(n);
+  };
+
+  if (generator === 'cover_letter') {
+    const name = get('$.investor.full_name');
+    const nat = get('$.investor.nationality');
+    const passport = get('$.investor.passport_number');
+    const entity = get('$.enterprise.legal_name');
+    const state = get('$.enterprise.state_of_formation');
+    const formed = get('$.enterprise.formation_date');
+    const committed = fmtUSD(get('$.investment.total_committed_usd'));
+    const spent = fmtUSD(get('$.investment.total_spent_usd'));
+    const sofRows = facts.filter((f) =>
+      f.field_path.startsWith('$.source_of_funds['),
+    ).length;
+    // each SOF chain has ~5 leaf fields in the schema
+    const sofChains = sofRows > 0 ? Math.ceil(sofRows / 5) : 0;
+
+    const lines: string[] = [];
+    if (name && nat) {
+      lines.push(
+        `${name}, ${nat} national${passport ? ` (passport ${passport})` : ''}, qualifies as a treaty investor.`,
+      );
+    }
+    if (entity) {
+      const entityBits = [entity];
+      if (state) entityBits.push(state);
+      if (formed) entityBits.push(`formed ${formed}`);
+      lines.push(`Enterprise: ${entityBits.join(' · ')}.`);
+    }
+    if (committed) {
+      const investBits = [`Total committed ${committed}`];
+      if (spent) investBits.push(`spent ${spent}`);
+      lines.push(`${investBits.join(', ')}.`);
+    }
+    if (sofChains > 0) {
+      lines.push(
+        `Source of funds traced through ${sofChains} chain${sofChains > 1 ? 's' : ''}.`,
+      );
+    }
+    return lines;
+  }
+
+  return [
+    `The ${formatGeneratorTitle(generator).toLowerCase()} will be drafted from the facts on file.`,
+  ];
+}
+
+function ApprovalSection({
+  title,
+  count,
+  countLabel,
+  children,
+}: {
+  title: string;
+  count?: number;
+  countLabel?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div>
-      <div className="smcp text-[0.65rem] text-graphite mb-3">¶ {props.title}</div>
-      {props.children}
-    </div>
+    <section>
+      <header className="flex items-baseline gap-3 mb-3">
+        <span className="smcp text-graphite">{title}</span>
+        {typeof count === 'number' && (
+          <span className="font-mono text-meta text-graphite-soft tabular-nums">
+            {count}
+            {countLabel ? ` ${countLabel}` : ''}
+          </span>
+        )}
+        <span className="flex-1 border-b border-rule translate-y-[-0.3em]" />
+      </header>
+      {children}
+    </section>
   );
 }
 
@@ -327,35 +462,28 @@ function FactsTable(props: {
   onEdit: (path: string, value: string) => void;
 }) {
   if (props.facts.length === 0) {
-    return (
-      <div className="font-display italic text-graphite">No facts will be consumed.</div>
-    );
+    return <div className="text-meta text-graphite-soft">No facts will be consumed.</div>;
   }
   return (
-    <div>
-      <div className="smcp text-[0.65rem] text-graphite mb-3">
-        ¶ facts the generator will use ({props.facts.length})
-      </div>
-      <table className="w-full font-mono text-[0.7rem]">
-        <thead>
-          <tr className="border-b border-graphite/20 text-graphite">
-            <th className="text-left py-2 w-1/3">field_path</th>
-            <th className="text-left py-2">value</th>
-            <th className="text-left py-2 w-32">source</th>
-          </tr>
-        </thead>
-        <tbody>
-          {props.facts.map((f) => (
-            <FactRow
-              key={f.field_path}
-              fact={f}
-              edited={props.edits[f.field_path]}
-              onEdit={(v) => props.onEdit(f.field_path, v)}
-            />
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <table className="w-full font-mono text-meta">
+      <thead>
+        <tr className="border-b border-rule-strong">
+          <th className="text-left py-2 pr-3 text-graphite font-medium w-1/3">field_path</th>
+          <th className="text-left py-2 pr-3 text-graphite font-medium">value</th>
+          <th className="text-left py-2 text-graphite font-medium w-32">source</th>
+        </tr>
+      </thead>
+      <tbody>
+        {props.facts.map((f) => (
+          <FactRow
+            key={f.field_path}
+            fact={f}
+            edited={props.edits[f.field_path]}
+            onEdit={(v) => props.onEdit(f.field_path, v)}
+          />
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -369,32 +497,34 @@ function FactRow(props: {
     props.edited !== undefined
       ? props.edited
       : props.fact.value === null || props.fact.value === undefined
-        ? '[null]'
+        ? '—'
         : String(props.fact.value);
   return (
-    <tr className="border-b border-graphite/10 align-top">
+    <tr className="border-b border-rule align-top">
       <td className="py-2 pr-3 text-graphite">{props.fact.field_path}</td>
       <td className="py-2 pr-3">
         {editing ? (
           <input
             autoFocus
-            defaultValue={display === '[null]' ? '' : display}
+            defaultValue={display === '—' ? '' : display}
             onBlur={(e) => {
               props.onEdit(e.currentTarget.value);
               setEditing(false);
             }}
-            className="border border-graphite/40 px-2 py-1 w-full"
+            className="border border-rule-strong px-2 py-1 w-full focus:outline-none focus:border-ink"
           />
         ) : (
           <span
             onClick={() => setEditing(true)}
-            className={`cursor-pointer ${props.edited !== undefined ? 'underline decoration-amber-500' : ''}`}
+            className={`cursor-pointer text-ink-2 ${
+              props.edited !== undefined ? 'underline underline-offset-2' : ''
+            }`}
           >
             {display}
           </span>
         )}
       </td>
-      <td className="py-2 text-graphite text-[0.65rem]">
+      <td className="py-2 text-graphite-soft tabular-nums">
         {props.fact.source_doc ?? ''}
         {props.fact.source_page != null && ` p.${props.fact.source_page}`}
       </td>
@@ -403,19 +533,26 @@ function FactRow(props: {
 }
 
 function ConflictList(props: { items: PreviewConflictEntry[] }) {
+  const sorted = [...props.items].sort((a, b) => b.severity - a.severity);
   return (
-    <ul className="space-y-2">
-      {props.items.map((c, i) => {
-        const rank = SEVERITY_RANK[c.severity];
+    <ul className="grid gap-2">
+      {sorted.map((c, i) => {
+        const rank = SEVERITY_RANK[c.severity] ?? SEVERITY_RANK[3];
         return (
           <li
             key={`${c.conflict_type}-${i}`}
-            className="border border-graphite/30 px-3 py-2"
+            className="grid grid-cols-[1.4rem_1fr_auto] items-baseline gap-x-3"
           >
-            <div className={`font-mono text-[0.7rem] mb-1 ${rank?.weight ?? ''}`}>
-              {rank?.glyph ?? '·'} severity {c.severity} · {c.conflict_type}
+            <span className={`font-mono text-meta ${rank.weight}`}>{rank.glyph}</span>
+            <div className="min-w-0">
+              <div className={`text-body ${rank.weight}`}>{c.description}</div>
+              <div className="font-mono text-meta text-graphite-soft mt-0.5">
+                {c.conflict_type}
+              </div>
             </div>
-            <div className="font-display italic text-[0.85rem]">{c.description}</div>
+            <span className="font-mono text-meta text-graphite tabular-nums shrink-0">
+              sev {c.severity}
+            </span>
           </li>
         );
       })}
