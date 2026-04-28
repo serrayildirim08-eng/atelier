@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Fraunces is loaded via next/font in app/layout.tsx and exposed as
+   var(--font-fraunces). The display stack picks it up below. */
+
 @theme {
   /* Concrete & jet — pure monochrome, light surface */
   --color-paper: #FAFAFA;
@@ -24,20 +27,39 @@
   --color-rule: rgba(10, 10, 10, 0.10);
   --color-rule-strong: rgba(10, 10, 10, 0.32);
 
-  /* Type stack — system-first sans, no serif fallback */
-  --font-display: -apple-system, "Helvetica Neue", "Inter", system-ui, sans-serif;
+  /* Type stack — sans body, serif (Fraunces, via next/font) for hero tiers only */
+  --font-display: var(--font-fraunces), "Iowan Old Style", "Hoefler Text", "Apple Garamond", Georgia, "Times New Roman", serif;
   --font-body: -apple-system, "Helvetica Neue", "Inter", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Berkeley Mono", Menlo, monospace;
 
-  /* Type scale — six tokens, replaces 30+ arbitrary sizes.
+  /* Type scale — eight tokens. Hero tiers (stunt/hero) carry the serif at
+     hero scale; section is the missing-rung between title and display.
      Body up from 12.5px to 15px. Labels up from 9.9px to 11.5px with
      half the tracking. Reading first, decoration second. */
+  --text-stunt:   6rem;         /* 96px   — empty-state hero (one per app) */
+  --text-hero:    4rem;         /* 64px   — matter masthead, anchored heroes */
   --text-display: 2.4rem;       /* 38.4px — page heroes, sparingly */
-  --text-title:   1.05rem;      /* 16.8px — section titles */
-  --text-lede:    1rem;         /* 16px   — italic ledes, intro paras */
+  --text-section: 1.5rem;       /* 24px   — section headers (was missing) */
+  --text-title:   1.05rem;      /* 16.8px — card titles */
+  --text-lede:    1rem;         /* 16px   — intro paras */
   --text-body:    0.9375rem;    /* 15px   — reading copy (DEFAULT) */
   --text-meta:    0.8125rem;    /* 13px   — secondary inline */
   --text-label:   0.72rem;      /* 11.5px — smcp uppercase labels */
+}
+
+/* Fraunces axis lock — applied wherever the serif renders. SOFT 0 = sharp
+   terminals (attorney-grade). WONK 0 = no quirky alts. opsz tuned per size. */
+.font-display {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 144, "SOFT" 0, "WONK" 0;
+}
+.font-display-hero {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 96, "SOFT" 0, "WONK" 0;
+}
+.font-display-section {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 36, "SOFT" 0, "WONK" 0;
 }
 
 html, body {
@@ -158,6 +180,20 @@ html, body {
   to { opacity: 1; }
 }
 .fade-in { animation: fadeIn 200ms ease-out both; }
+
+/* Background-progress chip dot. Pulsing rubric/red ring + dot. */
+@keyframes pulse-dot-bg-anim {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.7); }
+}
+.pulse-dot-bg {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #b8392e;
+  animation: pulse-dot-bg-anim 1.4s ease-in-out infinite;
+}
 
 /* Selection — jet wash on ink */
 ::selection { background: rgba(10, 10, 10, 0.16); color: var(--color-ink); }

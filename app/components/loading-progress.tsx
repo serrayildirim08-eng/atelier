@@ -350,6 +350,74 @@ function fmtRemaining(elapsedMs: number, percent: number): string {
   return `~ ${min}m remaining`;
 }
 
+function fmtRemainingBig(elapsedMs: number, percent: number, stage: number, totalPdfs: number): string {
+  // Early-stage ETA from percent is unreliable. Use a per-stage typical
+  // budget: scan/subtype/classify scale with PDF count; aggregate/draft/review
+  // are fairly fixed.
+  if (percent > 5) {
+    const totalMs = elapsedMs / (percent / 100);
+    const remainingMs = Math.max(0, totalMs - elapsedMs);
+    const min = Math.round(remainingMs / 60_000);
+    if (min === 0) return '< 1 minute left';
+    if (min === 1) return '~1 minute left';
+    return `~${min} minutes left`;
+  }
+  // Pre-1% fallback: 0.4s per PDF (Haiku detect+extract) + 90s aggregate +
+  // 60s draft + 60s review.
+  const baseMs = totalPdfs * 400 + 90_000 + 60_000 + 60_000;
+  const min = Math.max(1, Math.round(baseMs / 60_000));
+  return `~${min} minutes total · stage ${stage + 1}/${7}`;
+}
+
+const ROTATING_LINES_BY_STAGE: Record<number, string[]> = {
+  // 0 = scan
+  0: [
+    'Walking the deposit folder…',
+    'Counting PDFs…',
+    'Hashing each file for the dedup cache…',
+  ],
+  // 1 = subtype
+  1: [
+    'Picking three or four signal-dense PDFs…',
+    'Asking Haiku for the E-2 sub-type…',
+    'Cross-checking principal vs procedural posture…',
+  ],
+  // 2 = classify (per-PDF wave)
+  2: [
+    'Reading passports for nationality and validity…',
+    'Reading bank statements for transfer chains…',
+    'Reading formation docs for ownership structure…',
+    'Reading lease + payroll for substantiality…',
+    'Reading contracts for treaty-country evidence…',
+    'Hashing for the SHA-256 dedup cache…',
+  ],
+  // 3 = aggregate
+  3: [
+    'Reconciling investment chain across files…',
+    'Folding 26 doc-type variants into a unified E-2 schema…',
+    'Running 15 deterministic gates against the facts…',
+    'Cross-checking entity coherence (ownership ↔ formation ↔ lease)…',
+    'Detecting at-risk vs marginal posture…',
+    'Computing FX gates on transfers…',
+  ],
+  // 4 = draft
+  4: [
+    'Drafting the cover letter…',
+    'Citing FAM 9 and 8 CFR §214.2(e)…',
+    'Walking the five E-2 elements…',
+    'Naming exhibits as Tab A through Tab L…',
+  ],
+  // 5 = review
+  5: [
+    'Praying to immigration gods…',
+    'Auditing the draft against the unified facts…',
+    'Flagging inconsistencies and weak spots…',
+    'Checking citation allowlist…',
+  ],
+  // 6 = assemble
+  6: ['Assembling the dossier…', 'Persisting to the binder…'],
+};
+
 /* ────────────────────────── component ───────────────────────────────────── */
 
 interface Props {
@@ -411,6 +479,14 @@ export function LoadingProgress({ events, startedAt }: Props) {
       ? state.rows[typingActiveRow].label.toLowerCase()
       : null;
 
+  // Rotating activity ticker — pulled from per-stage line bank, advances
+  // every 3.5s. Gives the loading screen a sense of "the bot is doing
+  // something specific right now" even when the underlying call is silent.
+  const stageLines =
+    ROTATING_LINES_BY_STAGE[state.currentStage] ?? ['Working…'];
+  const tickerIdx = Math.floor(elapsedMs / 3500) % stageLines.length;
+  const tickerLine = stageLines[tickerIdx];
+
   return (
     <div className="grid gap-10 fade-up">
       <style>{`
@@ -437,6 +513,50 @@ export function LoadingProgress({ events, startedAt }: Props) {
           animation: none;
           opacity: 1;
         }
+        @keyframes pulse-dot {
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50%      { opacity: 0.35; transform: scale(0.7); }
+        }
+        .pulse-dot {
+          display: inline-block;
+          width: 0.6em;
+          height: 0.6em;
+          border-radius: 50%;
+          background: var(--color-rubric, #b8392e);
+          animation: pulse-dot 1.4s ease-in-out infinite;
+          margin-right: 0.5em;
+          vertical-align: 0.05em;
+        }
+        @keyframes shimmer {
+          0%   { background-position: -200% 0; }
+          100% { background-position: 200% 0; }
+        }
+        .shimmer-bar {
+          background: linear-gradient(
+            90deg,
+            rgba(10,10,10,0.06) 0%,
+            rgba(10,10,10,0.18) 50%,
+            rgba(10,10,10,0.06) 100%
+          );
+          background-size: 200% 100%;
+          animation: shimmer 1.6s linear infinite;
+        }
+        @keyframes ticker-fade {
+          0%   { opacity: 0; transform: translateY(4px); }
+          15%  { opacity: 1; transform: translateY(0); }
+          85%  { opacity: 1; transform: translateY(0); }
+          100% { opacity: 0; transform: translateY(-4px); }
+        }
+        .ticker-line {
+          animation: ticker-fade 3.5s ease-in-out;
+        }
+        @keyframes stage-cell-pulse {
+          0%, 100% { box-shadow: 0 0 0 0 rgba(184, 57, 46, 0.5); }
+          50%      { box-shadow: 0 0 0 4px rgba(184, 57, 46, 0); }
+        }
+        .stage-cell-active {
+          animation: stage-cell-pulse 1.6s ease-out infinite;
+        }
       `}</style>
 
       {/* ── TOP : percent + stage label ─────────────────────────────────── */}
@@ -456,11 +576,30 @@ export function LoadingProgress({ events, startedAt }: Props) {
             Stage {state.currentStage + 1} of {STAGES.length}
           </div>
           <div className="text-title font-medium text-ink leading-snug">
+            {!state.done && <span className="pulse-dot" aria-hidden />}
             {state.currentLabel ??
               (state.matter
                 ? `Reading ${state.matter}…`
                 : 'Preparing the matter…')}
           </div>
+          {!state.done && (
+            <div className="mt-3 grid gap-2">
+              <div className="font-display italic text-[1.6rem] text-ink leading-tight">
+                {fmtRemainingBig(elapsedMs, percent, state.currentStage, state.totalPdfs)}
+              </div>
+              <div className="font-mono text-meta tabular-nums text-graphite-soft">
+                {fmtElapsed(elapsedMs)} elapsed · still working
+              </div>
+              {tickerLine && (
+                <div
+                  key={tickerLine}
+                  className="font-mono text-[0.78rem] text-graphite ticker-line italic mt-1"
+                >
+                  ▸ {tickerLine}
+                </div>
+              )}
+            </div>
+          )}
           {state.totalPdfs > 0 && (
             <div className="mt-2 font-mono text-meta tabular-nums text-graphite">
               <span className="text-ink-2 font-semibold">{state.completedPdfs}</span>
@@ -478,11 +617,14 @@ export function LoadingProgress({ events, startedAt }: Props) {
       {/* ── PROGRESS BAR + meta ─────────────────────────────────────────── */}
       <div className="grid gap-2.5">
         <div
-          className="h-[6px] w-full"
+          className="relative h-[6px] w-full overflow-hidden"
           style={{ background: 'rgba(10, 10, 10, 0.08)' }}
         >
+          {!state.done && (
+            <div className="absolute inset-0 shimmer-bar" aria-hidden />
+          )}
           <div
-            className="h-full bg-ink transition-[width] duration-300 ease-out"
+            className="relative h-full bg-ink transition-[width] duration-300 ease-out"
             style={{ width: `${percent}%` }}
           />
         </div>
@@ -524,7 +666,7 @@ export function LoadingProgress({ events, startedAt }: Props) {
           return (
             <div
               key={stage.id}
-              className={`px-3.5 py-3 flex flex-col items-start justify-between gap-2 min-h-[4.4rem] ${cellTone}`}
+              className={`px-3.5 py-3 flex flex-col items-start justify-between gap-2 min-h-[4.4rem] ${cellTone} ${isCurrent ? 'stage-cell-active' : ''}`}
             >
               <span
                 className={`font-mono text-label tabular-nums tracking-[0.10em] uppercase font-semibold ${counterTone}`}

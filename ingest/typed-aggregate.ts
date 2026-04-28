@@ -2181,9 +2181,19 @@ export async function aggregateTypedMemoryToE2(
   // failure (contract vs I-129E investment drift) and the conflict_register
   // severity rubric in the system prompt does most of the constraining.
   // This trades roughly 5-15K extra thinking tokens for ~$0.10-$0.20/case.
-  const response = await getAnthropic().messages.create({
+  // Bumped to 32K so adaptive thinking + the JSON body both fit. With
+  // E2FactsSchema's ~176 leaves, the JSON itself runs 6–10K; thinking on
+  // a 158K-token corpus can easily eat 12K. 16K was getting truncated
+  // mid-object on real cases ("No JSON object found in response").
+  //
+  // Streaming is mandatory: Anthropic refuses non-streaming requests that
+  // could exceed 10 minutes wall-clock, and a 158K-input + adaptive-thinking
+  // call can easily cross that. We stream and assemble the final message;
+  // no UI deltas are surfaced — the route's heartbeat covers that.
+  const FIRST_PASS_MAX_TOKENS = 32_000;
+  const stream = getAnthropic().messages.stream({
     model: 'claude-sonnet-4-6',
-    max_tokens: 16000,
+    max_tokens: FIRST_PASS_MAX_TOKENS,
     thinking: { type: 'adaptive' },
     output_config: { effort: 'low' },
     system: [
@@ -2195,6 +2205,7 @@ export async function aggregateTypedMemoryToE2(
     ],
     messages: [{ role: 'user', content: userMessage }],
   });
+  const response = await stream.finalMessage();
 
   let jsonText = '';
   for (const block of response.content) {
@@ -2204,10 +2215,43 @@ export async function aggregateTypedMemoryToE2(
   let raw: unknown;
   try {
     raw = JSON.parse(extractFirstJsonObject(jsonText));
-  } catch (e: unknown) {
-    throw new Error(
-      `Aggregator JSON parse failed — ${e instanceof Error ? e.message : String(e)}`,
-    );
+  } catch (firstErr: unknown) {
+    // Fallback: retry once with thinking disabled. On a 158K-token corpus
+    // adaptive thinking sometimes consumes the entire output budget and
+    // the JSON never lands. Without thinking the model goes straight to
+    // structured output. Same prompt, same schema constraints.
+    const retryStream = getAnthropic().messages.stream({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 16_000,
+      system: [
+        {
+          type: 'text',
+          text: SYSTEM_PROMPT,
+          cache_control: { type: 'ephemeral', ttl: '1h' },
+        },
+      ],
+      messages: [{ role: 'user', content: userMessage }],
+    });
+    const retry = await retryStream.finalMessage();
+    let retryText = '';
+    for (const block of retry.content) {
+      if (block.type === 'text') retryText += block.text;
+    }
+    try {
+      raw = JSON.parse(extractFirstJsonObject(retryText));
+    } catch (retryErr: unknown) {
+      throw new Error(
+        `Aggregator JSON parse failed (retry also failed) — ` +
+          `first: ${firstErr instanceof Error ? firstErr.message : String(firstErr)}; ` +
+          `retry: ${retryErr instanceof Error ? retryErr.message : String(retryErr)}`,
+      );
+    }
+    logAnthropicUsage({
+      stage: 'extract',
+      model: 'claude-sonnet-4-6',
+      case_type: 'E2',
+      usage: retry.usage,
+    });
   }
 
   const parsed = E2FactsSchema.safeParse(raw);

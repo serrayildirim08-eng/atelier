@@ -297,12 +297,26 @@ export async function POST(request: Request): Promise<Response> {
       // Anthropic crunches. Without periodic events the dev server (and
       // some intermediate proxies) close the response, the client sees an
       // EOF without a `result` event, and the UI bounces back to "no
-      // matters". 5s heartbeats keep the connection warm AND give the user
-      // visible "still working" feedback in the loading overlay.
-      const startHeartbeat = (stage: string) => {
+      // matters". 5s heartbeats keep the connection warm AND drive a
+      // visible "still working — Xs elapsed" label in the loading overlay
+      // (we re-emit `progress` so the existing reducer ticks the label).
+      const startHeartbeat = (
+        stage: 'aggregating' | 'drafting' | 'reviewing',
+        baseLabel: string,
+      ) => {
+        const startedAt = Date.now();
         return setInterval(() => {
+          const elapsedSec = Math.floor((Date.now() - startedAt) / 1000);
           try {
             send(controller, { type: 'heartbeat', stage, ts: Date.now() });
+            // Re-emit a `progress` event so the loading overlay's typewriter
+            // label tick visibly rather than freezing at the initial label.
+            send(controller, {
+              type: 'progress',
+              stage,
+              label: `${baseLabel} · ${elapsedSec}s elapsed`,
+              total: pdfPaths.length,
+            });
           } catch {
             /* controller already closed — let the outer flow notice */
           }
@@ -310,7 +324,10 @@ export async function POST(request: Request): Promise<Response> {
       };
 
       let result: IngestResult;
-      const aggHeartbeat = startHeartbeat('aggregating');
+      const aggHeartbeat = startHeartbeat(
+        'aggregating',
+        `Reconciling ${successCount} per-document extractions into unified case facts`,
+      );
       try {
         const aggregate = await aggregateTypedMemoryToE2(memory, {
           aliases,
@@ -368,6 +385,13 @@ export async function POST(request: Request): Promise<Response> {
         return;
       }
 
+      // Emit a `result_partial` here so the UI can close the loading
+      // overlay and let the user start reviewing facts/exhibits/audit
+      // while the (slow) drafter + reviewer keep running. The final
+      // `result` event below will then arrive with draft + review
+      // merged in.
+      send(controller, { type: 'result_partial', result });
+
       // Phase 3 — draft (Sonnet)
       send(controller, {
         type: 'progress',
@@ -411,7 +435,10 @@ export async function POST(request: Request): Promise<Response> {
           total: pdfPaths.length,
         });
 
-        const reviewHeartbeat = startHeartbeat('reviewing');
+        const reviewHeartbeat = startHeartbeat(
+          'reviewing',
+          'Praying to immigration gods · auditing draft against the unified facts',
+        );
         try {
           const reviewed = await checkDraft(result.caseFacts, result.draft);
           result = { ...result, review: reviewed.report };

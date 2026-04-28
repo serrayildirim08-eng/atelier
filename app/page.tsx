@@ -76,7 +76,7 @@ interface IngestResult {
   aggregate_audit?: AggregateAuditPayload;
 }
 
-type DossierTab = 'facts' | 'exhibits' | 'draft' | 'review' | 'log' | 'audit' | 'binder';
+type DossierTab = 'facts' | 'exhibits' | 'draft' | 'review' | 'log' | 'audit' | 'binder' | 'context';
 
 interface IngestProgress {
   stage: string;
@@ -681,8 +681,30 @@ export default function Page() {
             // The closing `result` event will carry the draftError too;
             // we don't need to mutate state here. Keeping the branch so
             // unknown-event-type warnings stay quiet.
+          } else if (evt.type === 'result_partial') {
+            // Aggregator finished. The full pipeline still has draft +
+            // review running in the background, but we can release the
+            // loading overlay NOW so the user can browse Facts /
+            // Exhibits / Audit while the drafter + reviewer finish.
+            // The closing `result` event will replace this entry with a
+            // fully-populated record once draft + review land.
+            const partial = evt.result as IngestResult;
+            collected.push(partial);
+            setResults([...collected]);
+            if (collected.length === 1) setSelectedIdx(0);
+            setLoading(false);
+            // Keep `progress` set so the inline background-chip on the
+            // header can show "drafting…" / "reviewing…".
           } else if (evt.type === 'result') {
-            collected.push(evt.result as IngestResult);
+            // Final event: replace the partial record (if any) with the
+            // fully-populated one (draft + review attached). If no
+            // partial was emitted (error path), append normally.
+            const finalResult = evt.result as IngestResult;
+            if (collected.length > 0) {
+              collected[collected.length - 1] = finalResult;
+            } else {
+              collected.push(finalResult);
+            }
             setResults([...collected]);
             setStreamingDraft('');
             if (collected.length === 1) setSelectedIdx(0);
@@ -793,6 +815,23 @@ export default function Page() {
       </main>
 
       <StatusBar results={results} loading={loading} now={now} />
+
+      {/* Background-progress chip: when the loading overlay is closed but
+          drafter / reviewer are still running, show a small fixed chip
+          so the user knows work is continuing in the background. */}
+      {!loading && progress && (progress.stage === 'drafting' || progress.stage === 'reviewing') && (
+        <div className="fixed bottom-12 right-6 z-30 border border-rule-strong bg-paper px-4 py-2.5 paper-recess flex items-center gap-3 shadow-md">
+          <span className="pulse-dot-bg" aria-hidden />
+          <div className="grid">
+            <span className="font-mono text-[0.65rem] smcp text-graphite-soft tracking-wider">
+              background
+            </span>
+            <span className="text-meta text-ink leading-tight">
+              {progress.stage === 'drafting' ? 'Drafting cover letter…' : 'Reviewing draft…'}
+            </span>
+          </div>
+        </div>
+      )}
 
       {dragActive && <DragOverlay />}
 
@@ -1196,9 +1235,276 @@ function Dossier({
             onOpenPdf={onOpenPdf}
           />
         )}
+        {tab === 'context' && (
+          <ContextPane
+            matterId={result.filename}
+            caseFacts={result.caseFacts}
+          />
+        )}
         {tab === 'log' && <LogPane result={result} />}
       </div>
     </section>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* ContextPane — paste email / Copilot summaries / intake-call notes and  */
+/* cross-check them against the structured facts already extracted from   */
+/* the PDFs. Persists per matter to localStorage. Cross-check hits a      */
+/* small Sonnet endpoint that returns severity-coded findings.            */
+/* ---------------------------------------------------------------------- */
+
+interface CrossCheckFinding {
+  severity: 1 | 2 | 3 | 4 | 5;
+  finding_type:
+    | 'contradiction'
+    | 'inconsistency'
+    | 'missing_detail'
+    | 'unverified_claim'
+    | 'date_drift'
+    | 'amount_drift'
+    | 'name_drift'
+    | 'other';
+  field_in_facts: string | null;
+  context_quote: string;
+  fact_value: string | null;
+  rationale: string;
+  suggested_action: string | null;
+}
+
+interface CrossCheckResult {
+  findings: CrossCheckFinding[];
+  overall_assessment: 'clean' | 'minor_drift' | 'material_conflict';
+  one_line_summary: string;
+}
+
+const CONTEXT_STORAGE_KEY = (matterId: string) => `akalan:context:v1:${matterId}`;
+const CONTEXT_RESULT_KEY = (matterId: string) => `akalan:context-result:v1:${matterId}`;
+
+function ContextPane({
+  matterId,
+  caseFacts,
+}: {
+  matterId: string;
+  caseFacts: { case_type: CaseType; facts: Record<string, unknown> } | undefined;
+}) {
+  const [text, setText] = useState<string>('');
+  const [source, setSource] = useState<'email' | 'note'>('email');
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<CrossCheckResult | null>(null);
+
+  // Hydrate from localStorage on mount.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(CONTEXT_STORAGE_KEY(matterId));
+      if (saved) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setText(saved);
+      }
+      const savedResult = localStorage.getItem(CONTEXT_RESULT_KEY(matterId));
+      if (savedResult) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setResult(JSON.parse(savedResult) as CrossCheckResult);
+      }
+    } catch {
+      /* corrupt localStorage — start fresh */
+    }
+  }, [matterId]);
+
+  // Persist on every keystroke (debounced via the browser's natural batching).
+  useEffect(() => {
+    try {
+      if (text.length === 0) {
+        localStorage.removeItem(CONTEXT_STORAGE_KEY(matterId));
+      } else {
+        localStorage.setItem(CONTEXT_STORAGE_KEY(matterId), text);
+      }
+    } catch {
+      /* full / disabled — non-fatal */
+    }
+  }, [matterId, text]);
+
+  const runCrossCheck = async () => {
+    if (!caseFacts || text.trim().length === 0) return;
+    setRunning(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/cross-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          case_facts: caseFacts,
+          context_text: text,
+          source,
+        }),
+      });
+      const data = (await res.json()) as Record<string, unknown>;
+      if (!res.ok || typeof data.error === 'string') {
+        const message =
+          (typeof data.message === 'string' && data.message) ||
+          (typeof data.error === 'string' && data.error) ||
+          `HTTP ${res.status}`;
+        setError(message);
+        return;
+      }
+      const stripped: CrossCheckResult = {
+        findings: (data.findings as CrossCheckFinding[]) ?? [],
+        overall_assessment:
+          (data.overall_assessment as CrossCheckResult['overall_assessment']) ?? 'clean',
+        one_line_summary: (data.one_line_summary as string) ?? '',
+      };
+      setResult(stripped);
+      try {
+        localStorage.setItem(CONTEXT_RESULT_KEY(matterId), JSON.stringify(stripped));
+      } catch {
+        /* ignore */
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="px-9 py-7 grid gap-6 fade-in">
+      <header className="grid gap-1">
+        <span className="smcp text-graphite-soft">⁂  correspondence context</span>
+        <h2 className="text-title">Paste email threads, Copilot summaries, or intake-call notes.</h2>
+        <p className="text-body text-graphite leading-relaxed max-w-prose">
+          The bot will cross-check this text against the structured facts already
+          extracted from the matter&rsquo;s PDFs. Anything that contradicts, drifts,
+          or surfaces a missing detail comes back as a severity-coded flag.
+        </p>
+      </header>
+
+      <div className="flex items-baseline gap-3">
+        <span className="smcp text-graphite-soft">source:</span>
+        <button
+          onClick={() => setSource('email')}
+          className={`px-3 py-1 border smcp text-meta tracking-wider transition-colors ${
+            source === 'email'
+              ? 'border-ink bg-ink text-paper'
+              : 'border-rule text-graphite hover:border-ink'
+          }`}
+        >
+          email thread
+        </button>
+        <button
+          onClick={() => setSource('note')}
+          className={`px-3 py-1 border smcp text-meta tracking-wider transition-colors ${
+            source === 'note'
+              ? 'border-ink bg-ink text-paper'
+              : 'border-rule text-graphite hover:border-ink'
+          }`}
+        >
+          attorney note
+        </button>
+      </div>
+
+      <textarea
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Paste email thread, Copilot summary, or call notes…"
+        className="w-full min-h-[20rem] border border-rule paper-recess px-4 py-3 font-mono text-[0.78rem] leading-relaxed resize-y focus:outline-none focus:border-ink"
+      />
+
+      <div className="flex items-baseline justify-between gap-4">
+        <div className="font-mono text-meta text-graphite-soft tabular-nums">
+          {text.length.toLocaleString()} chars · saved per matter
+        </div>
+        <button
+          onClick={runCrossCheck}
+          disabled={running || text.trim().length === 0 || !caseFacts}
+          className="px-4 py-2 border border-ink smcp text-meta tracking-wider hover:bg-ink hover:text-paper transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {running ? 'cross-checking…' : 'cross-check now'}
+        </button>
+      </div>
+
+      {error && (
+        <div className="border border-rubric/60 bg-rubric/5 px-4 py-3 text-body text-ink">
+          <span className="smcp text-rubric mr-2">error</span>
+          {error}
+        </div>
+      )}
+
+      {result && (
+        <section className="grid gap-3">
+          <header className="border-t border-rule pt-4 flex items-baseline justify-between">
+            <div>
+              <span className="smcp text-graphite-soft mr-3">verdict:</span>
+              <span
+                className={
+                  result.overall_assessment === 'material_conflict'
+                    ? 'text-rubric font-semibold'
+                    : result.overall_assessment === 'minor_drift'
+                      ? 'text-ink'
+                      : 'text-graphite'
+                }
+              >
+                {result.overall_assessment.replace(/_/g, ' ')}
+              </span>
+            </div>
+            <span className="font-mono text-meta tabular-nums text-graphite">
+              {result.findings.length} finding{result.findings.length === 1 ? '' : 's'}
+            </span>
+          </header>
+          <p className="text-body italic text-graphite leading-relaxed">
+            {result.one_line_summary}
+          </p>
+          {result.findings.length === 0 ? (
+            <p className="text-body text-graphite-soft">
+              No conflicts surfaced. The correspondence is consistent with the case file.
+            </p>
+          ) : (
+            <ul className="grid gap-3">
+              {result.findings.map((f, i) => (
+                <li
+                  key={`${f.finding_type}-${i}`}
+                  className={`border px-4 py-3 ${
+                    f.severity >= 4
+                      ? 'border-rubric/60 bg-rubric/5'
+                      : f.severity === 3
+                        ? 'border-ink/40'
+                        : 'border-rule'
+                  }`}
+                >
+                  <div className="flex items-baseline justify-between gap-3 mb-1.5">
+                    <span className="font-mono text-meta tracking-wider smcp text-ink">
+                      severity {f.severity} · {f.finding_type.replace(/_/g, ' ')}
+                    </span>
+                    {f.field_in_facts && (
+                      <span className="font-mono text-[0.7rem] text-graphite-soft">
+                        {f.field_in_facts}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-body text-ink mb-2">{f.rationale}</div>
+                  <div className="font-mono text-[0.72rem] text-graphite mb-1 leading-relaxed">
+                    <span className="text-graphite-soft">from text:</span>{' '}
+                    <span className="italic">&ldquo;{f.context_quote}&rdquo;</span>
+                  </div>
+                  {f.fact_value && (
+                    <div className="font-mono text-[0.72rem] text-graphite leading-relaxed">
+                      <span className="text-graphite-soft">in case file:</span>{' '}
+                      {f.fact_value}
+                    </div>
+                  )}
+                  {f.suggested_action && (
+                    <div className="mt-2 text-body text-ink-2">
+                      <span className="smcp text-graphite-soft mr-2">do:</span>
+                      {f.suggested_action}
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+    </div>
   );
 }
 
@@ -1929,29 +2235,37 @@ function MemoryFactsList({ facts }: { facts: Record<string, unknown> }) {
 
 function DossierEmpty() {
   const caseTypes = [
-    ['E·II', 'Treaty Investor'],
-    ['EB·IA', 'Extraordinary Ability'],
-    ['EB·IB', 'Outstanding Researcher'],
-    ['EB·IC', 'Multinational Manager'],
+    ['E-2', 'Treaty Investor'],
+    ['EB-1A', 'Extraordinary Ability'],
+    ['EB-1B', 'Outstanding Researcher'],
+    ['EB-1C', 'Multinational Manager'],
   ] as const;
   return (
     <section className="min-h-0 grid place-items-center paper-grain px-12">
-      <div className="max-w-[560px] text-center">
-        <h1 className="text-display leading-[1.05] tracking-[-0.01em]">
+      <div className="max-w-[640px] text-center">
+        <h1
+          className="font-display text-stunt text-ink"
+          style={{
+            fontVariationSettings: '"opsz" 144, "SOFT" 0, "WONK" 0',
+            fontWeight: 300,
+            letterSpacing: '-0.025em',
+            lineHeight: 0.95,
+          }}
+        >
           Drop a dossier.
         </h1>
-        <p className="mt-5 text-lede text-ink-2 leading-relaxed">
+        <p className="mt-12 text-lede text-ink-2 leading-relaxed">
           PDFs, folders, exhibits &mdash; anything bound for USCIS.
         </p>
-        <div className="mt-10 grid grid-cols-4 gap-x-4 gap-y-2 border-t border-b border-rule py-5">
-          {caseTypes.map(([glyph, label]) => (
-            <div key={glyph} className="grid gap-1">
-              <div className="font-mono text-meta text-graphite">{glyph}</div>
+        <div className="mt-14 grid grid-cols-4 gap-x-4 gap-y-2 border-t border-b border-rule py-5">
+          {caseTypes.map(([code, label]) => (
+            <div key={code} className="grid gap-1">
+              <div className="font-mono text-meta text-graphite">{code}</div>
               <div className="text-meta text-graphite-soft">{label}</div>
             </div>
           ))}
         </div>
-        <p className="mt-8 text-body text-graphite leading-relaxed">
+        <p className="mt-10 text-body text-graphite leading-relaxed">
           The clerk reads each file end to end, identifies the case type, extracts every fact
           with provenance, drafts the cover letter in the firm&rsquo;s voice, and audits the draft
           for inconsistency and RFE risk before you set eyes on it.
@@ -2154,6 +2468,7 @@ function DossierTabs({
     },
     { key: 'audit', label: 'Audit' },
     { key: 'binder', label: 'Binder' },
+    { key: 'context', label: 'Context' },
     { key: 'log', label: 'Log' },
   ];
   return (
