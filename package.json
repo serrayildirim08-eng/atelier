@@ -14,7 +14,8 @@
     "electron:dev": "concurrently -k -n NEXT,ELECTRON -c blue,magenta \"next dev\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "next build && electron-builder",
     "electron:build:win": "next build && electron-builder --win --x64",
-    "electron:build:mac": "next build && electron-builder --mac"
+    "electron:build:mac": "next build && electron-builder --mac",
+    "update-app": "pkill -f 'atelier.app/Contents/MacOS' 2>/dev/null; next build && electron-builder --mac --arm64 && open dist-electron/mac-arm64/atelier.app"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",

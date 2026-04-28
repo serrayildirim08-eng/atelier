@@ -4,7 +4,7 @@ import { Fragment, useCallback, useState, useMemo, useEffect, useRef } from 'rea
 import { useRouter } from 'next/navigation';
 import type { DragEvent, ChangeEvent } from 'react';
 import type { ReviewReport } from '@/reason';
-import type { CaseType, E2Facts } from '@/ingest';
+import type { AggregateAuditPayload, CaseType, E2Facts } from '@/ingest';
 import {
   PreGenerationApprovalModal,
   type ApprovalResult,
@@ -17,6 +17,7 @@ import {
   type LoadingStreamEvent,
 } from '@/app/components/loading-progress';
 import {
+  aggregateGatesToConflicts,
   auditFromMemory,
   buildBinderManifest,
   deriveCaseProfile,
@@ -64,6 +65,15 @@ interface IngestResult {
   review?: ReviewReport;
   reviewError?: { code: string; message: string };
   error?: { code: string; message: string };
+  e2_subtype?: {
+    principal_subtype: string;
+    procedural_posture: string;
+    has_dependents: boolean;
+    detection_confidence?: 'HIGH' | 'MED' | 'LOW';
+    reasoning?: string;
+    detection_signals?: string[];
+  } | null;
+  aggregate_audit?: AggregateAuditPayload;
 }
 
 type DossierTab = 'facts' | 'exhibits' | 'draft' | 'review' | 'log' | 'audit' | 'binder';
@@ -156,6 +166,11 @@ interface PerPdfMemoryEntry {
     vital_record_subtype?: string | null;
     foreign_doc_subtype?: string | null;
   };
+  /** Full rich-extraction objects forwarded from the server. Keys mirror
+   *  PerPdfResult fields in ingest/typed-memory.ts. Only present when the
+   *  second-pass extractor ran successfully on this PDF. The PDF detail
+   *  modal renders these as structured fact panels. */
+  rich?: Record<string, unknown> | null;
 }
 
 type TypedMemory = Partial<Record<DocType, PerPdfMemoryEntry[]>>;
@@ -355,6 +370,9 @@ export default function Page() {
   });
   const [matterRoot, setMatterRoot] = useState<string | null>(null);
   const [matterOverlayOpen, setMatterOverlayOpen] = useState(false);
+  // PDF detail modal state — when set, opens the PdfDetailModal showing
+  // preview + structured rich extraction + audit findings for that PDF.
+  const [pdfDetailFilename, setPdfDetailFilename] = useState<string | null>(null);
   const [selectedEntryKey, setSelectedEntryKey] = useState<string | null>(null);
   const [entryLabels, setEntryLabels] = useState<Record<string, string>>({});
   const [dashboardOverrides, setDashboardOverrides] = useState<Record<string, string>>({});
@@ -392,7 +410,10 @@ export default function Page() {
   useEffect(() => {
     if (!matterOverlayOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMatterOverlayOpen(false);
+      if (e.key === 'Escape') {
+        setMatterOverlayOpen(false);
+        setPdfDetailFilename(null);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -598,6 +619,7 @@ export default function Page() {
               error: (evt.error as { code: string; message: string } | null) ?? null,
               subtypes:
                 (evt.subtypes as PerPdfMemoryEntry['subtypes'] | undefined) ?? undefined,
+              rich: (evt.rich as Record<string, unknown> | null) ?? null,
             };
             const bucket: DocType = entry.doc_type ?? 'other';
             setTypedMemory((prev) => {
@@ -715,6 +737,7 @@ export default function Page() {
           matterRoot={matterRoot}
           entryLabels={entryLabels}
           onOpenMatter={() => setMatterOverlayOpen(true)}
+          onOpenPdf={(name) => setPdfDetailFilename(name)}
           streamingDraft={streamingDraft}
         />
         <Marginalia
@@ -768,6 +791,17 @@ export default function Page() {
             setDashboardOverrides((prev) => ({ ...prev, [path]: val }))
           }
           onClose={() => setMatterOverlayOpen(false)}
+        />
+      )}
+
+      {pdfDetailFilename && (
+        <PdfDetailModal
+          filename={pdfDetailFilename}
+          matterRoot={matterRoot}
+          typedMemory={typedMemory}
+          caseFacts={selected?.caseFacts}
+          aggregateAudit={selected?.aggregate_audit}
+          onClose={() => setPdfDetailFilename(null)}
         />
       )}
     </div>
@@ -1023,6 +1057,7 @@ function Dossier({
   matterRoot,
   entryLabels,
   onOpenMatter,
+  onOpenPdf,
   streamingDraft,
 }: {
   result: IngestResult | undefined;
@@ -1035,6 +1070,7 @@ function Dossier({
   matterRoot: string | null;
   entryLabels: Record<string, string>;
   onOpenMatter: () => void;
+  onOpenPdf: (filename: string) => void;
   streamingDraft?: string;
 }) {
   const memoryHasEntries = Object.values(typedMemory).some(
@@ -1101,6 +1137,8 @@ function Dossier({
             matterId={result.filename}
             matterRoot={matterRoot}
             onOpenMatter={onOpenMatter}
+            onOpenPdf={onOpenPdf}
+            aggregateAudit={result.aggregate_audit}
           />
         )}
         {tab === 'binder' && (
@@ -1111,6 +1149,7 @@ function Dossier({
             matterId={result.filename}
             matterRoot={matterRoot}
             onOpenMatter={onOpenMatter}
+            onOpenPdf={onOpenPdf}
           />
         )}
         {tab === 'log' && <LogPane result={result} />}
@@ -1950,9 +1989,61 @@ function DossierHeader({ result }: { result: IngestResult }) {
       {caseType && (
         <div className="mt-2 text-meta text-graphite">{CASE_LABEL[caseType]}</div>
       )}
+      {result.e2_subtype && (
+        <div className="mt-2 flex items-center gap-2 flex-wrap">
+          <span className="font-mono text-meta border border-rule px-2 py-0.5 text-ink">
+            {SUBTYPE_BADGE_LABEL[result.e2_subtype.principal_subtype] ??
+              result.e2_subtype.principal_subtype}
+          </span>
+          <span className="font-mono text-meta border border-rule px-2 py-0.5 text-graphite">
+            {POSTURE_BADGE_LABEL[result.e2_subtype.procedural_posture] ??
+              result.e2_subtype.procedural_posture}
+          </span>
+          {result.e2_subtype.detection_confidence && (
+            <span
+              className="font-mono text-meta px-2 py-0.5 border"
+              style={{
+                color: SUBTYPE_CONF_COLOR[result.e2_subtype.detection_confidence],
+                borderColor: SUBTYPE_CONF_COLOR[result.e2_subtype.detection_confidence],
+              }}
+            >
+              {result.e2_subtype.detection_confidence}
+            </span>
+          )}
+          {result.e2_subtype.has_dependents && (
+            <span className="font-mono text-meta border border-rule px-2 py-0.5 text-graphite">
+              + dependents
+            </span>
+          )}
+          {result.e2_subtype.reasoning && (
+            <details className="text-meta text-graphite-soft">
+              <summary className="cursor-pointer hover:text-graphite">why?</summary>
+              <p className="mt-1 leading-snug max-w-prose">{result.e2_subtype.reasoning}</p>
+            </details>
+          )}
+        </div>
+      )}
     </header>
   );
 }
+
+const SUBTYPE_BADGE_LABEL: Record<string, string> = {
+  individual_investor: 'Subtype 1 · Individual',
+  corporate_owned_investor: 'Subtype 2 · Corporate-owned',
+  executive_supervisory_employee: 'Subtype 3 · Executive',
+  essential_skills_employee: 'Subtype 4 · Essential skills',
+};
+const POSTURE_BADGE_LABEL: Record<string, string> = {
+  consular_new: 'Consular · new',
+  consular_renewal: 'Consular · renewal',
+  uscis_cos_new: 'USCIS · COS',
+  uscis_extension: 'USCIS · extension',
+};
+const SUBTYPE_CONF_COLOR: Record<string, string> = {
+  HIGH: '#15803D',
+  MED: '#A16207',
+  LOW: '#B91C1C',
+};
 
 function guessClientName(r: IngestResult): string {
   // Try common shapes; fall back to filename.
@@ -2060,6 +2151,7 @@ function FactsPane({
 }) {
   return (
     <div className="px-9 py-7 grid gap-8 fade-in">
+      <MissingFieldsList facts={facts} />
       <StructuredFactsPanel
         facts={facts}
         typedMemory={typedMemory}
@@ -2076,6 +2168,90 @@ function FactsPane({
         </div>
       </details>
     </div>
+  );
+}
+
+function isFieldWrapper(v: unknown): v is { value: unknown; source_page?: number | null; source_quote?: string | null; confidence?: number | null } {
+  return (
+    !!v &&
+    typeof v === 'object' &&
+    'value' in (v as Record<string, unknown>) &&
+    'source_quote' in (v as Record<string, unknown>) &&
+    'confidence' in (v as Record<string, unknown>)
+  );
+}
+
+function isMissingValue(v: unknown): boolean {
+  if (v === null || v === undefined) return true;
+  if (typeof v === 'string') {
+    const t = v.trim();
+    return t === '' || /^\[MISSING(:[^\]]*)?\]$/i.test(t);
+  }
+  if (Array.isArray(v)) return v.length === 0;
+  return false;
+}
+
+function collectMissingPaths(node: unknown, prefix: string, out: string[]): void {
+  if (node === null || node === undefined) return;
+  if (typeof node !== 'object') return;
+  if (isFieldWrapper(node)) {
+    if (isMissingValue(node.value)) out.push(prefix || '(root)');
+    return;
+  }
+  if (Array.isArray(node)) {
+    node.forEach((item, i) => collectMissingPaths(item, `${prefix}[${i}]`, out));
+    return;
+  }
+  for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+    collectMissingPaths(v, prefix ? `${prefix}.${k}` : k, out);
+  }
+}
+
+function humanizePath(p: string): string {
+  return p
+    .replace(/\[\d+\]/g, '')
+    .split('.')
+    .map((seg) => seg.replace(/_/g, ' '))
+    .join(' › ');
+}
+
+function MissingFieldsList({ facts }: { facts: Record<string, unknown> }) {
+  const missing = useMemo(() => {
+    const out: string[] = [];
+    collectMissingPaths(facts, '', out);
+    // Dedupe while preserving order.
+    const seen = new Set<string>();
+    return out.filter((p) => (seen.has(p) ? false : (seen.add(p), true)));
+  }, [facts]);
+
+  if (missing.length === 0) {
+    return (
+      <section className="border border-rule paper-recess px-5 py-4">
+        <div className="smcp text-graphite-soft mb-1">missing</div>
+        <div className="text-body text-graphite">
+          Nothing missing — every field surfaced by the extractors carries a value.
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="border border-rule paper-recess">
+      <header className="px-5 py-3 border-b border-rule flex items-baseline justify-between">
+        <span className="smcp text-rubric tracking-[0.22em]">⁂  missing fields</span>
+        <span className="font-mono text-meta text-graphite-soft tabular-nums">
+          {missing.length} {missing.length === 1 ? 'item' : 'items'}
+        </span>
+      </header>
+      <ul className="px-5 py-4 grid gap-1.5 text-body text-graphite leading-snug list-disc list-inside">
+        {missing.map((p) => (
+          <li key={p} className="font-mono text-[0.78rem]">
+            <span className="text-ink">{humanizePath(p)}</span>
+            <span className="text-graphite-soft text-[0.7rem] ml-2">{p}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -2531,11 +2707,13 @@ function SlotRow({
   resolution,
   matterRoot,
   onOpenMatter,
+  onOpenPdf,
   muted,
 }: {
   resolution: SlotResolution;
   matterRoot: string | null;
   onOpenMatter: () => void;
+  onOpenPdf?: (filename: string) => void;
   muted?: boolean;
 }) {
   const slot = PROOF_SLOTS_BY_ID[resolution.slot_id];
@@ -2565,7 +2743,7 @@ function SlotRow({
                 <button
                   key={`${ex.pdf_path}:${i}`}
                   type="button"
-                  onClick={onOpenMatter}
+                  onClick={() => (onOpenPdf ? onOpenPdf(ex.pdf_path) : onOpenMatter())}
                   title={matterRoot ? `${matterRoot}/${ex.pdf_path}` : ex.pdf_path}
                   className="border border-rule px-2 py-0.5 text-meta font-mono text-graphite hover:bg-ink/5 truncate max-w-[24rem]"
                 >
@@ -2599,12 +2777,16 @@ function AuditPane({
   matterId,
   matterRoot,
   onOpenMatter,
+  onOpenPdf,
+  aggregateAudit,
 }: {
   typedMemory: TypedMemory;
   caseFacts: { case_type: CaseType; facts: Record<string, unknown> } | undefined;
   matterId: string | undefined;
   matterRoot: string | null;
   onOpenMatter: () => void;
+  onOpenPdf?: (filename: string) => void;
+  aggregateAudit?: AggregateAuditPayload;
 }) {
   const initialProfile = useMemo<CaseProfile | null>(() => {
     if (caseFacts?.case_type !== 'E2') return null;
@@ -2630,9 +2812,14 @@ function AuditPane({
   const report = useMemo(() => {
     if (!profile) return null;
     const entries = buildEntriesFromMemory(typedMemory);
-    const conflicts = readConflictRegister(caseFacts?.facts);
-    return auditFromMemory({ case_profile: profile, entries, conflicts });
-  }, [profile, typedMemory, caseFacts]);
+    const llmConflicts = readConflictRegister(caseFacts?.facts);
+    const gateConflicts = aggregateGatesToConflicts(aggregateAudit);
+    return auditFromMemory({
+      case_profile: profile,
+      entries,
+      conflicts: [...gateConflicts, ...llmConflicts],
+    });
+  }, [profile, typedMemory, caseFacts, aggregateAudit]);
 
   if (caseFacts?.case_type !== 'E2' || !profile || !report) {
     return (
@@ -2733,6 +2920,7 @@ function AuditPane({
                   resolution={r}
                   matterRoot={matterRoot}
                   onOpenMatter={onOpenMatter}
+                  onOpenPdf={onOpenPdf}
                 />
               ))}
             </ul>
@@ -2755,6 +2943,7 @@ function AuditPane({
                 resolution={r}
                 matterRoot={matterRoot}
                 onOpenMatter={onOpenMatter}
+                onOpenPdf={onOpenPdf}
               />
             ))}
           </ul>
@@ -2771,6 +2960,7 @@ function AuditPane({
                 resolution={r}
                 matterRoot={matterRoot}
                 onOpenMatter={onOpenMatter}
+                onOpenPdf={onOpenPdf}
                 muted
               />
             ))}
@@ -2791,12 +2981,14 @@ function BinderPane({
   matterId,
   matterRoot,
   onOpenMatter,
+  onOpenPdf,
 }: {
   typedMemory: TypedMemory;
   caseFacts: { case_type: CaseType; facts: Record<string, unknown> } | undefined;
   matterId: string | undefined;
   matterRoot: string | null;
   onOpenMatter: () => void;
+  onOpenPdf?: (filename: string) => void;
 }) {
   const profile = useMemo<CaseProfile | null>(() => {
     if (caseFacts?.case_type !== 'E2') return null;
@@ -2915,7 +3107,7 @@ function BinderPane({
                       </span>
                       <button
                         type="button"
-                        onClick={onOpenMatter}
+                        onClick={() => (onOpenPdf ? onOpenPdf(ex.pdf_path) : onOpenMatter())}
                         title={matterRoot ? `${matterRoot}/${ex.pdf_path}` : ex.pdf_path}
                         className="flex-1 text-left font-mono text-meta text-ink hover:bg-ink/5 truncate"
                       >
@@ -3442,14 +3634,14 @@ function StructuredBlock({
   rows: BlockRow[];
 }) {
   return (
-    <section className="border border-rule paper-recess">
-      <header className="px-5 py-3 border-b border-rule-strong flex items-baseline justify-between">
+    <section className="border border-rule bg-paper">
+      <header className="px-5 py-3 border-b border-rule paper-recess flex items-baseline justify-between">
         <div className="flex items-baseline gap-3">
-          <span className="font-mono text-[0.75rem] text-rubric tabular-nums">{roman}.</span>
-          <span className="font-display italic text-[1.05rem] text-ink-2">{title}</span>
+          <span className="font-mono text-meta text-graphite-soft tabular-nums">{roman}</span>
+          <span className="smcp text-graphite">{title}</span>
         </div>
       </header>
-      <dl className="px-5 py-4 grid grid-cols-[12rem_1fr] gap-x-6 gap-y-2.5">
+      <dl className="px-5 py-5 grid grid-cols-[12rem_1fr] gap-x-6 gap-y-3">
         {rows.map((row, i) => (
           <FactKVRow
             key={`${row.label}-${i}`}
@@ -3496,27 +3688,26 @@ function FactKVRow({
 
   return (
     <>
-      <dt className="font-display text-[0.85rem] text-graphite pt-0.5">{label}</dt>
-      <dd className="text-[0.95rem]">
+      <dt className="smcp text-graphite-soft pt-0.5">{label}</dt>
+      <dd>
         <span
           className={
             isMissing
-              ? 'font-mono text-[0.75rem] text-graphite-soft italic'
-              : 'font-display text-ink-2'
+              ? 'text-meta text-graphite-soft italic'
+              : 'text-body text-ink leading-snug'
           }
         >
           {valueLabel}
         </span>
         {(confidence !== null || sourcePage !== null) && (
-          <span className="ml-3 font-mono text-[0.62rem] text-graphite-soft">
+          <span className="ml-3 font-mono text-label text-graphite-soft tabular-nums">
             {sourcePage !== null && `p.${sourcePage}`}
-            {confidence !== null &&
-              ` · conf ${Math.round(confidence * 100)}%`}
+            {confidence !== null && ` · ${Math.round(confidence * 100)}%`}
           </span>
         )}
         {sourceQuote && !isMissing && (
-          <div className="font-display italic text-[0.7rem] text-graphite-soft mt-0.5">
-            “{sourceQuote.length > 90 ? sourceQuote.slice(0, 90) + '…' : sourceQuote}”
+          <div className="text-meta text-graphite-soft italic mt-1 leading-snug">
+            &ldquo;{sourceQuote.length > 90 ? sourceQuote.slice(0, 90) + '…' : sourceQuote}&rdquo;
           </div>
         )}
       </dd>
@@ -3584,12 +3775,11 @@ function FactSection({ label, value, top }: { label: string; value: unknown; top
 
 function SectionLabel({ label, count }: { label: string; count?: number }) {
   return (
-    <div className="flex items-baseline gap-3 mb-2.5">
-      <h3 className="smcp text-[0.7rem] text-rubric">§ {humanLabel(label)}</h3>
+    <div className="flex items-baseline gap-3 mb-3 pb-2 border-b border-rule">
+      <h3 className="smcp text-graphite">{humanLabel(label)}</h3>
       {typeof count === 'number' && (
-        <span className="font-mono text-[0.65rem] text-graphite-soft">{count}</span>
+        <span className="font-mono text-meta text-graphite-soft tabular-nums">{count}</span>
       )}
-      <div className="flex-1 border-b border-rule translate-y-[-0.32em]" />
     </div>
   );
 }
@@ -3826,12 +4016,12 @@ function DraftPane({
   if (result.draftError) {
     return (
       <div className="px-9 py-7">
-        <div className="border border-rubric/40 paper-recess p-5">
-          <div className="smcp text-[0.7rem] text-rubric mb-2">† draft failed</div>
-          <div className="font-mono text-[0.7rem] text-graphite mb-3">
+        <div className="border border-ink paper-recess p-5">
+          <div className="smcp text-ink mb-2">draft failed</div>
+          <div className="font-mono text-meta text-graphite mb-3">
             [{result.draftError.code}]
           </div>
-          <div className="font-display italic text-[1rem] text-ink-2">
+          <div className="text-body text-ink-2 leading-relaxed">
             {result.draftError.message}
           </div>
         </div>
@@ -3839,18 +4029,21 @@ function DraftPane({
     );
   }
 
-  // Server-authoritative draft when present; otherwise the in-flight
-  // streaming buffer (paragraphs land live as the model writes). The
-  // streaming buffer is cleared when the closing `result` event lands.
   const text = result.draft || streamingDraft || '';
 
   if (!text) {
     return (
-      <div className="px-9 py-12 text-center">
-        <div className="dinkus mb-6">⁂</div>
-        <p className="font-display italic text-[1.1rem] text-graphite">
-          The draft is not yet on the desk.
-        </p>
+      <div className="px-9 py-16 grid place-items-center">
+        <div className="border border-rule bg-paper grid place-items-center py-16 px-8 text-center max-w-md">
+          <div className="grid gap-3">
+            <div className="sigil mx-auto" style={{ width: '2.4rem', height: '2.4rem', fontSize: '0.85rem' }}>
+              —
+            </div>
+            <p className="text-body text-graphite leading-relaxed">
+              The draft is not yet on the desk.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
@@ -3865,33 +4058,27 @@ function DraftPane({
     }
   };
 
-  // Split paragraphs for editorial typesetting
   const paragraphs = text.split(/\n\s*\n/).filter((p) => p.trim().length > 0);
 
   return (
     <div className="px-9 py-7 fade-in">
       <div className="flex items-baseline justify-between mb-5">
-        <div>
-          <div className="smcp text-[0.65rem] text-graphite">¶ cover letter</div>
-          <div className="font-display italic text-[0.95rem] text-ink-2">
-            drafted in the firm’s voice · exhibit refs marked in blue
+        <div className="grid gap-1">
+          <div className="smcp text-graphite">cover letter</div>
+          <div className="text-meta text-graphite-soft">
+            drafted in the firm&rsquo;s voice · exhibit refs underlined
           </div>
         </div>
         <button
           onClick={onCopy}
-          className="px-3 py-1.5 border border-ink-2 text-[0.78rem] hover:bg-ink hover:text-paper transition-colors smcp"
+          className="px-3 py-2 border border-ink smcp text-meta hover:bg-ink hover:text-paper transition-colors"
         >
-          {copied ? '✓ copied' : '⁕ copy to clipboard'}
+          {copied ? '✓ copied' : 'copy to clipboard'}
         </button>
       </div>
-      <article className="max-w-[68ch] mx-auto bg-paper-2/40 border border-rule px-10 py-9 text-[1.02rem] leading-[1.7] text-ink">
+      <article className="max-w-[68ch] mx-auto bg-paper border border-rule px-10 py-9 text-body leading-[1.75] text-ink">
         {paragraphs.map((p, i) => (
-          <p
-            key={i}
-            className={
-              'mb-4 last:mb-0 ' + (i === 0 ? 'drop-cap font-display text-[1.06rem]' : '')
-            }
-          >
+          <p key={i} className="mb-4 last:mb-0">
             <ParagraphWithExhibitLinks
               text={p.trim()}
               onPickRef={onPickRef}
@@ -3919,12 +4106,12 @@ function ReviewPane({ result }: { result: IngestResult }) {
   if (result.reviewError) {
     return (
       <div className="px-9 py-7">
-        <div className="border border-rubric/40 paper-recess p-5">
-          <div className="smcp text-[0.7rem] text-rubric mb-2">† review failed</div>
-          <div className="font-mono text-[0.7rem] text-graphite mb-3">
+        <div className="border border-ink paper-recess p-5">
+          <div className="smcp text-ink mb-2">review failed</div>
+          <div className="font-mono text-meta text-graphite mb-3">
             [{result.reviewError.code}]
           </div>
-          <div className="font-display italic text-[1rem] text-ink-2">
+          <div className="text-body text-ink-2 leading-relaxed">
             {result.reviewError.message}
           </div>
         </div>
@@ -3934,39 +4121,44 @@ function ReviewPane({ result }: { result: IngestResult }) {
 
   if (!result.review) {
     return (
-      <div className="px-9 py-12 text-center">
-        <div className="dinkus mb-6">⁂</div>
-        <p className="font-display italic text-[1.1rem] text-graphite">
-          The auditor has not yet returned the file.
-        </p>
+      <div className="px-9 py-16 grid place-items-center">
+        <div className="border border-rule bg-paper grid place-items-center py-16 px-8 text-center max-w-md">
+          <div className="grid gap-3">
+            <div className="sigil mx-auto" style={{ width: '2.4rem', height: '2.4rem', fontSize: '0.85rem' }}>
+              —
+            </div>
+            <p className="text-body text-graphite leading-relaxed">
+              The auditor has not yet returned the file.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
 
   const r = result.review;
   return (
-    <div className="px-9 py-7 grid gap-8 fade-in">
+    <div className="px-9 py-7 grid gap-9 fade-in">
       <div>
         <SectionLabel label="summary" />
-        <p className="font-display text-[1.08rem] leading-[1.55] text-ink">{r.summary}</p>
+        <p className="text-lede text-ink leading-relaxed">{r.summary}</p>
       </div>
 
       <FindingGroup
-        glyph="‡"
         title="Inconsistencies"
         count={r.inconsistencies.length}
         emptyText="No inconsistencies between draft and facts."
       >
         {r.inconsistencies.map((f, i) => (
           <FindingCard key={i} severity={f.severity} eyebrow={f.category}>
-            <div className="text-[0.95rem] text-ink mb-2">{f.description}</div>
+            <div className="text-body text-ink mb-2 leading-relaxed">{f.description}</div>
             {f.letter_excerpt && (
               <BlockQuote label="draft">{f.letter_excerpt}</BlockQuote>
             )}
             {f.facts_value && (
-              <div className="text-[0.78rem] text-graphite mt-1">
-                <span className="smcp text-[0.6rem] text-graphite-soft mr-2">facts</span>
-                <span className="font-mono">{f.facts_value}</span>
+              <div className="flex items-baseline gap-2 mt-2 text-meta">
+                <span className="smcp text-graphite-soft">facts</span>
+                <span className="font-mono text-ink-2">{f.facts_value}</span>
               </div>
             )}
           </FindingCard>
@@ -3974,14 +4166,13 @@ function ReviewPane({ result }: { result: IngestResult }) {
       </FindingGroup>
 
       <FindingGroup
-        glyph="†"
         title="Missing arguments"
         count={r.missing_arguments.length}
         emptyText="All required elements appear to be argued."
       >
         {r.missing_arguments.map((f, i) => (
           <FindingCard key={i} eyebrow={f.element}>
-            <div className="text-[0.95rem] text-ink mb-2">{f.description}</div>
+            <div className="text-body text-ink mb-2 leading-relaxed">{f.description}</div>
             <DefMini label="missing" value={f.what_is_missing} />
             <DefMini label="suggestion" value={f.suggestion} />
           </FindingCard>
@@ -3989,14 +4180,13 @@ function ReviewPane({ result }: { result: IngestResult }) {
       </FindingGroup>
 
       <FindingGroup
-        glyph="※"
         title="Weak spots & RFE risks"
         count={r.weak_spots.length}
         emptyText="No notable RFE risks identified."
       >
         {r.weak_spots.map((f, i) => (
           <FindingCard key={i} severity={f.severity} eyebrow={f.element}>
-            <div className="text-[0.95rem] text-ink mb-2">{f.description}</div>
+            <div className="text-body text-ink mb-2 leading-relaxed">{f.description}</div>
             <DefMini label="rfe risk" value={f.rfe_risk} />
             <DefMini label="suggestion" value={f.suggestion} />
           </FindingCard>
@@ -4007,13 +4197,11 @@ function ReviewPane({ result }: { result: IngestResult }) {
 }
 
 function FindingGroup({
-  glyph,
   title,
   count,
   emptyText,
   children,
 }: {
-  glyph: string;
   title: string;
   count: number;
   emptyText: string;
@@ -4021,15 +4209,12 @@ function FindingGroup({
 }) {
   return (
     <div>
-      <div className="flex items-baseline gap-3 mb-3">
-        <h3 className="smcp text-[0.72rem] text-rubric">
-          {glyph} {title}
-        </h3>
-        <span className="font-mono text-[0.65rem] text-graphite-soft">({count})</span>
-        <div className="flex-1 border-b border-rule translate-y-[-0.32em]" />
+      <div className="flex items-baseline gap-3 mb-4 pb-2 border-b border-rule">
+        <h3 className="smcp text-graphite">{title}</h3>
+        <span className="font-mono text-meta text-graphite-soft tabular-nums">{count}</span>
       </div>
       {count === 0 ? (
-        <p className="font-display italic text-[0.95rem] text-graphite">{emptyText}</p>
+        <p className="text-body text-graphite leading-relaxed">{emptyText}</p>
       ) : (
         <div className="grid gap-3">{children}</div>
       )}
@@ -4037,10 +4222,10 @@ function FindingGroup({
   );
 }
 
-const SEVERITY_TONE: Record<string, string> = {
-  critical: 'border-l-rubric',
-  major: 'border-l-ochre',
-  minor: 'border-l-graphite',
+const SEVERITY_WEIGHT: Record<string, string> = {
+  critical: 'border-l-ink border-l-[3px]',
+  major: 'border-l-rule-strong border-l-[3px]',
+  minor: 'border-l-rule border-l-[3px]',
 };
 
 function FindingCard({
@@ -4055,25 +4240,27 @@ function FindingCard({
   return (
     <div
       className={
-        'border border-rule border-l-[3px] paper-recess px-5 py-4 ' +
-        (severity ? SEVERITY_TONE[severity] ?? 'border-l-graphite' : 'border-l-graphite')
+        'border border-rule bg-paper px-5 py-4 ' +
+        (severity ? SEVERITY_WEIGHT[severity] ?? 'border-l-rule border-l-[3px]' : 'border-l-rule border-l-[3px]')
       }
     >
-      <div className="flex items-baseline gap-3 mb-1.5">
+      <div className="flex items-baseline gap-3 mb-2">
         {severity && (
           <span
             className={
-              'smcp text-[0.6rem] ' +
-              (severity === 'critical' || severity === 'major'
-                ? 'text-rubric'
-                : 'text-ochre')
+              'smcp ' +
+              (severity === 'critical'
+                ? 'text-ink font-semibold'
+                : severity === 'major'
+                  ? 'text-ink-2 font-medium'
+                  : 'text-graphite')
             }
           >
-            ‡ {severity}
+            {severity}
           </span>
         )}
         {eyebrow && (
-          <span className="smcp text-[0.6rem] text-graphite">
+          <span className="smcp text-graphite-soft">
             {humanLabel(eyebrow)}
           </span>
         )}
@@ -4085,18 +4272,18 @@ function FindingCard({
 
 function BlockQuote({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="border-l-2 border-paper-deep pl-3 my-1.5">
-      <div className="smcp text-[0.6rem] text-graphite-soft mb-0.5">{label}</div>
-      <div className="font-display italic text-[0.92rem] text-ink-2">“{children}”</div>
+    <div className="border-l border-rule-strong pl-3 my-2">
+      <div className="smcp text-graphite-soft mb-0.5">{label}</div>
+      <div className="text-body text-ink-2 italic leading-relaxed">&ldquo;{children}&rdquo;</div>
     </div>
   );
 }
 
 function DefMini({ label, value }: { label: string; value: string }) {
   return (
-    <div className="grid grid-cols-[5.5rem_1fr] gap-3 text-[0.84rem] py-0.5">
-      <dt className="smcp text-[0.6rem] text-graphite pt-1">{label}</dt>
-      <dd className="text-ink-2">{value}</dd>
+    <div className="grid grid-cols-[6rem_1fr] gap-3 py-1 items-baseline">
+      <dt className="smcp text-graphite-soft">{label}</dt>
+      <dd className="text-body text-ink-2 leading-snug">{value}</dd>
     </div>
   );
 }
@@ -4125,11 +4312,11 @@ function LogPane({ result }: { result: IngestResult }) {
   return (
     <div className="px-9 py-7 fade-in">
       <SectionLabel label="processing log" />
-      <dl className="grid grid-cols-[14rem_1fr] gap-x-6 gap-y-2.5 border-t border-rule pt-3">
+      <dl className="grid grid-cols-[14rem_1fr] gap-x-6 gap-y-3 border-t border-rule pt-4">
         {rows.map((r) => (
           <div key={r.k} className="contents">
-            <dt className="smcp text-[0.65rem] text-graphite pt-1">{r.k}</dt>
-            <dd className="font-mono text-[0.82rem] text-ink-2 break-all">{r.v}</dd>
+            <dt className="smcp text-graphite-soft pt-0.5">{r.k}</dt>
+            <dd className="font-mono text-body text-ink-2 break-words">{r.v}</dd>
           </div>
         ))}
       </dl>
@@ -4715,6 +4902,242 @@ function DragOverlay() {
 /* ---------------------------------------------------------------------- */
 /* Matter overlay — full-viewport, category accordion + PDF preview        */
 /* ---------------------------------------------------------------------- */
+
+/* ---------------------------------------------------------------------- */
+/* PDF detail modal — preview + structured rich extraction + audit hits   */
+/* ---------------------------------------------------------------------- */
+
+function findEntryByFilename(
+  typedMemory: TypedMemory,
+  filename: string,
+): PerPdfMemoryEntry | null {
+  for (const list of Object.values(typedMemory)) {
+    for (const entry of list ?? []) {
+      if (entry.filename === filename) return entry;
+    }
+  }
+  return null;
+}
+
+function PdfDetailModal({
+  filename,
+  matterRoot,
+  typedMemory,
+  caseFacts,
+  aggregateAudit,
+  onClose,
+}: {
+  filename: string;
+  matterRoot: string | null;
+  typedMemory: TypedMemory;
+  caseFacts: { case_type: CaseType; facts: Record<string, unknown> } | undefined;
+  aggregateAudit?: AggregateAuditPayload;
+  onClose: () => void;
+}) {
+  const entry = findEntryByFilename(typedMemory, filename);
+
+  // PDF preview URL: server route serves local PDFs by absolute path.
+  const pdfUrl = useMemo(() => {
+    if (!matterRoot) return null;
+    return `/api/file?path=${encodeURIComponent(`${matterRoot}/${filename}`)}`;
+  }, [matterRoot, filename]);
+
+  // Cross-reference: which conflicts mention this PDF?
+  const relatedConflicts = useMemo<ConflictRegisterEntry[]>(() => {
+    const llm = readConflictRegister(caseFacts?.facts);
+    const gates = aggregateGatesToConflicts(aggregateAudit);
+    return [...gates, ...llm].filter((c) =>
+      c.evidence.some((e) => e.pdf_path && filename.includes(e.pdf_path.split('/').pop() ?? '')),
+    );
+  }, [filename, caseFacts, aggregateAudit]);
+
+  // Cross-reference: which proof slots can this PDF fill?
+  const fillsSlots = useMemo<string[]>(() => {
+    if (!entry) return [];
+    const memEntry: MemoryPdfEntry = {
+      filename: entry.filename,
+      pageCount: entry.pageCount,
+      facts: { doc_type: entry.doc_type ?? undefined },
+      ...(entry.subtypes ?? {}),
+    } as MemoryPdfEntry;
+    const docTypeId = resolveDocTypeId(memEntry);
+    if (!docTypeId) return [];
+    const dt = DOC_TYPES_BY_ID[docTypeId];
+    return dt?.fills_proof_slots ?? [];
+  }, [entry]);
+
+  if (!entry) {
+    return (
+      <div
+        className="fixed inset-0 z-50 bg-ink/60 backdrop-blur-sm flex items-center justify-center p-6"
+        onClick={onClose}
+      >
+        <div
+          className="bg-paper border border-rule p-6 max-w-md"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="smcp text-graphite-soft mb-1">Document not found</div>
+          <p className="text-body text-graphite mb-3">{filename}</p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="border border-rule px-3 py-1 text-meta text-graphite hover:bg-ink/5"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const factsObj = entry.facts ?? {};
+  const displayName = unwrapField<string>((factsObj as Record<string, unknown>).display_name);
+  const summary = unwrapField<string>((factsObj as Record<string, unknown>).one_line_summary);
+  const richEntries = entry.rich
+    ? Object.entries(entry.rich).filter(([, v]) => v !== null && v !== undefined)
+    : [];
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-ink/60 backdrop-blur-sm flex items-stretch justify-center"
+      onClick={onClose}
+    >
+      <div
+        className="bg-paper border border-rule m-6 flex-1 max-w-[1400px] flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="px-6 py-3 border-b border-rule flex items-baseline justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="smcp text-graphite-soft mb-0.5">document detail</div>
+            <h2 className="text-body text-ink truncate">{displayName ?? trimFilename(filename)}</h2>
+            <div className="text-meta text-graphite-soft font-mono mt-0.5 truncate">
+              {filename} · {entry.pageCount} pages · {entry.doc_type ?? 'unknown'}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="border border-rule px-3 py-1 text-meta text-graphite hover:bg-ink/5 whitespace-nowrap"
+          >
+            Close (Esc)
+          </button>
+        </header>
+        <div className="flex-1 grid grid-cols-1 md:grid-cols-2 min-h-0">
+          <div className="border-r border-rule bg-paper-2 min-h-0">
+            {pdfUrl ? (
+              <iframe
+                src={pdfUrl}
+                className="w-full h-full"
+                title={`PDF preview — ${filename}`}
+              />
+            ) : (
+              <div className="p-6 text-meta text-graphite-soft">
+                Matter folder not available — preview disabled.
+              </div>
+            )}
+          </div>
+          <div className="overflow-y-auto p-6 grid gap-5">
+            {summary && (
+              <section>
+                <div className="smcp text-graphite-soft mb-1">summary</div>
+                <p className="text-body text-ink leading-snug">{summary}</p>
+              </section>
+            )}
+            {entry.subtypes && Object.values(entry.subtypes).some((v) => v) && (
+              <section>
+                <div className="smcp text-graphite-soft mb-1">subtype</div>
+                <ul className="font-mono text-meta text-graphite grid gap-0.5">
+                  {Object.entries(entry.subtypes)
+                    .filter(([, v]) => v)
+                    .map(([k, v]) => (
+                      <li key={k}>
+                        <span className="text-graphite-soft">{k}:</span> {String(v)}
+                      </li>
+                    ))}
+                </ul>
+              </section>
+            )}
+            {fillsSlots.length > 0 && (
+              <section>
+                <div className="smcp text-graphite-soft mb-1">fills proof slots</div>
+                <ul className="font-mono text-meta text-graphite grid gap-0.5">
+                  {fillsSlots.map((sid) => (
+                    <li key={sid}>
+                      {sid}
+                      {PROOF_SLOTS_BY_ID[sid]?.description ? (
+                        <span className="text-graphite-soft">
+                          {' — '}
+                          {PROOF_SLOTS_BY_ID[sid].description}
+                        </span>
+                      ) : null}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {relatedConflicts.length > 0 && (
+              <section>
+                <div className="smcp text-graphite-soft mb-1">audit findings on this document</div>
+                <ul className="grid gap-2">
+                  {relatedConflicts.map((c) => (
+                    <li
+                      key={c.id}
+                      className="paper-recess border border-rule px-3 py-2 border-l-2"
+                      style={{ borderLeftColor: severityChip(c.severity).color }}
+                    >
+                      <div className="text-body text-ink">{c.description}</div>
+                      <div className="text-meta text-graphite-soft mt-0.5 font-mono">
+                        <span style={{ color: severityChip(c.severity).color }}>
+                          {severityChip(c.severity).label}
+                        </span>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {richEntries.length > 0 && (
+              <section>
+                <div className="smcp text-graphite-soft mb-1">extracted facts</div>
+                <div className="grid gap-3">
+                  {richEntries.map(([key, value]) => (
+                    <details
+                      key={key}
+                      open
+                      className="border border-rule paper-recess"
+                    >
+                      <summary className="cursor-pointer px-3 py-1.5 font-mono text-meta text-graphite hover:bg-ink/5">
+                        ▾ {key}
+                      </summary>
+                      <pre className="px-3 py-2 border-t border-rule text-meta font-mono text-ink whitespace-pre-wrap break-words overflow-x-auto">
+                        {JSON.stringify(value, null, 2)}
+                      </pre>
+                    </details>
+                  ))}
+                </div>
+              </section>
+            )}
+            {entry.error && (
+              <section className="border border-rule paper-recess px-3 py-2 border-l-2 border-l-[#B91C1C]">
+                <div className="smcp text-[#B91C1C] mb-1">extraction error</div>
+                <div className="text-meta font-mono text-ink">{entry.error.code}</div>
+                <div className="text-meta text-graphite mt-0.5">{entry.error.message}</div>
+              </section>
+            )}
+            <details className="border border-rule paper-recess">
+              <summary className="cursor-pointer px-3 py-1.5 font-mono text-meta text-graphite hover:bg-ink/5">
+                ▸ raw thin facts
+              </summary>
+              <pre className="px-3 py-2 border-t border-rule text-meta font-mono text-ink whitespace-pre-wrap break-words overflow-x-auto">
+                {JSON.stringify(entry.facts, null, 2)}
+              </pre>
+            </details>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function MatterOverlay({
   matterName,

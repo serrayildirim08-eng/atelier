@@ -675,11 +675,13 @@ export async function classifyAndExtractOnePdf(
   const text = sampleLongText(parsed.text, MAX_TEXT_CHARS);
   const parseMs = TIMING_ENABLED ? Date.now() - tParse0 : 0;
 
-  // Tier-0 deterministic classifier — runs before Haiku to provide a
-  // free, observability-grade hint. If Haiku later returns 'other' but
-  // Tier-0 was confident, that's a strong signal Haiku miscalled the
-  // doc_type. Currently logged only; cost-reducing skip-Haiku path is a
-  // follow-up that requires synthesizing the thin facts payload.
+  // Tier-0 deterministic classifier — runs before Haiku for two purposes:
+  //   1. Bias the Haiku prompt with a strong prior (cuts noisy doc_type
+  //      misclassifications, especially on bilingual / image-heavy docs).
+  //   2. Telemetry: if Haiku later disagrees with a confident Tier-0 hit,
+  //      surface the conflict for review.
+  // Full skip-Haiku cost-reduction would require synthesizing per-variant
+  // thin facts — deferred until per-variant synthesizers exist.
   const tier0 = classifyByTier0({
     filename: input.filename,
     first_page_text: text.slice(0, 4000),
@@ -690,7 +692,15 @@ export async function classifyAndExtractOnePdf(
     );
   }
 
-  const userMessage = `## Filename\n${input.filename}\n\n## Document text (pages delimited by [page N] markers)\n\n${text}\n\nRespond with ONLY a single JSON object matching the doc_type-discriminated PerPdfFacts schema. No prose, no markdown fences.`;
+  // Hint block: a confident Tier-0 hit lets Haiku skip much of its own
+  // discriminator search. We only include it when confidence ≥ 0.7 so
+  // borderline calls don't bias Haiku away from a better answer.
+  const tier0HintBlock =
+    tier0.doc_type_id && tier0.confidence >= 0.7
+      ? `\n\n## Tier-0 prior\nA deterministic regex/keyword classifier matched this PDF as \`${tier0.doc_type_id}\` with confidence ${tier0.confidence.toFixed(2)} (signals: ${tier0.matched_signals.slice(0, 3).join('; ')}). This is a STRONG prior — only override with explicit text evidence.`
+      : '';
+
+  const userMessage = `## Filename\n${input.filename}${tier0HintBlock}\n\n## Document text (pages delimited by [page N] markers)\n\n${text}\n\nRespond with ONLY a single JSON object matching the doc_type-discriminated PerPdfFacts schema. No prose, no markdown fences.`;
 
   // The PerPdfFactsSchema discriminated union has hundreds of nullable
   // params across 17 variants — exceeds Anthropic's structured-output cap

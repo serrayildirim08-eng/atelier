@@ -293,7 +293,24 @@ export async function POST(request: Request): Promise<Response> {
         aliases = {};
       }
 
+      // Heartbeat: aggregator/draft/review go silent for many seconds while
+      // Anthropic crunches. Without periodic events the dev server (and
+      // some intermediate proxies) close the response, the client sees an
+      // EOF without a `result` event, and the UI bounces back to "no
+      // matters". 5s heartbeats keep the connection warm AND give the user
+      // visible "still working" feedback in the loading overlay.
+      const startHeartbeat = (stage: string) => {
+        return setInterval(() => {
+          try {
+            send(controller, { type: 'heartbeat', stage, ts: Date.now() });
+          } catch {
+            /* controller already closed — let the outer flow notice */
+          }
+        }, 5000);
+      };
+
       let result: IngestResult;
+      const aggHeartbeat = startHeartbeat('aggregating');
       try {
         const aggregate = await aggregateTypedMemoryToE2(memory, {
           aliases,
@@ -340,6 +357,8 @@ export async function POST(request: Request): Promise<Response> {
             message: e instanceof Error ? e.message : String(e),
           },
         };
+      } finally {
+        clearInterval(aggHeartbeat);
       }
 
       if ('error' in result) {
@@ -392,6 +411,7 @@ export async function POST(request: Request): Promise<Response> {
           total: pdfPaths.length,
         });
 
+        const reviewHeartbeat = startHeartbeat('reviewing');
         try {
           const reviewed = await checkDraft(result.caseFacts, result.draft);
           result = { ...result, review: reviewed.report };
@@ -403,6 +423,8 @@ export async function POST(request: Request): Promise<Response> {
               message: e instanceof Error ? e.message : String(e),
             },
           };
+        } finally {
+          clearInterval(reviewHeartbeat);
         }
       }
 

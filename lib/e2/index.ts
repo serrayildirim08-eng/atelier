@@ -27,6 +27,8 @@ export { POST_PROFILES_BY_POST, getPostProfile } from './binder-posts';
 
 export { auditDocuments, type AuditInput } from './document-audit';
 
+export { aggregateGatesToConflicts } from './aggregate-gates';
+
 export { selectBinderProfile, buildBinderManifest, type ManifestInput } from './binder-manifest';
 
 export {
