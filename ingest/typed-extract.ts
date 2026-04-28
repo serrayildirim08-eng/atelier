@@ -18,6 +18,7 @@ import { logAnthropicUsage } from '@/lib/usage-log';
 import { pdfContentHash, readPdfCache, writePdfCache } from '@/lib/pdf-cache';
 import { sampleLongText } from '@/lib/token-count';
 import { extractPdfText } from './pdf';
+import { classifyByTier0 } from './classify-fallback';
 import {
   PerPdfFactsSchema,
   type DocType,
@@ -674,6 +675,21 @@ export async function classifyAndExtractOnePdf(
   const text = sampleLongText(parsed.text, MAX_TEXT_CHARS);
   const parseMs = TIMING_ENABLED ? Date.now() - tParse0 : 0;
 
+  // Tier-0 deterministic classifier — runs before Haiku to provide a
+  // free, observability-grade hint. If Haiku later returns 'other' but
+  // Tier-0 was confident, that's a strong signal Haiku miscalled the
+  // doc_type. Currently logged only; cost-reducing skip-Haiku path is a
+  // follow-up that requires synthesizing the thin facts payload.
+  const tier0 = classifyByTier0({
+    filename: input.filename,
+    first_page_text: text.slice(0, 4000),
+  });
+  if (TIMING_ENABLED && tier0.doc_type_id) {
+    console.log(
+      `[tier0] ${input.filename} → ${tier0.doc_type_id} (conf=${tier0.confidence.toFixed(2)}, signals=${tier0.matched_signals.slice(0, 2).join('; ')})`,
+    );
+  }
+
   const userMessage = `## Filename\n${input.filename}\n\n## Document text (pages delimited by [page N] markers)\n\n${text}\n\nRespond with ONLY a single JSON object matching the doc_type-discriminated PerPdfFacts schema. No prose, no markdown fences.`;
 
   // The PerPdfFactsSchema discriminated union has hundreds of nullable
@@ -783,6 +799,16 @@ export async function classifyAndExtractOnePdf(
   });
 
   const facts = validated.data as PerPdfFacts;
+
+  // Tier-0 quality check: if Haiku classified as 'other' but Tier-0 had a
+  // confident hit, surface the disagreement at telemetry level. Keep
+  // Haiku's classification — overriding requires synthesizing a thin
+  // facts variant for the new doc_type, which is non-trivial.
+  if (facts.doc_type === 'other' && tier0.doc_type_id && tier0.confidence >= 0.75) {
+    console.warn(
+      `[typed-extract] ${input.filename}: Haiku=other but Tier-0=${tier0.doc_type_id} (conf=${tier0.confidence.toFixed(2)}). Possible miscall — review.`,
+    );
+  }
 
   // Second pass: route to each rich extractor whose flavor includes the
   // first-pass doc_type. Multiple extractors may apply to the same PDF

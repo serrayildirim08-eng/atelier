@@ -22,6 +22,7 @@ import {
   renderExhibitListMarkdown,
   renderExhibitListCompact,
 } from '@/draft/exhibit-list';
+import { draftBusinessPlan } from '@/draft/business-plan-writer';
 import type { CaseFacts, E2Facts } from '@/ingest/schema';
 import type { TypedMemory } from '@/ingest/typed-memory';
 import type { PreviewEdit, PreviewRecord } from '@/lib/preview-store';
@@ -136,6 +137,19 @@ export async function executeApprovedPreview(
         usage: null,
       };
     }
+    case 'business_plan': {
+      if (editedFacts.case_type !== 'E2') {
+        throw new Error('Business-plan generator is wired for E-2 only.');
+      }
+      const result = await draftBusinessPlan({
+        caseFacts: editedFacts.facts as E2Facts,
+      });
+      return {
+        output_path: null,
+        output_inline: result.rendered_markdown,
+        usage: result.usage,
+      };
+    }
     case 'noid_principal':
     case 'noid_dependent':
       // NoID generator is a thin attestation; the draft layer doesn't
@@ -148,6 +162,12 @@ export async function executeApprovedPreview(
         output_inline: renderNoidAttestation(record),
         usage: null,
       };
+    default: {
+      // Exhaustiveness guard — adding a new PreviewGenerator member without
+      // wiring it here will fail compilation on the `never` assignment.
+      const _exhaustive: never = record.generator;
+      throw new Error(`Unhandled generator: ${String(_exhaustive)}`);
+    }
   }
 }
 

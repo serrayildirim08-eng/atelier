@@ -83,7 +83,18 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const pdfPaths = await walkPdfs(rootPath);
+  let pdfPaths: string[];
+  try {
+    pdfPaths = await walkPdfs(rootPath);
+  } catch (e: unknown) {
+    return Response.json(
+      {
+        error: 'walk_failed',
+        message: e instanceof Error ? e.message : String(e),
+      },
+      { status: 500 },
+    );
+  }
   const matterName = path.basename(rootPath);
 
   const encoder = new TextEncoder();
@@ -93,6 +104,7 @@ export async function POST(request: Request): Promise<Response> {
 
   const stream = new ReadableStream({
     async start(controller) {
+      try {
       send(controller, { type: 'start', total: pdfPaths.length, matter: matterName });
 
       if (pdfPaths.length === 0) {
@@ -193,6 +205,49 @@ export async function POST(request: Request): Promise<Response> {
             error: r.error ?? null,
             facts: r.facts ?? null,
             pageCount: r.pageCount,
+            // Rich-extractor subtype discriminators — strings only, used
+            // by lib/e2 audit to map coarse doc_type to fine-grained ids.
+            subtypes: {
+              formation_doc_subtype: r.corporateFormation?.formation_doc_subtype ?? null,
+              contract_subtype: r.contract?.contract_subtype ?? null,
+              government_doc_subtype: r.governmentDoc?.government_doc_subtype ?? null,
+              tax_return_subtype: r.taxReturn?.tax_return_subtype ?? null,
+              statement_subtype: r.financialStatement?.statement_subtype ?? null,
+              credential_subtype: r.credential?.credential_subtype ?? null,
+              payroll_subtype: r.payroll?.payroll_subtype ?? null,
+              wire_subtype: r.wireConfirmation?.wire_subtype ?? null,
+              vital_record_subtype: r.vitalRecords?.vital_record_subtype ?? null,
+              foreign_doc_subtype: r.foreignCorporate?.foreign_doc_subtype ?? null,
+            },
+            // Full rich extraction content — used by the PDF detail modal
+            // to show structured per-document facts (CV current title,
+            // wire amount + FX rate, contract parties, etc.). Each field
+            // is optional; only attached when the second-pass extractor
+            // ran successfully on this PDF.
+            rich: {
+              passport: r.passport ?? null,
+              visaStamp: r.visaStamp ?? null,
+              i94: r.i94 ?? null,
+              vitalRecords: r.vitalRecords ?? null,
+              corporateFormation: r.corporateFormation ?? null,
+              foreignCorporate: r.foreignCorporate ?? null,
+              contract: r.contract ?? null,
+              customerContract: r.customerContract ?? null,
+              realEstatePurchase: r.realEstatePurchase ?? null,
+              bankReceipt: r.bankReceipt ?? null,
+              wireConfirmation: r.wireConfirmation ?? null,
+              taxReturn: r.taxReturn ?? null,
+              financialStatement: r.financialStatement ?? null,
+              payroll: r.payroll ?? null,
+              jobOffer: r.jobOffer ?? null,
+              serviceRecord: r.serviceRecord ?? null,
+              cv: r.cv ?? null,
+              credential: r.credential ?? null,
+              recommendationLetter: r.recommendationLetter ?? null,
+              governmentDoc: r.governmentDoc ?? null,
+              imagePhoto: r.imagePhoto ?? null,
+              incentiveDocument: r.incentiveDocument ?? null,
+            },
           });
         },
       );
@@ -240,9 +295,10 @@ export async function POST(request: Request): Promise<Response> {
 
       let result: IngestResult;
       try {
-        const { caseFacts } = await aggregateTypedMemoryToE2(memory, {
+        const aggregate = await aggregateTypedMemoryToE2(memory, {
           aliases,
         });
+        const { caseFacts, ...gates } = aggregate;
         result = {
           filename: matterName,
           pageCount: totalPages,
@@ -252,6 +308,27 @@ export async function POST(request: Request): Promise<Response> {
           caseFacts: { case_type: 'E2', facts: caseFacts },
           e2_subtype: e2Subtype,
           source_pdfs: sourcePdfs,
+          // Forward all 15 deterministic-gate row arrays + derived flags so
+          // the client audit can fold them into the unified conflict
+          // register without re-running gate logic.
+          aggregate_audit: {
+            defensive_paragraphs_required: gates.defensive_paragraphs_required,
+            marginality_evidence_present: gates.marginality_evidence_present,
+            fx_gate_results: gates.fx_gate_results,
+            passport_validity_results: gates.passport_validity_results,
+            i94_status_results: gates.i94_status_results,
+            translation_gate_results: gates.translation_gate_results,
+            salary_benchmark_results: gates.salary_benchmark_results,
+            cv_title_drift_results: gates.cv_title_drift_results,
+            personal_reference_results: gates.personal_reference_results,
+            credential_verifiability_results: gates.credential_verifiability_results,
+            tax_balance_sheet_results: gates.tax_balance_sheet_results,
+            pl_tax_net_income_results: gates.pl_tax_net_income_results,
+            real_estate_buyer_mismatch_results: gates.real_estate_buyer_mismatch_results,
+            incentive_recipient_mismatch_results: gates.incentive_recipient_mismatch_results,
+            substantiality_recon_results: gates.substantiality_recon_results,
+            entity_coherence_results: gates.entity_coherence_results,
+          },
         } satisfies IngestSuccess;
       } catch (e: unknown) {
         result = {
@@ -332,6 +409,28 @@ export async function POST(request: Request): Promise<Response> {
       send(controller, { type: 'result', result });
       send(controller, { type: 'done', total: pdfPaths.length });
       controller.close();
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        const stack = e instanceof Error ? e.stack : '';
+        console.error('[ingest-path] fatal in stream:', e);
+        try {
+          send(controller, {
+            type: 'result',
+            result: {
+              filename: matterName,
+              pageCount: 0,
+              error: {
+                code: 'ingest_fatal',
+                message: stack ? `${message}\n${stack}` : message,
+              },
+            },
+          });
+          send(controller, { type: 'done', total: 0 });
+        } catch {}
+        try {
+          controller.close();
+        } catch {}
+      }
     },
   });
 

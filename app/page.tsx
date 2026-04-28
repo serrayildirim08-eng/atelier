@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useCallback, useState, useMemo, useEffect } from 'react';
+import { Fragment, useCallback, useState, useMemo, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { DragEvent, ChangeEvent } from 'react';
 import type { ReviewReport } from '@/reason';
@@ -16,6 +16,25 @@ import {
   LoadingProgress,
   type LoadingStreamEvent,
 } from '@/app/components/loading-progress';
+import {
+  auditFromMemory,
+  buildBinderManifest,
+  deriveCaseProfile,
+  resolveDocTypeId,
+  selectBinderProfile,
+  PROOF_SLOTS_BY_ID,
+  DOC_TYPES_BY_ID,
+  type BinderManifest,
+  type DetectedSubtypeShape,
+  type MemoryPdfEntry,
+  type CaseProfile,
+  type ConflictRegisterEntry,
+  type FundsOrigin,
+  type Vehicle,
+  type ConsularPost,
+  type SlotResolution,
+  type Severity,
+} from '@/lib/e2';
 
 /* ---------------------------------------------------------------------- */
 /* Types                                                                   */
@@ -47,7 +66,7 @@ interface IngestResult {
   error?: { code: string; message: string };
 }
 
-type DossierTab = 'facts' | 'exhibits' | 'draft' | 'review' | 'log';
+type DossierTab = 'facts' | 'exhibits' | 'draft' | 'review' | 'log' | 'audit' | 'binder';
 
 interface IngestProgress {
   stage: string;
@@ -122,6 +141,21 @@ interface PerPdfMemoryEntry {
   doc_type: DocType | null;
   facts: Record<string, unknown> | null;
   error: { code: string; message: string } | null;
+  /** Rich-extractor subtype discriminators forwarded from the server. The
+   *  E-2 audit framework uses these to refine the coarse `doc_type` into
+   *  fine-grained doc-type ids (lib/e2/from-memory.ts). */
+  subtypes?: {
+    formation_doc_subtype?: string | null;
+    contract_subtype?: string | null;
+    government_doc_subtype?: string | null;
+    tax_return_subtype?: string | null;
+    statement_subtype?: string | null;
+    credential_subtype?: string | null;
+    payroll_subtype?: string | null;
+    wire_subtype?: string | null;
+    vital_record_subtype?: string | null;
+    foreign_doc_subtype?: string | null;
+  };
 }
 
 type TypedMemory = Partial<Record<DocType, PerPdfMemoryEntry[]>>;
@@ -240,6 +274,40 @@ const ASSESSMENT_PILL: Record<
   },
 };
 
+async function downloadInlineAsDocx(content: string, filename: string): Promise<void> {
+  const res = await fetch('/api/export', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, filename }),
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    alert(`Export failed: ${data.error ?? res.statusText}`);
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function downloadInlineAsMarkdown(content: string, filename: string): void {
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 function StatusPill({
   assessment,
   size = 'compact',
@@ -299,7 +367,22 @@ export default function Page() {
   // reduces it into rows + stage-strip state. Reset on each new ingest.
   const [streamEvents, setStreamEvents] = useState<LoadingStreamEvent[]>([]);
   const [streamStartedAt, setStreamStartedAt] = useState<number | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const router = useRouter();
+
+  const cancelIngest = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setLoading(false);
+    setProgress(null);
+    setResults([]);
+    setTypedMemory({});
+    setPerPdfCount({ done: 0, total: 0 });
+    setMatterRoot(null);
+    setStreamingDraft('');
+    setStreamEvents([]);
+    setStreamStartedAt(null);
+  }, []);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -439,11 +522,16 @@ export default function Page() {
     setStreamEvents([]);
     setStreamStartedAt(Date.now());
 
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       const res = await fetch('/api/ingest-path', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ path: rootPath }),
+        signal: controller.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -508,6 +596,8 @@ export default function Page() {
               doc_type: (evt.doc_type as DocType | null) ?? null,
               facts: (evt.facts as Record<string, unknown> | null) ?? null,
               error: (evt.error as { code: string; message: string } | null) ?? null,
+              subtypes:
+                (evt.subtypes as PerPdfMemoryEntry['subtypes'] | undefined) ?? undefined,
             };
             const bucket: DocType = entry.doc_type ?? 'other';
             setTypedMemory((prev) => {
@@ -546,19 +636,25 @@ export default function Page() {
         }
       }
     } catch (e: unknown) {
-      setResults([
-        {
-          filename: rootPath,
-          pageCount: 0,
-          error: {
-            code: 'network',
-            message: e instanceof Error ? e.message : String(e),
+      const isAbort =
+        (e instanceof DOMException && e.name === 'AbortError') ||
+        (e instanceof Error && e.name === 'AbortError');
+      if (!isAbort) {
+        setResults([
+          {
+            filename: rootPath,
+            pageCount: 0,
+            error: {
+              code: 'network',
+              message: e instanceof Error ? e.message : String(e),
+            },
           },
-        },
-      ]);
+        ]);
+      }
     } finally {
       setLoading(false);
       setProgress(null);
+      if (abortRef.current === controller) abortRef.current = null;
     }
   }, [router]);
 
@@ -635,6 +731,17 @@ export default function Page() {
 
       {loading && streamStartedAt !== null && (
         <div className="fixed inset-0 z-40 paper-grain overflow-y-auto">
+          <button
+            onClick={() => {
+              if (window.confirm('Cancel ingestion and clear the matter?')) {
+                cancelIngest();
+              }
+            }}
+            className="fixed top-5 right-6 z-50 px-3 py-1.5 border border-rule-strong bg-paper-2 hover:bg-ink hover:text-paper text-meta smcp tracking-wider transition-colors"
+            aria-label="Cancel ingestion"
+          >
+            cancel ingestion ✕
+          </button>
           <div className="max-w-[80rem] mx-auto px-10 py-12">
             <LoadingProgress
               events={streamEvents}
@@ -888,7 +995,7 @@ function BinderRow({
         onClick={onDelete}
         aria-label="Delete matter"
         title="Delete matter"
-        className="absolute top-2 right-2 w-6 h-6 grid place-items-center text-graphite-soft hover:text-ink hover:bg-paper-deep/40 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity font-mono text-meta"
+        className="absolute top-2 right-2 w-6 h-6 grid place-items-center text-graphite-soft hover:text-ink hover:bg-paper-deep/60 transition-colors font-mono text-base border border-rule"
       >
         ×
       </button>
@@ -986,6 +1093,26 @@ function Dossier({
           />
         )}
         {tab === 'review' && <ReviewPane result={result} />}
+        {tab === 'audit' && (
+          <AuditPane
+            key={`audit:${result.filename}`}
+            typedMemory={typedMemory}
+            caseFacts={result.caseFacts}
+            matterId={result.filename}
+            matterRoot={matterRoot}
+            onOpenMatter={onOpenMatter}
+          />
+        )}
+        {tab === 'binder' && (
+          <BinderPane
+            key={`binder:${result.filename}`}
+            typedMemory={typedMemory}
+            caseFacts={result.caseFacts}
+            matterId={result.filename}
+            matterRoot={matterRoot}
+            onOpenMatter={onOpenMatter}
+          />
+        )}
         {tab === 'log' && <LogPane result={result} />}
       </div>
     </section>
@@ -1064,7 +1191,9 @@ const EXHIBIT_CATEGORIES: ExhibitCategorySpec[] = [
     key: 'business_plan',
     label: '3 · Business Plan',
     doc_types: ['business_plan'],
-    generators: [],
+    generators: [
+      { generator: 'business_plan', label: 'Generate · Business plan (E-2)' },
+    ],
   },
   {
     key: 'cover_letter',
@@ -1221,14 +1350,40 @@ function MemoryPane({
               </div>
             )}
             {recentOutput.output_inline && (
-              <details>
-                <summary className="cursor-pointer text-graphite">
-                  ▸ view inline ({recentOutput.output_inline.length.toLocaleString()} chars)
-                </summary>
-                <pre className="mt-2 whitespace-pre-wrap text-[0.7rem] bg-ink-2/5 p-3 max-h-96 overflow-y-auto">
-                  {recentOutput.output_inline}
-                </pre>
-              </details>
+              <>
+                <div className="mb-3 flex gap-2">
+                  <button
+                    onClick={() =>
+                      downloadInlineAsDocx(
+                        recentOutput.output_inline ?? '',
+                        `${recentOutput.generator}.docx`,
+                      )
+                    }
+                    className="px-2.5 py-1 border border-rule-strong text-[0.65rem] smcp tracking-wider hover:bg-ink hover:text-paper transition-colors"
+                  >
+                    download .docx
+                  </button>
+                  <button
+                    onClick={() =>
+                      downloadInlineAsMarkdown(
+                        recentOutput.output_inline ?? '',
+                        `${recentOutput.generator}.md`,
+                      )
+                    }
+                    className="px-2.5 py-1 border border-rule text-[0.65rem] smcp tracking-wider hover:bg-paper-deep transition-colors"
+                  >
+                    download .md
+                  </button>
+                </div>
+                <details>
+                  <summary className="cursor-pointer text-graphite">
+                    ▸ view inline ({recentOutput.output_inline.length.toLocaleString()} chars)
+                  </summary>
+                  <pre className="mt-2 whitespace-pre-wrap text-[0.7rem] bg-ink-2/5 p-3 max-h-96 overflow-y-auto">
+                    {recentOutput.output_inline}
+                  </pre>
+                </details>
+              </>
             )}
           </div>
         </section>
@@ -1855,6 +2010,8 @@ function DossierTabs({
           ? '!'
           : '…',
     },
+    { key: 'audit', label: 'Audit' },
+    { key: 'binder', label: 'Binder' },
     { key: 'log', label: 'Log' },
   ];
   return (
@@ -1918,6 +2075,863 @@ function FactsPane({
           ))}
         </div>
       </details>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Audit pane — checklist of required E-2 proof slots and what's missing  */
+/* ---------------------------------------------------------------------- */
+
+const POSTURE_OPTIONS: { value: CaseProfile['posture']; label: string }[] = [
+  { value: 'consular_first_time', label: 'Consular — first time' },
+  { value: 'consular_renewal', label: 'Consular — renewal' },
+  { value: 'uscis_change_of_status', label: 'USCIS — change of status' },
+  { value: 'uscis_extension', label: 'USCIS — extension' },
+];
+
+const SUBTYPE_OPTIONS: { value: CaseProfile['principal_subtype']; label: string }[] = [
+  { value: 'individual_investor', label: 'Subtype 1 — Individual investor' },
+  { value: 'corporate_owned_investor', label: 'Subtype 2 — Corporate-owned investor' },
+  { value: 'executive_supervisory', label: 'Subtype 3 — Executive / supervisory' },
+  { value: 'essential_skills_employee', label: 'Subtype 4 — Essential skills employee' },
+];
+
+const STAGE_OPTIONS: { value: CaseProfile['stage']; label: string }[] = [
+  { value: 'pre_launch', label: 'Pre-launch (Walsh & Pollard)' },
+  { value: 'early_stage', label: 'Early stage (<12 mo)' },
+  { value: 'operating', label: 'Operating (≥12 mo)' },
+];
+
+const VEHICLE_OPTIONS: { value: Vehicle; label: string }[] = [
+  { value: 'restaurant_food_service', label: 'Restaurant / food service' },
+  { value: 'franchise', label: 'Franchise' },
+  { value: 'tech_saas', label: 'Tech / SaaS' },
+  { value: 'consulting_services', label: 'Consulting services' },
+  { value: 'professional_services', label: 'Professional services' },
+  { value: 'ecommerce', label: 'E-commerce' },
+  { value: 'real_estate_active', label: 'Real estate (active)' },
+  { value: 'hospitality_lodging', label: 'Hospitality / lodging' },
+  { value: 'healthcare_clinic', label: 'Healthcare / clinic' },
+  { value: 'beauty_personal_care', label: 'Beauty / personal care' },
+  { value: 'fitness_wellness', label: 'Fitness / wellness' },
+  { value: 'automotive_services', label: 'Automotive services' },
+  { value: 'construction_trades', label: 'Construction / trades' },
+  { value: 'import_export_trade', label: 'Import / export' },
+  { value: 'manufacturing', label: 'Manufacturing' },
+  { value: 'retail_brick_mortar', label: 'Retail (brick & mortar)' },
+  { value: 'education_training', label: 'Education / training' },
+  { value: 'media_entertainment', label: 'Media / entertainment' },
+  { value: 'other', label: 'Other' },
+];
+
+const ORIGIN_OPTIONS: { value: FundsOrigin; label: string }[] = [
+  { value: 'salary_employment', label: 'Salary' },
+  { value: 'business_profits_dividends', label: 'Business profits / dividends' },
+  { value: 'sale_of_real_estate', label: 'Sale of real estate' },
+  { value: 'sale_of_business_or_shares', label: 'Sale of business / shares' },
+  { value: 'inheritance', label: 'Inheritance' },
+  { value: 'gift', label: 'Gift' },
+  { value: 'loan_personal_collateral', label: 'Loan (non-business collateral)' },
+  { value: 'personal_savings', label: 'Personal savings' },
+  { value: 'cryptocurrency', label: 'Cryptocurrency' },
+  { value: 'rental_income', label: 'Rental income' },
+  { value: 'investment_portfolio_sale', label: 'Investment portfolio sale' },
+];
+
+const NATIONALITY_OPTIONS: { value: CaseProfile['nationality_path']; label: string }[] = [
+  { value: 'birth', label: 'Birth' },
+  { value: 'descent', label: 'Descent' },
+  { value: 'marriage', label: 'Marriage' },
+  { value: 'naturalization_residency', label: 'Naturalization (residency-based)' },
+  { value: 'cbi_investment', label: 'CBI — citizenship by investment (AMIGOS)' },
+];
+
+const POST_OPTIONS: { value: ConsularPost; label: string }[] = [
+  { value: 'istanbul', label: 'Istanbul' },
+  { value: 'ankara', label: 'Ankara' },
+  { value: 'tokyo', label: 'Tokyo' },
+  { value: 'osaka_kobe', label: 'Osaka-Kobe' },
+  { value: 'naha', label: 'Naha' },
+  { value: 'frankfurt', label: 'Frankfurt' },
+  { value: 'paris', label: 'Paris' },
+  { value: 'london', label: 'London' },
+  { value: 'toronto', label: 'Toronto' },
+  { value: 'seoul', label: 'Seoul' },
+  { value: 'madrid', label: 'Madrid' },
+  { value: 'rome', label: 'Rome' },
+  { value: 'other', label: 'Other / unknown' },
+];
+
+const FAM_GROUPS: { fam: string; label: string }[] = [
+  { fam: 'E1_treaty_nationality', label: 'E1 — Treaty Nationality' },
+  { fam: 'E2_substantial_investment', label: 'E2 — Substantial Investment' },
+  { fam: 'E2_source_of_funds', label: 'E2 — Source of Funds' },
+  { fam: 'E2_at_risk', label: 'E2 — At Risk' },
+  { fam: 'E3_real_and_operating', label: 'E3 — Real & Operating' },
+  { fam: 'E4_more_than_marginal', label: 'E4 — More than Marginal' },
+  { fam: 'E5_develop_and_direct', label: 'E5 — Develop & Direct' },
+];
+
+function severityClasses(sev: Severity, status: SlotResolution['status']): string {
+  if (status === 'filled') return 'border-l-2 border-l-transparent';
+  if (sev >= 5) return 'border-l-2 border-l-[#B91C1C] bg-[#B91C1C]/[0.04]';
+  if (sev >= 4) return 'border-l-2 border-l-[#C2410C] bg-[#C2410C]/[0.04]';
+  if (sev >= 3) return 'border-l-2 border-l-[#A16207] bg-[#A16207]/[0.03]';
+  return 'border-l-2 border-l-rule';
+}
+
+function severityChip(sev: Severity): { color: string; label: string } {
+  if (sev >= 5) return { color: '#B91C1C', label: `sev ${sev}` };
+  if (sev >= 4) return { color: '#C2410C', label: `sev ${sev}` };
+  if (sev >= 3) return { color: '#A16207', label: `sev ${sev}` };
+  return { color: '#595959', label: `sev ${sev}` };
+}
+
+function loadStoredProfile(matterId: string | undefined): CaseProfile | null {
+  if (!matterId || typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(`e2-profile:${matterId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CaseProfile;
+    if (parsed?.visa_class !== 'E2') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Pull provenance-wrapped value (`{ value, source_quote, ... }`) or return raw. */
+function unwrapField<T = unknown>(field: unknown): T | undefined {
+  if (field && typeof field === 'object' && 'value' in (field as Record<string, unknown>)) {
+    return (field as { value: T }).value;
+  }
+  return field as T | undefined;
+}
+
+function clampSeverity(n: unknown): Severity {
+  const v = typeof n === 'number' ? n : Number(n);
+  if (!Number.isFinite(v)) return 1;
+  return Math.min(5, Math.max(1, Math.round(v))) as Severity;
+}
+
+/** Read the LLM-emitted `conflict_register` from caseFacts.facts and convert
+ *  to ConflictRegisterEntry[] for the audit. Each entry's fields are
+ *  provenance-wrapped (`Field<T>` → `{ value, source_page, source_quote, ... }`),
+ *  so unwrap before mapping. */
+function readConflictRegister(
+  facts: Record<string, unknown> | undefined,
+): ConflictRegisterEntry[] {
+  if (!facts) return [];
+  const raw = facts.conflict_register;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((entry, idx): ConflictRegisterEntry | null => {
+      if (!entry || typeof entry !== 'object') return null;
+      const e = entry as Record<string, unknown>;
+      const description = unwrapField<string>(e.description) ?? '';
+      const conflictType = unwrapField<string>(e.conflict_type) ?? `conflict_${idx}`;
+      const severity = clampSeverity(unwrapField(e.severity));
+      const factADoc = unwrapField<string>(e.fact_a_doc) ?? '';
+      const factAPage = unwrapField<number>(e.fact_a_page);
+      const factBDoc = unwrapField<string>(e.fact_b_doc) ?? '';
+      const factBPage = unwrapField<number>(e.fact_b_page);
+      if (!description) return null;
+      return {
+        id: `${conflictType}_${idx}`,
+        description,
+        severity,
+        evidence: [
+          {
+            pdf_path: factADoc,
+            doc_type_id: 'unknown',
+            field_name: conflictType,
+            value: factAPage ?? '',
+          },
+          {
+            pdf_path: factBDoc,
+            doc_type_id: 'unknown',
+            field_name: conflictType,
+            value: factBPage ?? '',
+          },
+        ].filter((ev) => ev.pdf_path),
+      };
+    })
+    .filter((x): x is ConflictRegisterEntry => x !== null);
+}
+
+function buildEntriesFromMemory(typedMemory: TypedMemory): MemoryPdfEntry[] {
+  const entries: MemoryPdfEntry[] = [];
+  for (const [, list] of Object.entries(typedMemory)) {
+    for (const entry of list ?? []) {
+      const sub = entry.subtypes ?? {};
+      // The from-memory adapter expects rich extraction objects keyed by
+      // their _subtype discriminator string. Reconstruct minimal shapes
+      // from the forwarded discriminators — that's all the adapter reads.
+      entries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        facts: { doc_type: entry.doc_type ?? undefined },
+        corporateFormation: sub.formation_doc_subtype
+          ? { formation_doc_subtype: sub.formation_doc_subtype }
+          : undefined,
+        contract: sub.contract_subtype ? { contract_subtype: sub.contract_subtype } : undefined,
+        governmentDoc: sub.government_doc_subtype
+          ? { government_doc_subtype: sub.government_doc_subtype }
+          : undefined,
+        taxReturn: sub.tax_return_subtype
+          ? { tax_return_subtype: sub.tax_return_subtype }
+          : undefined,
+        financialStatement: sub.statement_subtype
+          ? { statement_subtype: sub.statement_subtype }
+          : undefined,
+        credential: sub.credential_subtype
+          ? { credential_subtype: sub.credential_subtype }
+          : undefined,
+        payroll: sub.payroll_subtype ? { payroll_subtype: sub.payroll_subtype } : undefined,
+        wireConfirmation: sub.wire_subtype ? { wire_subtype: sub.wire_subtype } : undefined,
+        vitalRecords: sub.vital_record_subtype
+          ? { vital_record_subtype: sub.vital_record_subtype }
+          : undefined,
+        foreignCorporate: sub.foreign_doc_subtype
+          ? { foreign_doc_subtype: sub.foreign_doc_subtype }
+          : undefined,
+      });
+    }
+  }
+  return entries;
+}
+
+function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid gap-1">
+      <label className="smcp text-graphite-soft">{label}</label>
+      {children}
+    </div>
+  );
+}
+
+function CaseProfileEditor({
+  profile,
+  onChange,
+}: {
+  profile: CaseProfile;
+  onChange: (next: CaseProfile) => void;
+}) {
+  const update = <K extends keyof CaseProfile>(key: K, value: CaseProfile[K]) =>
+    onChange({ ...profile, [key]: value });
+
+  const toggleOrigin = (o: FundsOrigin) => {
+    const has = profile.funds_origins.includes(o);
+    const next = has ? profile.funds_origins.filter((x) => x !== o) : [...profile.funds_origins, o];
+    update('funds_origins', next.length === 0 ? ['personal_savings'] : next);
+  };
+
+  const isConsular = profile.posture.startsWith('consular_');
+
+  return (
+    <details className="border border-rule paper-recess" open>
+      <summary className="cursor-pointer px-5 py-3 font-mono text-[0.75rem] text-graphite hover:bg-ink/5">
+        ▾ case profile
+      </summary>
+      <div className="grid gap-4 px-5 py-4 border-t border-rule grid-cols-1 md:grid-cols-2">
+        <FieldRow label="Posture">
+          <select
+            className="border border-rule bg-paper px-2 py-1 text-meta w-full"
+            value={profile.posture}
+            onChange={(e) => update('posture', e.target.value as CaseProfile['posture'])}
+          >
+            {POSTURE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </FieldRow>
+        <FieldRow label="Principal subtype">
+          <select
+            className="border border-rule bg-paper px-2 py-1 text-meta w-full"
+            value={profile.principal_subtype}
+            onChange={(e) =>
+              update('principal_subtype', e.target.value as CaseProfile['principal_subtype'])
+            }
+          >
+            {SUBTYPE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </FieldRow>
+        <FieldRow label="Stage">
+          <select
+            className="border border-rule bg-paper px-2 py-1 text-meta w-full"
+            value={profile.stage}
+            onChange={(e) => update('stage', e.target.value as CaseProfile['stage'])}
+          >
+            {STAGE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </FieldRow>
+        <FieldRow label="Vehicle">
+          <select
+            className="border border-rule bg-paper px-2 py-1 text-meta w-full"
+            value={profile.vehicle}
+            onChange={(e) => update('vehicle', e.target.value as Vehicle)}
+          >
+            {VEHICLE_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </FieldRow>
+        <FieldRow label="Nationality path">
+          <select
+            className="border border-rule bg-paper px-2 py-1 text-meta w-full"
+            value={profile.nationality_path}
+            onChange={(e) =>
+              update('nationality_path', e.target.value as CaseProfile['nationality_path'])
+            }
+          >
+            {NATIONALITY_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </FieldRow>
+        <FieldRow label="Treaty country (ISO 3-letter)">
+          <input
+            className="border border-rule bg-paper px-2 py-1 text-meta w-full font-mono uppercase"
+            placeholder="TUR"
+            maxLength={3}
+            value={profile.treaty_country}
+            onChange={(e) => update('treaty_country', e.target.value.toUpperCase())}
+          />
+        </FieldRow>
+        {isConsular && (
+          <FieldRow label="Consular post">
+            <select
+              className="border border-rule bg-paper px-2 py-1 text-meta w-full"
+              value={profile.post ?? 'other'}
+              onChange={(e) => update('post', e.target.value as ConsularPost)}
+            >
+              {POST_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </FieldRow>
+        )}
+        <FieldRow label="Has dependents">
+          <div className="flex items-center gap-3 text-meta flex-wrap">
+            <label className="inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={profile.has_dependents}
+                onChange={(e) => {
+                  const has = e.target.checked;
+                  if (has) {
+                    onChange({
+                      ...profile,
+                      has_dependents: true,
+                      dependent_breakdown: profile.dependent_breakdown ?? {
+                        spouse: false,
+                        children_under_21: 0,
+                      },
+                    });
+                  } else {
+                    onChange({
+                      ...profile,
+                      has_dependents: false,
+                      dependent_breakdown: null,
+                    });
+                  }
+                }}
+              />
+              <span>yes</span>
+            </label>
+            {profile.has_dependents && (
+              <>
+                <label className="inline-flex items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={profile.dependent_breakdown?.spouse ?? false}
+                    onChange={(e) =>
+                      onChange({
+                        ...profile,
+                        dependent_breakdown: {
+                          spouse: e.target.checked,
+                          children_under_21:
+                            profile.dependent_breakdown?.children_under_21 ?? 0,
+                        },
+                      })
+                    }
+                  />
+                  <span>spouse</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5">
+                  <span>children &lt;21:</span>
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    className="border border-rule bg-paper px-2 py-0.5 w-16 text-meta tabular-nums"
+                    value={profile.dependent_breakdown?.children_under_21 ?? 0}
+                    onChange={(e) =>
+                      onChange({
+                        ...profile,
+                        dependent_breakdown: {
+                          spouse: profile.dependent_breakdown?.spouse ?? false,
+                          children_under_21: Math.max(0, parseInt(e.target.value, 10) || 0),
+                        },
+                      })
+                    }
+                  />
+                </label>
+              </>
+            )}
+          </div>
+        </FieldRow>
+        <div className="md:col-span-2">
+          <FieldRow label="Funds origins (one or more)">
+            <div className="flex flex-wrap gap-1.5">
+              {ORIGIN_OPTIONS.map((o) => {
+                const active = profile.funds_origins.includes(o.value);
+                return (
+                  <button
+                    key={o.value}
+                    type="button"
+                    onClick={() => toggleOrigin(o.value)}
+                    className={
+                      'border px-2 py-0.5 text-meta transition-colors ' +
+                      (active
+                        ? 'border-ink bg-ink text-paper'
+                        : 'border-rule text-graphite hover:bg-ink/5')
+                    }
+                  >
+                    {o.label}
+                  </button>
+                );
+              })}
+            </div>
+          </FieldRow>
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function SlotRow({
+  resolution,
+  matterRoot,
+  onOpenMatter,
+  muted,
+}: {
+  resolution: SlotResolution;
+  matterRoot: string | null;
+  onOpenMatter: () => void;
+  muted?: boolean;
+}) {
+  const slot = PROOF_SLOTS_BY_ID[resolution.slot_id];
+  const filled = resolution.status === 'filled';
+  const chip = severityChip(resolution.effective_severity);
+  return (
+    <li
+      className={
+        'paper-recess border border-rule px-4 py-2 ' +
+        severityClasses(resolution.effective_severity, resolution.status)
+      }
+    >
+      <div className="flex items-baseline gap-3">
+        <span className="font-mono text-meta tabular-nums w-5 text-graphite-soft">
+          {filled ? '✓' : '·'}
+        </span>
+        <div className="flex-1 min-w-0">
+          <div className={'font-mono text-meta ' + (muted ? 'text-graphite' : 'text-ink')}>
+            {resolution.slot_id}
+          </div>
+          {slot?.description && (
+            <div className="text-meta text-graphite mt-0.5 leading-snug">{slot.description}</div>
+          )}
+          {resolution.filled_by.length > 0 && (
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {resolution.filled_by.map((ex, i) => (
+                <button
+                  key={`${ex.pdf_path}:${i}`}
+                  type="button"
+                  onClick={onOpenMatter}
+                  title={matterRoot ? `${matterRoot}/${ex.pdf_path}` : ex.pdf_path}
+                  className="border border-rule px-2 py-0.5 text-meta font-mono text-graphite hover:bg-ink/5 truncate max-w-[24rem]"
+                >
+                  {trimFilename(ex.pdf_path)} · APS {ex.effective_aps}
+                </button>
+              ))}
+            </div>
+          )}
+          {!filled && slot?.requires_one_of && slot.requires_one_of.length > 0 && (
+            <div className="mt-1 text-meta text-graphite-soft font-mono">
+              needs:{' '}
+              {slot.requires_one_of
+                .slice(0, 3)
+                .map((id) => DOC_TYPES_BY_ID[id]?.name ?? id)
+                .join(' · ')}
+              {slot.requires_one_of.length > 3 ? ` · +${slot.requires_one_of.length - 3}` : ''}
+            </div>
+          )}
+        </div>
+        <span className="text-meta font-mono whitespace-nowrap" style={{ color: chip.color }}>
+          {chip.label}
+        </span>
+      </div>
+    </li>
+  );
+}
+
+function AuditPane({
+  typedMemory,
+  caseFacts,
+  matterId,
+  matterRoot,
+  onOpenMatter,
+}: {
+  typedMemory: TypedMemory;
+  caseFacts: { case_type: CaseType; facts: Record<string, unknown> } | undefined;
+  matterId: string | undefined;
+  matterRoot: string | null;
+  onOpenMatter: () => void;
+}) {
+  const initialProfile = useMemo<CaseProfile | null>(() => {
+    if (caseFacts?.case_type !== 'E2') return null;
+    const stored = loadStoredProfile(matterId);
+    if (stored) return stored;
+    const detected = ((caseFacts.facts as { e2_subtype?: unknown }).e2_subtype ?? null) as
+      | DetectedSubtypeShape
+      | null;
+    return deriveCaseProfile(detected);
+  }, [caseFacts, matterId]);
+
+  const [profile, setProfile] = useState<CaseProfile | null>(initialProfile);
+
+  useEffect(() => {
+    if (!profile || !matterId || typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(`e2-profile:${matterId}`, JSON.stringify(profile));
+    } catch {
+      // localStorage unavailable / quota — silent
+    }
+  }, [profile, matterId]);
+
+  const report = useMemo(() => {
+    if (!profile) return null;
+    const entries = buildEntriesFromMemory(typedMemory);
+    const conflicts = readConflictRegister(caseFacts?.facts);
+    return auditFromMemory({ case_profile: profile, entries, conflicts });
+  }, [profile, typedMemory, caseFacts]);
+
+  if (caseFacts?.case_type !== 'E2' || !profile || !report) {
+    return (
+      <div className="px-9 py-7 fade-in">
+        <p className="text-graphite">
+          Audit is currently E-2 only. Open an E-2 matter to see the proof-slot checklist.
+        </p>
+      </div>
+    );
+  }
+
+  const required = report.resolutions.filter((r) => r.requirement === 'required');
+  const recommended = report.resolutions.filter((r) => r.requirement === 'recommended');
+  const filledRequired = required.filter((r) => r.status === 'filled').length;
+
+  // Group required slots by FAM element (first match wins so each slot
+  // surfaces in exactly one section).
+  const groupedRequired: Record<string, SlotResolution[]> = {};
+  const seen = new Set<string>();
+  for (const group of FAM_GROUPS) {
+    groupedRequired[group.fam] = [];
+    for (const r of required) {
+      if (seen.has(r.slot_id)) continue;
+      const slot = PROOF_SLOTS_BY_ID[r.slot_id];
+      if (!slot) continue;
+      if (slot.fam_elements.includes(group.fam as never)) {
+        groupedRequired[group.fam].push(r);
+        seen.add(r.slot_id);
+      }
+    }
+  }
+  const ungrouped = required.filter((r) => !seen.has(r.slot_id));
+
+  return (
+    <div className="px-9 py-7 grid gap-6 fade-in">
+      <header>
+        <div className="smcp text-graphite-soft mb-1">missingness audit</div>
+        <h2 className="text-section leading-snug">
+          {filledRequired} of {required.length} required slots filled
+        </h2>
+        <p className="text-meta text-graphite mt-1 flex items-center gap-3 flex-wrap">
+          <span>{report.fatal_gaps.length} fatal</span>
+          <span>·</span>
+          <span>{report.recommended_gaps.length} recommended missing</span>
+          <span>·</span>
+          <span
+            className="font-mono"
+            style={{ color: severityChip(report.max_severity).color }}
+          >
+            max severity {report.max_severity}/5
+          </span>
+        </p>
+      </header>
+
+      <CaseProfileEditor profile={profile} onChange={setProfile} />
+
+      {report.conflicts.length > 0 && (
+        <section>
+          <h3 className="text-body font-medium mb-2">Cross-document conflicts</h3>
+          <ul className="grid gap-2">
+            {report.conflicts.map((c) => (
+              <li
+                key={c.id}
+                className={
+                  'paper-recess border border-rule px-4 py-2 ' +
+                  severityClasses(c.severity, 'inadequate')
+                }
+              >
+                <div className="text-body text-ink">{c.description}</div>
+                <div className="text-meta text-graphite-soft font-mono mt-1">
+                  <span style={{ color: severityChip(c.severity).color }}>
+                    {severityChip(c.severity).label}
+                  </span>
+                  {c.suggested_resolution ? ` · ${c.suggested_resolution}` : ''}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {FAM_GROUPS.map((group) => {
+        const slots = groupedRequired[group.fam] ?? [];
+        if (slots.length === 0) return null;
+        const filled = slots.filter((s) => s.status === 'filled').length;
+        return (
+          <section key={group.fam}>
+            <h3 className="text-body font-medium mb-2 flex items-baseline justify-between">
+              <span>{group.label}</span>
+              <span className="text-meta text-graphite-soft font-mono tabular-nums">
+                {filled}/{slots.length}
+              </span>
+            </h3>
+            <ul className="grid gap-2">
+              {slots.map((r) => (
+                <SlotRow
+                  key={r.slot_id}
+                  resolution={r}
+                  matterRoot={matterRoot}
+                  onOpenMatter={onOpenMatter}
+                />
+              ))}
+            </ul>
+          </section>
+        );
+      })}
+
+      {ungrouped.length > 0 && (
+        <section>
+          <h3 className="text-body font-medium mb-2 flex items-baseline justify-between">
+            <span>Forms / Dependents / Other</span>
+            <span className="text-meta text-graphite-soft font-mono tabular-nums">
+              {ungrouped.filter((s) => s.status === 'filled').length}/{ungrouped.length}
+            </span>
+          </h3>
+          <ul className="grid gap-2">
+            {ungrouped.map((r) => (
+              <SlotRow
+                key={r.slot_id}
+                resolution={r}
+                matterRoot={matterRoot}
+                onOpenMatter={onOpenMatter}
+              />
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {recommended.length > 0 && (
+        <section>
+          <h3 className="text-body font-medium mb-2">Recommended (not strictly required)</h3>
+          <ul className="grid gap-2">
+            {recommended.map((r) => (
+              <SlotRow
+                key={r.slot_id}
+                resolution={r}
+                matterRoot={matterRoot}
+                onOpenMatter={onOpenMatter}
+                muted
+              />
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
+/* Binder pane — tab + page-cap aware exhibit emitter                      */
+/* ---------------------------------------------------------------------- */
+
+function BinderPane({
+  typedMemory,
+  caseFacts,
+  matterId,
+  matterRoot,
+  onOpenMatter,
+}: {
+  typedMemory: TypedMemory;
+  caseFacts: { case_type: CaseType; facts: Record<string, unknown> } | undefined;
+  matterId: string | undefined;
+  matterRoot: string | null;
+  onOpenMatter: () => void;
+}) {
+  const profile = useMemo<CaseProfile | null>(() => {
+    if (caseFacts?.case_type !== 'E2') return null;
+    const stored = loadStoredProfile(matterId);
+    if (stored) return stored;
+    const detected = ((caseFacts.facts as { e2_subtype?: unknown }).e2_subtype ?? null) as
+      | DetectedSubtypeShape
+      | null;
+    return deriveCaseProfile(detected);
+  }, [caseFacts, matterId]);
+
+  const manifest = useMemo<BinderManifest | null>(() => {
+    if (!profile) return null;
+    let binderProfile;
+    try {
+      binderProfile = selectBinderProfile(profile);
+    } catch {
+      // selectBinderProfile throws when consular posture without post; bail.
+      return null;
+    }
+    const filled_exhibits = buildEntriesFromMemory(typedMemory)
+      .map((entry) => {
+        const docTypeId = resolveDocTypeId(entry);
+        if (!docTypeId) return null;
+        const dt = DOC_TYPES_BY_ID[docTypeId];
+        return {
+          doc_type_id: docTypeId,
+          pdf_path: entry.filename,
+          pages: entry.pageCount ?? 1,
+          effective_aps: (dt?.typical_aps ?? 3) as 1 | 2 | 3 | 4 | 5,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+    return buildBinderManifest({
+      case_profile: profile,
+      filled_exhibits,
+      binder_profile: binderProfile,
+    });
+  }, [profile, typedMemory]);
+
+  if (caseFacts?.case_type !== 'E2' || !profile || !manifest) {
+    return (
+      <div className="px-9 py-7 fade-in">
+        <p className="text-graphite">
+          Binder is currently E-2 only. Open an E-2 matter; consular postures need a post selected
+          in the Audit tab&apos;s case profile.
+        </p>
+      </div>
+    );
+  }
+
+  const cap = manifest.binder_profile.page_cap;
+  const overCap = cap !== null && manifest.total_pages_capped > cap;
+  const nearCap = cap !== null && !overCap && manifest.total_pages_capped >= cap * 0.9;
+
+  return (
+    <div className="px-9 py-7 grid gap-6 fade-in">
+      <header>
+        <div className="smcp text-graphite-soft mb-1">binder manifest</div>
+        <h2 className="text-section leading-snug">{manifest.binder_profile.profile_id}</h2>
+        <p className="text-meta text-graphite mt-1 flex items-center gap-3 flex-wrap">
+          <span>
+            {manifest.total_pages_filed} pages filed · {manifest.total_pages_capped} count toward
+            cap{cap !== null ? ` (cap ${cap})` : ''}
+          </span>
+          {manifest.binder_profile.submission?.address && (
+            <>
+              <span>·</span>
+              <span className="font-mono">{manifest.binder_profile.submission.address}</span>
+            </>
+          )}
+        </p>
+        {overCap && (
+          <div className="mt-2 border border-[#B91C1C] bg-[#B91C1C]/[0.05] text-[#B91C1C] px-3 py-2 text-meta">
+            PAGE CAP EXCEEDED — {manifest.total_pages_capped} / {cap}
+          </div>
+        )}
+        {nearCap && !overCap && (
+          <div className="mt-2 border border-[#C2410C] bg-[#C2410C]/[0.05] text-[#C2410C] px-3 py-2 text-meta">
+            Approaching page cap — {manifest.total_pages_capped} / {cap}
+          </div>
+        )}
+        {manifest.warnings.length > 0 && (
+          <ul className="mt-2 grid gap-1">
+            {manifest.warnings.map((w, i) => (
+              <li key={i} className="text-meta text-graphite font-mono">
+                ⚠ {w}
+              </li>
+            ))}
+          </ul>
+        )}
+      </header>
+
+      <div className="grid gap-4">
+        {manifest.ordered_tabs.map((tab) => {
+          const excluded = manifest.binder_profile.excluded_from_page_cap.includes(tab.semantic);
+          return (
+            <section key={`${tab.physical_label}-${tab.semantic}`} className="border border-rule paper-recess">
+              <header className="px-5 py-2 border-b border-rule flex items-baseline justify-between">
+                <div>
+                  <span className="font-mono text-meta text-graphite-soft">{tab.physical_label}</span>
+                  <span className="ml-3 text-body text-ink">{tab.title}</span>
+                </div>
+                <span className="font-mono text-meta text-graphite-soft tabular-nums">
+                  {tab.page_count_in_section} pages{excluded ? ' · excluded from cap' : ''}
+                </span>
+              </header>
+              {tab.exhibits.length === 0 ? (
+                <div className="px-5 py-3 text-meta text-graphite-soft italic">No exhibits in this section yet.</div>
+              ) : (
+                <ul className="grid divide-y divide-rule">
+                  {tab.exhibits.map((ex) => (
+                    <li key={ex.exhibit_id} className="px-5 py-2 flex items-baseline gap-3">
+                      <span className="font-mono text-meta text-graphite-soft tabular-nums w-12">
+                        {ex.exhibit_id}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={onOpenMatter}
+                        title={matterRoot ? `${matterRoot}/${ex.pdf_path}` : ex.pdf_path}
+                        className="flex-1 text-left font-mono text-meta text-ink hover:bg-ink/5 truncate"
+                      >
+                        {trimFilename(ex.pdf_path)}
+                      </button>
+                      <span className="font-mono text-meta text-graphite-soft tabular-nums whitespace-nowrap">
+                        {DOC_TYPES_BY_ID[ex.doc_type_id]?.name ?? ex.doc_type_id} · {ex.pages}p · APS {ex.effective_aps}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          );
+        })}
+      </div>
     </div>
   );
 }

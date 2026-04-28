@@ -44,6 +44,39 @@ export interface IngestSuccess {
   reviewError?: { code: string; message: string };
   source_pdfs?: string[];
   scanned_pdfs?: string[];
+  /**
+   * Deterministic cross-document gate results from typed-aggregate. Each
+   * field is an array of audit rows the gate produced. Surfaced to the
+   * client so the audit pane can fold them into the unified conflict
+   * register without re-running gate logic. Optional because matter-folder
+   * uploads always include it but the legacy single-PDF path does not.
+   */
+  aggregate_audit?: AggregateAuditPayload;
+}
+
+/**
+ * Loose payload shape for the deterministic aggregate-gate forward. Field
+ * types are kept as `unknown[]` here so the client can read fields it
+ * needs without dragging the whole typed-aggregate type graph into the
+ * UI bundle. Server-side construction is type-safe at the call site.
+ */
+export interface AggregateAuditPayload {
+  defensive_paragraphs_required?: unknown;
+  marginality_evidence_present?: unknown;
+  fx_gate_results?: unknown[];
+  passport_validity_results?: unknown[];
+  i94_status_results?: unknown[];
+  translation_gate_results?: unknown[];
+  salary_benchmark_results?: unknown[];
+  cv_title_drift_results?: unknown[];
+  personal_reference_results?: unknown[];
+  credential_verifiability_results?: unknown[];
+  tax_balance_sheet_results?: unknown[];
+  pl_tax_net_income_results?: unknown[];
+  real_estate_buyer_mismatch_results?: unknown[];
+  incentive_recipient_mismatch_results?: unknown[];
+  substantiality_recon_results?: unknown[];
+  entity_coherence_results?: unknown[];
 }
 
 export interface IngestFailure {

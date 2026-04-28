@@ -62,21 +62,13 @@ export function OperationsExpenditureTable({ items }: Props) {
 
   return (
     <div className="overflow-x-auto">
-      <table className="w-full border-collapse text-[0.86rem]">
+      <table className="w-full border-collapse">
         <thead>
-          <tr className="border-b border-ink-2">
-            <th className="pb-2 text-left smcp text-[0.62rem] text-graphite tracking-[0.2em] font-medium">
-              Heading bucket
-            </th>
-            <th className="pb-2 text-right smcp text-[0.62rem] text-graphite tracking-[0.2em] font-medium w-24">
-              Lines
-            </th>
-            <th className="pb-2 text-right smcp text-[0.62rem] text-graphite tracking-[0.2em] font-medium w-40">
-              Total (USD)
-            </th>
-            <th className="pb-2 text-right smcp text-[0.62rem] text-graphite tracking-[0.2em] font-medium w-24">
-              Share
-            </th>
+          <tr className="border-b border-ink-2 text-left">
+            <th className="pb-2.5 smcp text-graphite font-medium">Heading bucket</th>
+            <th className="pb-2.5 smcp text-graphite font-medium text-right w-24">Lines</th>
+            <th className="pb-2.5 smcp text-graphite font-medium text-right w-40">Total (USD)</th>
+            <th className="pb-2.5 smcp text-graphite font-medium text-right w-24">Share</th>
           </tr>
         </thead>
         <tbody>
@@ -84,18 +76,18 @@ export function OperationsExpenditureTable({ items }: Props) {
             <tr
               key={b.label}
               className={
-                'border-b border-rule ' +
+                'border-b border-rule last:border-b-0 ' +
                 (b.lines === 0 ? 'text-graphite-soft' : 'text-ink')
               }
             >
-              <td className="py-2.5 font-display text-[0.95rem]">{b.label}</td>
-              <td className="py-2.5 text-right font-mono tabular-nums text-[0.82rem]">
+              <td className="py-3 text-body">{b.label}</td>
+              <td className="py-3 text-right font-mono tabular-nums text-body">
                 {b.lines === 0 ? '—' : b.lines}
               </td>
-              <td className="py-2.5 text-right font-mono tabular-nums text-[0.92rem]">
+              <td className="py-3 text-right font-mono tabular-nums text-body">
                 {b.lines === 0 ? '—' : fmtUSD(b.total)}
               </td>
-              <td className="py-2.5 text-right font-mono tabular-nums text-[0.78rem] text-graphite">
+              <td className="py-3 text-right font-mono tabular-nums text-meta text-graphite">
                 {b.lines === 0 || grand === 0
                   ? '—'
                   : `${((b.total / grand) * 100).toFixed(1)}%`}
@@ -105,21 +97,19 @@ export function OperationsExpenditureTable({ items }: Props) {
         </tbody>
         <tfoot>
           <tr className="border-t border-ink-2">
-            <td className="pt-3 smcp text-[0.66rem] text-graphite tracking-[0.2em]">
-              Σ operating outlay
-            </td>
+            <td className="pt-3 smcp text-graphite">Σ operating outlay</td>
             <td />
-            <td className="pt-3 text-right font-mono text-[0.95rem] tabular-nums text-ink">
+            <td className="pt-3 text-right font-mono text-title font-semibold tabular-nums text-ink">
               {fmtUSD(grand)}
             </td>
-            <td className="pt-3 text-right font-mono text-[0.78rem] text-graphite">100%</td>
+            <td className="pt-3 text-right font-mono text-meta text-graphite">100%</td>
           </tr>
         </tfoot>
       </table>
-      <p className="mt-3 text-[0.72rem] text-graphite italic font-display max-w-[68ch]">
+      <p className="mt-4 text-meta text-graphite-soft max-w-[68ch] leading-relaxed">
         Buckets mirror the §VI cover-letter headings. Marginality and real-and-operating
-        arguments cite this table; anything labelled “Other operating outlay” should be
-        re-categorised before filing.
+        arguments cite this table; anything labelled &ldquo;Other operating outlay&rdquo; should
+        be re-categorised before filing.
       </p>
     </div>
   );

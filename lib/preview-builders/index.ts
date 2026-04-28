@@ -19,6 +19,7 @@ import { buildDeclarationPreview } from './declaration';
 import { buildExhibitListPreview } from './exhibit-list';
 import { buildFormsPreview } from './forms';
 import { buildNoidPreview } from './noid';
+import { buildBusinessPlanPreview } from './business-plan';
 
 export interface BuildPreviewInputs {
   matterId: string;
@@ -87,6 +88,15 @@ export async function buildPreview(
         ...baseShape,
         ...buildExhibitListPreview(inputs.memory),
       };
+    case 'business_plan':
+      return {
+        ...baseShape,
+        ...buildBusinessPlanPreview(inputs.caseFacts),
+      };
+    default: {
+      const _exhaustive: never = inputs.generator;
+      throw new Error(`Unhandled generator: ${String(_exhaustive)}`);
+    }
   }
 }
 
@@ -96,4 +106,5 @@ export {
   buildExhibitListPreview,
   buildFormsPreview,
   buildNoidPreview,
+  buildBusinessPlanPreview,
 };

@@ -44,7 +44,8 @@ export type PreviewGenerator =
   | 'declaration_beneficiary'
   | 'declaration_spouse'
   | 'declaration_enterprise_rep'
-  | 'exhibit_list';
+  | 'exhibit_list'
+  | 'business_plan';
 
 export interface PreviewFactRow {
   field_path: string;

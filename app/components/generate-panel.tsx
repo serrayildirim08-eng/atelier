@@ -20,6 +20,40 @@ import {
 } from './pre-generation-approval';
 import type { PreviewGenerator } from '@/lib/preview-store';
 
+async function downloadAsDocx(content: string, filename: string): Promise<void> {
+  const res = await fetch('/api/export', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content, filename }),
+  });
+  if (!res.ok) {
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    alert(`Export failed: ${data.error ?? res.statusText}`);
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function downloadAsMarkdown(content: string, filename: string): void {
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 interface GenerateButtonGroupItem {
   generator: PreviewGenerator;
   label: string;
@@ -36,6 +70,11 @@ const COVER_AND_LIST: GenerateButtonGroupItem[] = [
     generator: 'exhibit_list',
     label: 'Exhibit list',
     description: 'Mechanical · A–L tab convention · $0',
+  },
+  {
+    generator: 'business_plan',
+    label: 'Business plan (E-2)',
+    description: '5-year P&L · Sonnet 4.6 + adaptive thinking · ~16K tokens · ~$0.30',
   },
 ];
 
@@ -102,57 +141,67 @@ export function GeneratePanel({ matterId }: { matterId: string }) {
   }
 
   return (
-    <section className="border border-rule paper-recess">
-      <header className="px-7 py-3 flex items-baseline justify-between border-b border-rule-strong">
-        <div className="flex items-baseline gap-3">
-          <span className="smcp text-[0.66rem] text-rubric tracking-[0.22em]">
-            ⁂  generate (with attorney approval)
-          </span>
-          <span className="display-italic text-[0.95rem] text-graphite">
-            every output ships only after sign-off
-          </span>
-        </div>
-      </header>
+    <div className="grid gap-6">
+      <Group title="Cover letter and exhibit index" items={COVER_AND_LIST} onPick={setOpenGenerator} />
+      <Group title="Declarations" items={DECLARATIONS} onPick={setOpenGenerator} />
+      <Group title="USCIS / DOS forms" items={FORMS} onPick={setOpenGenerator} />
+      <Group title="Notices of Intent to Depart" items={NOIDS} onPick={setOpenGenerator} />
 
-      <div className="px-7 py-5 grid gap-5">
-        <Group title="Cover letter and exhibit index" items={COVER_AND_LIST} onPick={setOpenGenerator} />
-        <Group title="Declarations" items={DECLARATIONS} onPick={setOpenGenerator} />
-        <Group title="USCIS / DOS forms" items={FORMS} onPick={setOpenGenerator} />
-        <Group title="Notices of Intent to Depart" items={NOIDS} onPick={setOpenGenerator} />
-
-        {outputs.length > 0 && (
-          <div>
-            <div className="smcp text-[0.65rem] text-graphite mb-3">¶ recent outputs</div>
-            <ul className="space-y-2 font-mono text-[0.72rem]">
-              {outputs.map((o, i) => (
-                <li key={`${o.generator}-${i}`} className="border border-rule px-3 py-2">
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="text-ink-2">{o.generator.replace(/_/g, ' ')}</span>
-                    <span className="text-graphite-soft text-[0.65rem]">
-                      {new Date(o.approved_at).toLocaleString()}
-                    </span>
+      {outputs.length > 0 && (
+        <article className="border border-rule bg-paper">
+          <header className="flex items-baseline justify-between px-5 py-3 border-b border-rule paper-recess">
+            <span className="smcp text-graphite">Recent outputs</span>
+            <span className="font-mono text-label text-graphite-soft tabular-nums">{outputs.length}</span>
+          </header>
+          <ul className="px-5 py-5 grid gap-3">
+            {outputs.map((o, i) => (
+              <li key={`${o.generator}-${i}`} className="border border-rule px-4 py-3">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-body text-ink">{o.generator.replace(/_/g, ' ')}</span>
+                  <span className="font-mono text-meta text-graphite-soft">
+                    {new Date(o.approved_at).toLocaleString()}
+                  </span>
+                </div>
+                {o.output_path && (
+                  <div className="font-mono text-meta text-graphite mt-1 break-all">
+                    → {o.output_path}
                   </div>
-                  {o.output_path && (
-                    <div className="text-graphite mt-1 break-all">
-                      → {o.output_path}
+                )}
+                {o.output_inline && (
+                  <>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        onClick={() =>
+                          downloadAsDocx(o.output_inline ?? '', `${o.generator}.docx`)
+                        }
+                        className="px-3 py-1.5 border border-ink smcp text-meta hover:bg-ink hover:text-paper transition-colors"
+                      >
+                        download .docx
+                      </button>
+                      <button
+                        onClick={() =>
+                          downloadAsMarkdown(o.output_inline ?? '', `${o.generator}.md`)
+                        }
+                        className="px-3 py-1.5 border border-rule smcp text-meta text-graphite hover:border-ink hover:text-ink transition-colors"
+                      >
+                        download .md
+                      </button>
                     </div>
-                  )}
-                  {o.output_inline && (
-                    <details className="mt-2">
-                      <summary className="cursor-pointer text-graphite">
+                    <details className="mt-3">
+                      <summary className="cursor-pointer text-meta text-graphite hover:text-ink">
                         ▸ view inline ({o.output_inline.length.toLocaleString()} chars)
                       </summary>
-                      <pre className="mt-2 whitespace-pre-wrap text-[0.7rem] bg-ink-2/5 p-3 max-h-96 overflow-y-auto">
+                      <pre className="mt-2 whitespace-pre-wrap text-meta bg-paper-deep/30 p-3 max-h-96 overflow-y-auto leading-relaxed">
                         {o.output_inline}
                       </pre>
                     </details>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </div>
+                  </>
+                )}
+              </li>
+            ))}
+          </ul>
+        </article>
+      )}
 
       <PreGenerationApprovalModal
         open={openGenerator !== null}
@@ -163,7 +212,7 @@ export function GeneratePanel({ matterId }: { matterId: string }) {
           if (openGenerator) onApproved(openGenerator, result);
         }}
       />
-    </section>
+    </div>
   );
 }
 
@@ -173,22 +222,33 @@ function Group(props: {
   onPick: (g: PreviewGenerator) => void;
 }) {
   return (
-    <div>
-      <div className="smcp text-[0.65rem] text-graphite mb-3">¶ {props.title}</div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+    <article className="border border-rule bg-paper">
+      <header className="flex items-baseline justify-between px-5 py-3 border-b border-rule paper-recess">
+        <span className="smcp text-graphite">{props.title}</span>
+        <span className="font-mono text-label text-graphite-soft tabular-nums">{props.items.length}</span>
+      </header>
+      <div className="px-5 py-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {props.items.map((item) => (
           <button
             key={item.generator}
             onClick={() => props.onPick(item.generator)}
-            className="text-left border border-rule px-4 py-3 hover:border-ink-2 transition-colors"
+            className="text-left border border-rule bg-paper px-4 py-4 hover:border-ink transition-colors group"
           >
-            <div className="display-italic text-[0.95rem] text-ink-2">{item.label}</div>
-            <div className="font-mono text-[0.65rem] text-graphite-soft mt-1">
+            <div className="text-title font-semibold text-ink leading-tight">{item.label}</div>
+            <div className="text-meta text-graphite-soft mt-2 leading-snug">
               {item.description}
+            </div>
+            <div className="mt-3 flex items-baseline justify-between">
+              <span className="smcp text-graphite-soft group-hover:text-ink transition-colors">
+                approve & generate
+              </span>
+              <span className="font-mono text-meta text-graphite-soft group-hover:text-ink transition-colors">
+                →
+              </span>
             </div>
           </button>
         ))}
       </div>
-    </div>
+    </article>
   );
 }

@@ -85,7 +85,7 @@ function createWindow(targetUrl) {
     minHeight: 720,
     backgroundColor: '#F1E9D6',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    title: 'AKALAN Atelier',
+    title: 'atelier',
     icon: APP_ICON_PATH,
     show: false,
     webPreferences: {
