@@ -51,10 +51,14 @@ interface PendingEdit {
   new_value: string;
 }
 
-const SEVERITY_COLOR: Record<number, string> = {
-  3: 'text-amber-700 bg-amber-50 border-amber-200',
-  4: 'text-rose-700 bg-rose-50 border-rose-200',
-  5: 'text-rose-900 bg-rose-100 border-rose-400 font-bold',
+// Severity carried by weight + glyph + position, not chromatic accent —
+// strict monochrome doctrine.
+const SEVERITY_RANK: Record<number, { glyph: string; weight: string }> = {
+  1: { glyph: '·', weight: 'font-normal text-graphite' },
+  2: { glyph: '·', weight: 'font-normal text-graphite' },
+  3: { glyph: '‡', weight: 'font-medium text-ink-2' },
+  4: { glyph: '‡', weight: 'font-semibold text-ink' },
+  5: { glyph: '‡', weight: 'font-bold text-ink' },
 };
 
 export function PreGenerationApprovalModal(props: ApprovalModalProps) {
@@ -68,9 +72,13 @@ export function PreGenerationApprovalModal(props: ApprovalModalProps) {
 
   useEffect(() => {
     if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setPreview(null);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setEdits({});
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setError(null);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setInitials('');
 
     let cancelled = false;
@@ -150,11 +158,29 @@ export function PreGenerationApprovalModal(props: ApprovalModalProps) {
     }
   }
 
+  // Escape closes; clicking the backdrop also closes (unless submitting).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !submitting) onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, submitting, onClose]);
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="bg-paper max-w-4xl w-full max-h-[90vh] overflow-y-auto border border-graphite/30 shadow-xl">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={() => {
+        if (!submitting) onClose();
+      }}
+    >
+      <div
+        className="bg-paper max-w-4xl w-full max-h-[90vh] overflow-y-auto border border-graphite/30 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="px-9 py-7 border-b border-graphite/20">
           <div className="flex items-baseline justify-between mb-2">
             <div>
@@ -165,10 +191,11 @@ export function PreGenerationApprovalModal(props: ApprovalModalProps) {
             </div>
             <button
               onClick={onClose}
-              className="font-mono text-[0.7rem] text-graphite hover:text-ink-2"
+              className="font-mono text-[0.85rem] text-ink-2 px-3 py-1 border border-graphite/40 hover:bg-ink hover:text-paper transition-colors disabled:opacity-50"
               disabled={submitting}
+              aria-label="Close approval modal"
             >
-              [×] close
+              ✕ close (Esc)
             </button>
           </div>
           <div className="font-mono text-[0.7rem] text-graphite">
@@ -378,17 +405,20 @@ function FactRow(props: {
 function ConflictList(props: { items: PreviewConflictEntry[] }) {
   return (
     <ul className="space-y-2">
-      {props.items.map((c, i) => (
-        <li
-          key={`${c.conflict_type}-${i}`}
-          className={`border px-3 py-2 ${SEVERITY_COLOR[c.severity] ?? 'border-graphite/30'}`}
-        >
-          <div className="font-mono text-[0.7rem] mb-1">
-            severity {c.severity} · {c.conflict_type}
-          </div>
-          <div className="font-display italic text-[0.85rem]">{c.description}</div>
-        </li>
-      ))}
+      {props.items.map((c, i) => {
+        const rank = SEVERITY_RANK[c.severity];
+        return (
+          <li
+            key={`${c.conflict_type}-${i}`}
+            className="border border-graphite/30 px-3 py-2"
+          >
+            <div className={`font-mono text-[0.7rem] mb-1 ${rank?.weight ?? ''}`}>
+              {rank?.glyph ?? '·'} severity {c.severity} · {c.conflict_type}
+            </div>
+            <div className="font-display italic text-[0.85rem]">{c.description}</div>
+          </li>
+        );
+      })}
     </ul>
   );
 }

@@ -452,20 +452,18 @@ export function LoadingProgress({ events, startedAt }: Props) {
           {Math.floor(percent)}%
         </div>
         <div className="text-right max-w-[26rem] pt-3">
-          <div className="smcp text-[0.66rem] text-graphite mb-3">
+          <div className="smcp text-graphite mb-3">
             Stage {state.currentStage + 1} of {STAGES.length}
           </div>
-          <div className="text-[20px] font-medium text-ink leading-snug">
+          <div className="text-title font-medium text-ink leading-snug">
             {state.currentLabel ??
               (state.matter
                 ? `Reading ${state.matter}…`
                 : 'Preparing the matter…')}
           </div>
           {state.totalPdfs > 0 && (
-            <div className="mt-2 font-mono text-[0.78rem] tabular-nums text-graphite tracking-[0.06em]">
-              <span className="text-ink-2 font-semibold">
-                {state.completedPdfs}
-              </span>
+            <div className="mt-2 font-mono text-meta tabular-nums text-graphite">
+              <span className="text-ink-2 font-semibold">{state.completedPdfs}</span>
               <span className="text-graphite-soft"> / </span>
               <span>{state.totalPdfs}</span>
               <span className="text-graphite-soft">
@@ -488,14 +486,14 @@ export function LoadingProgress({ events, startedAt }: Props) {
             style={{ width: `${percent}%` }}
           />
         </div>
-        <div className="flex items-baseline justify-between font-mono text-[0.7rem] uppercase tracking-[0.18em]">
+        <div className="flex items-baseline justify-between smcp">
           <span className="text-graphite">0%</span>
-          <span className="text-graphite-soft text-[0.7rem] tracking-[0.16em]">
+          <span className="text-graphite-soft normal-case tracking-normal font-mono text-meta">
             started {fmtElapsed(elapsedMs)} ago
             {state.totalPdfs > 0 && (
               <>
                 <span className="px-2 text-graphite-soft/60">·</span>
-                <span className="text-graphite tabular-nums normal-case tracking-[0.06em]">
+                <span className="text-graphite tabular-nums">
                   {state.completedPdfs}/{state.totalPdfs} pdf
                   {state.totalPdfs === 1 ? '' : 's'}
                 </span>
@@ -529,11 +527,11 @@ export function LoadingProgress({ events, startedAt }: Props) {
               className={`px-3.5 py-3 flex flex-col items-start justify-between gap-2 min-h-[4.4rem] ${cellTone}`}
             >
               <span
-                className={`font-mono text-[0.62rem] font-semibold uppercase tracking-[0.22em] tabular-nums ${counterTone}`}
+                className={`font-mono text-label tabular-nums tracking-[0.10em] uppercase font-semibold ${counterTone}`}
               >
                 {String(i + 1).padStart(2, '0')}
               </span>
-              <span className="font-mono text-[0.78rem] font-semibold uppercase tracking-[0.18em]">
+              <span className="font-mono text-meta uppercase tracking-[0.10em] font-semibold">
                 {stage.label}
               </span>
             </div>
@@ -543,11 +541,9 @@ export function LoadingProgress({ events, startedAt }: Props) {
 
       {/* ── BUILDING THE DASHBOARD : typewriter table ───────────────────── */}
       <section className="grid gap-4">
-        <header className="flex items-baseline justify-between border-b-[1.5px] border-ink pb-2">
-          <div className="font-mono text-[0.74rem] font-semibold uppercase tracking-[0.22em] text-ink">
-            Building the dashboard
-          </div>
-          <div className="font-mono text-[0.7rem] uppercase tracking-[0.2em] text-graphite tabular-nums">
+        <header className="flex items-baseline justify-between border-b border-ink pb-2">
+          <div className="smcp text-ink">Building the dashboard</div>
+          <div className="font-mono text-meta text-graphite tabular-nums">
             {state.filledRows} / {state.rows.length} rows
           </div>
         </header>
@@ -557,17 +553,14 @@ export function LoadingProgress({ events, startedAt }: Props) {
             const target = row.value;
             const typed = typedLengths[i] ?? 0;
             const isActive = !state.done && i === typingActiveRow;
-            // Two distinct active states: blocked (data not landed → cursor
-            // blinks on underscores) vs typing (data landed → cursor solid,
-            // characters reveal one tick at a time).
             const isTyping = isActive && target !== null;
             const safeTyped = target === null ? 0 : Math.min(typed, target.length);
             return (
               <div key={row.label} className="contents">
-                <dt className="border-b border-rule py-2.5 font-mono text-[0.66rem] font-semibold uppercase tracking-[0.22em] text-graphite">
+                <dt className="border-b border-rule py-2.5 smcp text-graphite">
                   {row.label}
                 </dt>
-                <dd className="border-b border-rule py-2.5 text-[18px] leading-snug font-semibold text-ink">
+                <dd className="border-b border-rule py-2.5 text-title leading-snug font-semibold text-ink">
                   {target === null ? (
                     <span
                       className="font-mono text-graphite-soft font-medium"
@@ -594,7 +587,7 @@ export function LoadingProgress({ events, startedAt }: Props) {
           })}
         </dl>
 
-        <footer className="font-mono text-[0.7rem] font-semibold uppercase tracking-[0.22em] text-graphite pt-1">
+        <footer className="smcp text-graphite pt-1">
           {state.done
             ? `Complete — ${state.filledRows} of ${state.rows.length} rows committed`
             : activeRowLabel

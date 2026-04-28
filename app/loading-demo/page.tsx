@@ -289,18 +289,12 @@ export default function LoadingDemoPage() {
 
   return (
     <div className="min-h-screen paper-grain px-10 py-12 max-w-[80rem] mx-auto">
-      <header className="flex items-baseline justify-between mb-10 border-b-[1.5px] border-ink pb-4">
-        <span
-          style={{ fontFamily: 'var(--font-display)' }}
-          className="italic text-[28px] font-semibold tracking-[-0.025em] text-ink leading-none"
-        >
-          atelier.
+      <header className="flex items-baseline justify-between mb-10 border-b border-ink pb-4">
+        <span className="text-display font-semibold tracking-[-0.025em] text-ink leading-none">
+          atelier
         </span>
-        <button
-          onClick={restart}
-          className="font-mono text-[0.7rem] font-semibold uppercase tracking-[0.22em] text-ink border border-ink px-3 py-1.5 hover:bg-ink hover:text-paper transition-colors"
-        >
-          ↻ replay
+        <button onClick={restart} className="smcp px-3 py-2 border border-ink hover:bg-ink hover:text-paper transition-colors">
+          replay
         </button>
       </header>
 

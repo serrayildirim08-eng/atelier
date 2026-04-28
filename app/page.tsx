@@ -302,6 +302,7 @@ export default function Page() {
   const router = useRouter();
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsElectron(typeof window !== 'undefined' && !!window.akalan?.pickFolder);
   }, []);
 
@@ -321,15 +322,21 @@ export default function Page() {
 
   // Persist matters across page refreshes. The binder rail (left) reads
   // results[] — without this, every Cmd+R wipes the user's case list.
-  // localStorage cap is ~5MB; ~14KB per matter (incl. draft) → 200+ cases
-  // before bumping into the limit, which is past any solo firm's volume.
+  // We can't use a useState lazy initializer (Next.js SSR runs without
+  // localStorage so server [] would mismatch the client's hydrated
+  // value), so we hydrate in a mount effect. The setState-in-effect
+  // rule is intentionally disabled here: the alternative is a hydration
+  // warning, and this is the canonical Next.js pattern for client-only
+  // persistence.
   useEffect(() => {
     try {
       const raw = localStorage.getItem('akalan:matters:v1');
       if (!raw) return;
       const stored = JSON.parse(raw) as IngestResult[];
       if (Array.isArray(stored) && stored.length > 0) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setResults(stored);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setSelectedIdx(0);
       }
     } catch {
@@ -338,9 +345,12 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    if (results.length === 0) return;
     try {
-      localStorage.setItem('akalan:matters:v1', JSON.stringify(results));
+      if (results.length === 0) {
+        localStorage.removeItem('akalan:matters:v1');
+      } else {
+        localStorage.setItem('akalan:matters:v1', JSON.stringify(results));
+      }
     } catch {
       /* localStorage full or disabled — non-fatal, just skip persistence */
     }
@@ -581,6 +591,16 @@ export default function Page() {
             setSelectedIdx(i);
             setTab('facts');
           }}
+          onDelete={(i) => {
+            const r = results[i];
+            const name = (r?.filename ?? '').replace(/\.pdf$/i, '') || 'this matter';
+            if (!window.confirm(`Delete ${name}? This cannot be undone.`)) return;
+            setResults((prev) => prev.filter((_, idx) => idx !== i));
+            setSelectedIdx((prev) => {
+              if (prev === i) return 0;
+              return prev > i ? prev - 1 : prev;
+            });
+          }}
           loading={loading}
           progress={progress}
           perPdfCount={perPdfCount}
@@ -694,6 +714,7 @@ function Binder({
   results,
   selectedIdx,
   onSelect,
+  onDelete,
   loading,
   progress,
   perPdfCount,
@@ -704,6 +725,7 @@ function Binder({
   results: IngestResult[];
   selectedIdx: number;
   onSelect: (i: number) => void;
+  onDelete: (i: number) => void;
   loading: boolean;
   progress: IngestProgress | null;
   perPdfCount: { done: number; total: number };
@@ -737,6 +759,7 @@ function Binder({
             result={r}
             selected={i === selectedIdx}
             onSelect={() => onSelect(i)}
+            onDelete={() => onDelete(i)}
           />
         ))}
       </div>
@@ -811,54 +834,65 @@ function BinderRow({
   result,
   selected,
   onSelect,
+  onDelete,
 }: {
   result: IngestResult;
   selected: boolean;
   onSelect: () => void;
+  onDelete: () => void;
 }) {
   const caseType = result.caseFacts?.case_type;
   const isError = !!result.error;
   const assessment = result.review?.overall_assessment;
 
   return (
-    <button
-      onClick={onSelect}
+    <div
       className={
-        'group w-full text-left px-3 py-2.5 transition-colors border-l-2 ' +
+        'group relative transition-colors border-l-2 ' +
         (selected
           ? 'border-rubric paper-recess'
           : 'border-transparent hover:bg-paper-2/60')
       }
     >
-      <div className="flex items-baseline justify-between gap-2 mb-0.5">
-        <div className="text-body leading-snug truncate">
-          {trimFilename(result.filename)}
+      <button onClick={onSelect} className="w-full text-left px-3 py-2.5 pr-9">
+        <div className="flex items-baseline justify-between gap-2 mb-0.5">
+          <div className="text-body leading-snug truncate">
+            {trimFilename(result.filename)}
+          </div>
+          {caseType && (
+            <span className="font-mono text-meta text-graphite shrink-0">
+              {CASE_GLYPH[caseType]}
+            </span>
+          )}
         </div>
-        {caseType && (
-          <span className="font-mono text-meta text-graphite shrink-0">
-            {CASE_GLYPH[caseType]}
-          </span>
-        )}
-      </div>
-      <div className="flex items-center gap-2 text-meta text-graphite-soft">
-        {isError ? (
-          <span className="smcp text-ink">error</span>
-        ) : caseType ? (
-          <>
-            <span className="font-mono tabular-nums">{result.pageCount}p</span>
-            <span className="text-rule-strong">·</span>
-            <span className="truncate">{CASE_LABEL[caseType]}</span>
-          </>
-        ) : (
-          <span className="smcp">pending</span>
-        )}
-      </div>
-      {assessment && (
-        <div className="mt-1.5">
-          <StatusPill assessment={assessment} size="compact" />
+        <div className="flex items-center gap-2 text-meta text-graphite-soft">
+          {isError ? (
+            <span className="smcp text-ink">error</span>
+          ) : caseType ? (
+            <>
+              <span className="font-mono tabular-nums">{result.pageCount}p</span>
+              <span className="text-rule-strong">·</span>
+              <span className="truncate">{CASE_LABEL[caseType]}</span>
+            </>
+          ) : (
+            <span className="smcp">pending</span>
+          )}
         </div>
-      )}
-    </button>
+        {assessment && (
+          <div className="mt-1.5">
+            <StatusPill assessment={assessment} size="compact" />
+          </div>
+        )}
+      </button>
+      <button
+        onClick={onDelete}
+        aria-label="Delete matter"
+        title="Delete matter"
+        className="absolute top-2 right-2 w-6 h-6 grid place-items-center text-graphite-soft hover:text-ink hover:bg-paper-deep/40 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity font-mono text-meta"
+      >
+        ×
+      </button>
+    </div>
   );
 }
 
@@ -1241,11 +1275,34 @@ function MemoryPane({
 function DocumentPreviewModal({ path, onClose }: { path: string; onClose: () => void }) {
   const filename = path.split('/').pop() ?? path;
   const fileSrc = `/api/file?path=${encodeURIComponent(path)}`;
+
+  // Escape key closes — iframe focus can swallow click events on the
+  // header X button, so the keyboard shortcut is the reliable fallback.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   return (
     <div
       onClick={onClose}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
     >
+      {/* Floating close button outside the iframe, always clickable. */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+        className="absolute top-4 right-4 z-10 bg-paper border border-graphite/40 px-4 py-2 font-mono text-[0.85rem] text-ink-2 hover:bg-ink hover:text-paper transition-colors shadow-lg"
+        aria-label="Close preview"
+      >
+        ✕  Close (Esc)
+      </button>
+
       <div
         onClick={(e) => e.stopPropagation()}
         className="bg-paper w-full max-w-5xl h-[90vh] flex flex-col border border-graphite/30 shadow-xl"
@@ -1258,10 +1315,13 @@ function DocumentPreviewModal({ path, onClose }: { path: string; onClose: () => 
             </div>
           </div>
           <button
-            onClick={onClose}
-            className="font-mono text-[0.7rem] text-graphite hover:text-ink-2"
+            onClick={(e) => {
+              e.stopPropagation();
+              onClose();
+            }}
+            className="font-mono text-[0.85rem] text-ink-2 px-3 py-1 border border-graphite/40 hover:bg-ink hover:text-paper transition-colors"
           >
-            [×] close
+            ✕ close
           </button>
         </div>
         <div className="flex-1 min-h-0">
@@ -2116,16 +2176,19 @@ function useIntakeForm(
     try {
       const raw = localStorage.getItem(key);
       if (!raw) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setState(EMPTY_INTAKE);
         return;
       }
       const parsed = JSON.parse(raw) as Partial<IntakeFields>;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setState({
         address: typeof parsed.address === 'string' ? parsed.address : '',
         phone: typeof parsed.phone === 'string' ? parsed.phone : '',
         email: typeof parsed.email === 'string' ? parsed.email : '',
       });
     } catch {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setState(EMPTY_INTAKE);
     }
   }, [matterId]);
@@ -2256,6 +2319,7 @@ function IntakeRow({
   const [draft, setDraft] = useState(value);
   // Sync draft when matter switches.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft(value);
   }, [value]);
   return (

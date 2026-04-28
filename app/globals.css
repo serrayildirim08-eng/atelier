@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  /* Concrete & jet — pure monochrome, no warm undertone, light surface */
+  /* Concrete & jet — pure monochrome, light surface */
   --color-paper: #FAFAFA;
   --color-paper-2: #F0F0F0;
   --color-paper-3: #E5E5E5;
@@ -12,11 +12,12 @@
   --color-graphite: #404040;
   --color-graphite-soft: #595959;
 
-  /* Marks — collapsed to monochrome; weight + tracking carry hierarchy */
-  --color-rubric: #0A0A0A;       /* brand/critical = jet, no chromatic accent */
+  /* Marks — strict monochrome. Hierarchy carried by weight, position,
+     spacing, and hairline rules. No chromatic accent. */
+  --color-rubric: #0A0A0A;
   --color-rubric-soft: #1F1F1F;
-  --color-ochre: #404040;        /* warning tier collapses to graphite */
-  --color-verdant: #404040;      /* OK tier collapses to graphite */
+  --color-ochre: #404040;
+  --color-verdant: #404040;
   --color-seal: #1F1F1F;
 
   /* Hairlines */
@@ -27,12 +28,24 @@
   --font-display: -apple-system, "Helvetica Neue", "Inter", system-ui, sans-serif;
   --font-body: -apple-system, "Helvetica Neue", "Inter", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Berkeley Mono", Menlo, monospace;
+
+  /* Type scale — six tokens, replaces 30+ arbitrary sizes.
+     Body up from 12.5px to 15px. Labels up from 9.9px to 11.5px with
+     half the tracking. Reading first, decoration second. */
+  --text-display: 2.4rem;       /* 38.4px — page heroes, sparingly */
+  --text-title:   1.05rem;      /* 16.8px — section titles */
+  --text-lede:    1rem;         /* 16px   — italic ledes, intro paras */
+  --text-body:    0.9375rem;    /* 15px   — reading copy (DEFAULT) */
+  --text-meta:    0.8125rem;    /* 13px   — secondary inline */
+  --text-label:   0.72rem;      /* 11.5px — smcp uppercase labels */
 }
 
 html, body {
   background: var(--color-paper);
   color: var(--color-ink);
   font-family: var(--font-body);
+  font-size: 0.9375rem;       /* 15px reading baseline */
+  line-height: 1.55;
   font-weight: 500;
   font-feature-settings: "kern" 1;
   font-optical-sizing: auto;
@@ -49,12 +62,25 @@ html, body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Mono technical labels — ALL CAPS, weight + tracking carry hierarchy */
+/* Mono technical labels — uppercase, but tracking dialed back from 0.2em
+   to 0.10em. Atelier labels whisper; they don't shout. Use sentence-case
+   for anything that isn't strictly a section header. */
 .smcp {
   font-family: var(--font-mono);
   text-transform: uppercase;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.10em;
   font-weight: 600;
+  font-size: var(--text-label);
+}
+
+/* Sentence-case section header — quieter than smcp, for inline labels
+   that don't earn full uppercase ceremony. */
+.label-quiet {
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+  letter-spacing: 0.04em;
+  font-weight: 500;
+  color: var(--color-graphite);
 }
 
 /* Italic — reserved for the wordmark period and rare emphasis. Not a hierarchy carrier. */
