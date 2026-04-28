@@ -157,11 +157,9 @@ export function DocumentInventory() {
 
   return (
     <div>
-      <div className="flex items-baseline gap-3 mb-4 flex-wrap">
-        <span className="smcp text-[0.62rem] text-graphite tracking-[0.2em]">
-          binder rollup
-        </span>
-        <span className="font-mono text-[0.78rem] text-ink-2 tabular-nums">
+      <div className="flex items-baseline gap-3 mb-5 flex-wrap">
+        <span className="smcp text-graphite">binder rollup</span>
+        <span className="font-mono text-meta text-ink-2 tabular-nums">
           {totalDocs} documents · {totalPages} pages · 12 tabs
         </span>
       </div>
@@ -171,28 +169,28 @@ export function DocumentInventory() {
           <li key={tab.letter} className="bg-paper">
             <details className="group">
               <summary className="flex items-baseline gap-4 cursor-pointer select-none px-4 py-3 hover:bg-paper-2/60 transition-colors list-none [&::-webkit-details-marker]:hidden">
-                <span className="font-display italic text-[1.4rem] leading-none text-rubric w-7 shrink-0">
+                <span className="font-mono text-title font-bold leading-none text-ink w-7 shrink-0">
                   {tab.letter}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <div className="font-display text-[1rem] leading-tight text-ink">
+                  <div className="text-body font-semibold text-ink leading-tight">
                     {tab.title}
                   </div>
-                  <div className="font-display italic text-[0.78rem] text-graphite-soft truncate">
+                  <div className="text-meta text-graphite-soft truncate mt-0.5">
                     {tab.hint}
                   </div>
                 </div>
-                <span className="font-mono text-[0.72rem] text-graphite tabular-nums tracking-wider">
+                <span className="font-mono text-meta text-graphite tabular-nums">
                   {tab.documents.length}{' '}
                   {tab.documents.length === 1 ? 'doc' : 'docs'}
                 </span>
-                <span className="font-mono text-[0.78rem] text-graphite-soft transition-transform group-open:rotate-90">
+                <span className="font-mono text-meta text-graphite-soft transition-transform group-open:rotate-90">
                   ›
                 </span>
               </summary>
               <div className="px-4 pb-5 pt-1">
                 {tab.documents.length === 0 ? (
-                  <p className="font-display italic text-[0.86rem] text-graphite-soft">
+                  <p className="text-meta text-graphite-soft italic">
                     Nothing filed under this tab yet.
                   </p>
                 ) : (
@@ -213,17 +211,13 @@ export function DocumentInventory() {
 
 function Thumbnail({ doc }: { doc: DocStub }) {
   const lines = Math.min(8, Math.max(3, Math.floor(doc.pages / 2) + 3));
-  // 4-tier render priority: alias > display_name > suggested_filename
-  // > raw filename. The matter API resolves alias/display/suggested
-  // server-side and ships display_name already populated with the
-  // winning value; here we just fall back to raw if absent.
   const primary = doc.display_name && doc.display_name.length > 0
     ? doc.display_name
     : doc.filename;
   return (
     <div className="group cursor-pointer">
       <div
-        className="relative aspect-[3/4] paper-recess border border-rule-strong overflow-hidden hover:border-ink-2 transition-colors"
+        className="relative aspect-[3/4] paper-recess border border-rule-strong overflow-hidden hover:border-ink transition-colors"
         aria-hidden
       >
         <div className="absolute inset-3 grid gap-[3px] content-start">
@@ -235,19 +229,19 @@ function Thumbnail({ doc }: { doc: DocStub }) {
             />
           ))}
         </div>
-        <div className="absolute right-1.5 bottom-1.5 font-mono text-[0.6rem] text-graphite-soft tabular-nums tracking-widest">
+        <div className="absolute right-1.5 bottom-1.5 font-mono text-label text-graphite-soft tabular-nums">
           {String(doc.pages).padStart(2, '0')}p
         </div>
         <div className="absolute left-0 top-0 h-2 w-full bg-rule/40" />
       </div>
       <div
-        className="mt-1.5 font-display text-[0.78rem] text-ink-2 leading-snug line-clamp-2"
+        className="mt-2 text-meta text-ink-2 leading-snug line-clamp-2"
         title={doc.filename}
       >
         {primary}
       </div>
       {doc.display_name && doc.display_name.length > 0 && (
-        <small className="block mt-0.5 font-mono text-[0.62rem] text-graphite-soft tabular-nums truncate">
+        <small className="block mt-0.5 font-mono text-label text-graphite-soft tabular-nums truncate">
           {doc.filename}
         </small>
       )}

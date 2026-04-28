@@ -179,6 +179,7 @@ interface AkalanBridge {
   platform: string;
   isDesktop: boolean;
   pickFolder?: () => Promise<string | null>;
+  pathForFile?: (file: File) => string;
 }
 
 declare global {
@@ -188,6 +189,25 @@ declare global {
 }
 
 const PDF_EXT = /\.pdf$/i;
+
+/**
+ * Given an absolute path resolved by Electron's webUtils.getPathForFile,
+ * return the matter folder root.
+ *   - If the path is a folder (no trailing file extension), return as-is.
+ *   - If the path is a file (looks like ".../something.pdf"), return its
+ *     parent directory — that's the folder the user dragged from.
+ * Heuristic-only. Server-side fs.stat in /api/ingest-path is the
+ * authoritative check.
+ */
+function resolveDroppedFolder(firstPath: string): string {
+  const cleaned = firstPath.replace(/\/+$/, '');
+  const basename = cleaned.split('/').pop() ?? '';
+  if (/\.[a-zA-Z0-9]{1,5}$/.test(basename)) {
+    const lastSlash = cleaned.lastIndexOf('/');
+    return lastSlash > 0 ? cleaned.slice(0, lastSlash) : cleaned;
+  }
+  return cleaned;
+}
 
 /* ---------------------------------------------------------------------- */
 /* File traversal — preserved from prior version                           */
@@ -333,17 +353,13 @@ function StatusPill({
   const style = ASSESSMENT_PILL[assessment];
   const label = ASSESSMENT_LABEL[assessment] ?? assessment;
   if (!style) {
-    return (
-      <span className="smcp text-[0.6rem] text-graphite">{label}</span>
-    );
+    return <span className="smcp text-graphite">{label}</span>;
   }
   const sizing =
-    size === 'full'
-      ? 'px-3 py-1.5 text-[0.7rem] tracking-[0.22em]'
-      : 'px-2 py-0.5 text-[0.55rem] tracking-[0.18em]';
+    size === 'full' ? 'px-3 py-1.5 text-meta' : 'px-2 py-0.5 text-label';
   return (
     <span
-      className={`inline-flex items-center font-mono uppercase ${sizing} ${style.container} ${style.text}`}
+      className={`inline-flex items-center smcp ${sizing} ${style.container} ${style.text}`}
     >
       {label}
     </span>
@@ -511,10 +527,33 @@ export default function Page() {
     }
   }, []);
 
+  // Forward-declared via ref so onDrop (defined here) can call into
+  // handleFolderPath (defined further down) without a TDZ violation.
+  const handleFolderPathRef = useRef<(rootPath: string) => void>(() => {});
+
   const onDrop = useCallback(
     async (e: DragEvent<HTMLDivElement>) => {
       e.preventDefault();
       setDragActive(false);
+
+      // Electron-only fast path: when running inside atelier and the user
+      // drops a folder (or files inside one), resolve the absolute folder
+      // path via webUtils.getPathForFile and route through the streaming
+      // /api/ingest-path endpoint. Without this, drag-drop falls back to
+      // /api/ingest (per-file, non-streaming) and a 400-PDF deposit takes
+      // hours instead of minutes — and skips the heartbeat.
+      const pathForFile = window.akalan?.pathForFile;
+      if (pathForFile && e.dataTransfer.files.length > 0) {
+        const firstPath = pathForFile(e.dataTransfer.files[0]);
+        if (firstPath) {
+          const folderPath = resolveDroppedFolder(firstPath);
+          if (folderPath) {
+            handleFolderPathRef.current(folderPath);
+            return;
+          }
+        }
+      }
+
       const items = e.dataTransfer.items;
       const hasEntries =
         items.length > 0 &&
@@ -680,6 +719,11 @@ export default function Page() {
     }
   }, [router]);
 
+  // Wire the ref so onDrop can call into the latest handleFolderPath
+  // without a TDZ. handleFolderPathRef is declared above onDrop; we
+  // assign here, after handleFolderPath exists.
+  handleFolderPathRef.current = handleFolderPath;
+
   const onPickFolderElectron = useCallback(async () => {
     if (!window.akalan?.pickFolder) return;
     const picked = await window.akalan.pickFolder();
@@ -831,12 +875,12 @@ function Header({ now }: { now: Date }) {
         </span>
       </div>
 
-      <div className="flex items-center gap-3 px-3 py-1 border border-rule paper-recess text-[0.78rem] text-graphite hover:border-ink-2 transition-colors cursor-text">
-        <span className="font-mono text-[0.7rem]">⌘K</span>
+      <div className="flex items-center gap-3 px-3 py-1.5 border border-rule paper-recess text-meta text-graphite hover:border-ink transition-colors cursor-text">
+        <span className="font-mono text-label">⌘K</span>
         <span className="smcp">search the binder</span>
       </div>
 
-      <div className="flex items-center justify-end gap-5 text-[0.78rem] text-graphite font-mono">
+      <div className="flex items-center justify-end gap-5 text-meta text-graphite font-mono">
         <span>{date}</span>
         <span className="text-rule-strong">·</span>
         <span>{time}</span>
@@ -991,7 +1035,7 @@ function BinderRow({
       className={
         'group relative transition-colors border-l-2 ' +
         (selected
-          ? 'border-rubric paper-recess'
+          ? 'border-ink paper-recess'
           : 'border-transparent hover:bg-paper-2/60')
       }
     >
@@ -1328,22 +1372,31 @@ function MemoryPane({
 
   if (totalEntries === 0) {
     return (
-      <div className="px-9 py-12 font-display italic text-[0.95rem] text-graphite">
-        Exhibits are empty. PDFs will appear here as they are classified.
+      <div className="px-9 py-16 grid place-items-center">
+        <div className="border border-rule bg-paper grid place-items-center py-16 px-8 text-center max-w-md">
+          <div className="grid gap-3">
+            <div className="sigil mx-auto" style={{ width: '2.4rem', height: '2.4rem', fontSize: '0.85rem' }}>
+              —
+            </div>
+            <p className="text-body text-graphite leading-relaxed">
+              Exhibits are empty. PDFs will appear here as they are classified.
+            </p>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="px-9 py-7 space-y-5">
+    <div className="px-9 py-7 grid gap-5">
       <button
         onClick={onOpenMatter}
-        className="w-full flex items-baseline justify-between border border-ink-2 paper-recess px-5 py-3 hover:bg-ink hover:text-paper transition-colors group"
+        className="w-full flex items-baseline justify-between border border-ink bg-paper px-5 py-3 hover:bg-ink hover:text-paper transition-colors group"
       >
-        <span className="font-display italic text-[1rem] group-hover:not-italic">
+        <span className="text-body text-ink font-semibold group-hover:text-paper">
           Open the matter
         </span>
-        <span className="font-mono text-[0.7rem] tracking-widest text-graphite group-hover:text-paper-2">
+        <span className="font-mono text-meta text-graphite group-hover:text-paper-2">
           {populated.length} sections · {totalEntries} documents →
         </span>
       </button>
@@ -1373,18 +1426,16 @@ function MemoryPane({
       ))}
 
       {recentOutput && (
-        <section className="border border-rule paper-recess">
-          <header className="px-5 py-3 border-b border-rule-strong">
-            <span className="smcp text-[0.65rem] text-rubric tracking-[0.22em]">
-              ⁂  recent output
-            </span>
-            <span className="ml-3 font-display italic text-[0.85rem] text-graphite">
+        <section className="border border-rule bg-paper">
+          <header className="flex items-baseline justify-between gap-3 px-5 py-3 border-b border-rule paper-recess">
+            <span className="smcp text-graphite">recent output</span>
+            <span className="font-mono text-meta text-graphite-soft">
               {recentOutput.generator.replace(/_/g, ' ')} · {new Date(recentOutput.approved_at).toLocaleString()}
             </span>
           </header>
-          <div className="px-5 py-4 font-mono text-[0.7rem]">
+          <div className="px-5 py-5 font-mono text-meta">
             {recentOutput.output_path && (
-              <div className="text-graphite mb-2 break-all">
+              <div className="text-graphite mb-3 break-all">
                 → {recentOutput.output_path}
               </div>
             )}
@@ -1398,7 +1449,7 @@ function MemoryPane({
                         `${recentOutput.generator}.docx`,
                       )
                     }
-                    className="px-2.5 py-1 border border-rule-strong text-[0.65rem] smcp tracking-wider hover:bg-ink hover:text-paper transition-colors"
+                    className="px-3 py-1.5 border border-ink smcp text-meta hover:bg-ink hover:text-paper transition-colors"
                   >
                     download .docx
                   </button>
@@ -1409,16 +1460,16 @@ function MemoryPane({
                         `${recentOutput.generator}.md`,
                       )
                     }
-                    className="px-2.5 py-1 border border-rule text-[0.65rem] smcp tracking-wider hover:bg-paper-deep transition-colors"
+                    className="px-3 py-1.5 border border-rule smcp text-meta text-graphite hover:border-ink hover:text-ink transition-colors"
                   >
                     download .md
                   </button>
                 </div>
                 <details>
-                  <summary className="cursor-pointer text-graphite">
+                  <summary className="cursor-pointer text-meta text-graphite hover:text-ink">
                     ▸ view inline ({recentOutput.output_inline.length.toLocaleString()} chars)
                   </summary>
-                  <pre className="mt-2 whitespace-pre-wrap text-[0.7rem] bg-ink-2/5 p-3 max-h-96 overflow-y-auto">
+                  <pre className="mt-2 whitespace-pre-wrap text-meta bg-paper-deep/30 p-3 max-h-96 overflow-y-auto leading-relaxed">
                     {recentOutput.output_inline}
                   </pre>
                 </details>
@@ -1491,7 +1542,7 @@ function DocumentPreviewModal({ path, onClose }: { path: string; onClose: () => 
           e.stopPropagation();
           onClose();
         }}
-        className="absolute top-4 right-4 z-10 bg-paper border border-graphite/40 px-4 py-2 font-mono text-[0.85rem] text-ink-2 hover:bg-ink hover:text-paper transition-colors shadow-lg"
+        className="absolute top-4 right-4 z-10 bg-paper border border-graphite/40 px-4 py-2 font-mono text-meta text-ink-2 hover:bg-ink hover:text-paper transition-colors shadow-lg"
         aria-label="Close preview"
       >
         ✕  Close (Esc)
@@ -1499,12 +1550,12 @@ function DocumentPreviewModal({ path, onClose }: { path: string; onClose: () => 
 
       <div
         onClick={(e) => e.stopPropagation()}
-        className="bg-paper w-full max-w-5xl h-[90vh] flex flex-col border border-graphite/30 shadow-xl"
+        className="bg-paper w-full max-w-5xl h-[90vh] flex flex-col border border-rule-strong"
       >
-        <div className="px-6 py-3 border-b border-graphite/20 flex items-baseline justify-between">
-          <div>
-            <div className="smcp text-[0.65rem] text-graphite">¶ document preview</div>
-            <div className="font-display italic text-[1.05rem] text-ink-2 truncate max-w-2xl">
+        <div className="px-6 py-3 border-b border-rule paper-recess flex items-baseline justify-between">
+          <div className="grid gap-1 min-w-0">
+            <div className="smcp text-graphite">document preview</div>
+            <div className="font-mono text-body text-ink-2 truncate max-w-2xl">
               {filename}
             </div>
           </div>
@@ -1513,9 +1564,9 @@ function DocumentPreviewModal({ path, onClose }: { path: string; onClose: () => 
               e.stopPropagation();
               onClose();
             }}
-            className="font-mono text-[0.85rem] text-ink-2 px-3 py-1 border border-graphite/40 hover:bg-ink hover:text-paper transition-colors"
+            className="smcp text-meta px-3 py-2 border border-ink hover:bg-ink hover:text-paper transition-colors shrink-0"
           >
-            ✕ close
+            close · esc
           </button>
         </div>
         <div className="flex-1 min-h-0">
@@ -1551,32 +1602,32 @@ function ExhibitCategoryCard({
 }) {
   const empty = entries.length === 0;
   return (
-    <section className="border border-rule paper-recess">
+    <section className="border border-rule bg-paper">
       <button
         onClick={onToggle}
-        className="w-full flex items-baseline justify-between px-5 py-3 group hover:bg-ink/5 transition-colors text-left"
+        className="w-full flex items-baseline justify-between px-5 py-3 group hover:bg-paper-deep/30 transition-colors text-left paper-recess border-b border-rule"
       >
         <div className="flex items-baseline gap-3">
-          <span className="font-display italic text-[1.05rem] text-ink-2">
+          <span className="smcp text-graphite group-hover:text-ink transition-colors">
             {spec.label}
           </span>
-          <span className="font-mono text-[0.7rem] text-graphite-soft tracking-wider">
+          <span className="font-mono text-meta text-graphite-soft tabular-nums">
             {empty ? '—' : `${entries.length} doc${entries.length === 1 ? '' : 's'}`}
           </span>
         </div>
-        <span className="font-mono text-[0.7rem] text-graphite group-hover:text-ink-2">
+        <span className="font-mono text-meta text-graphite-soft group-hover:text-ink transition-colors">
           {collapsed ? '▸' : '▾'}
         </span>
       </button>
 
       {!collapsed && (
-        <div className="px-5 pb-5 pt-1 space-y-4">
+        <div className="px-5 py-5 grid gap-4">
           {empty ? (
-            <div className="font-display italic text-[0.85rem] text-graphite-soft px-2">
+            <div className="text-body text-graphite-soft italic">
               No documents in this category yet.
             </div>
           ) : (
-            <ul className="space-y-2">
+            <ul className="grid gap-2">
               {entries.map(({ docType, entry }, i) => {
                 const display =
                   entryLabels[entry.filename] ||
@@ -1588,17 +1639,17 @@ function ExhibitCategoryCard({
                   <li
                     key={`${entry.filename}-${i}`}
                     onClick={clickable ? () => onPickDocument(entry.filename) : undefined}
-                    className={`border-l-2 border-rule pl-3 py-1.5 hover:border-ink-2 transition-colors ${
-                      clickable ? 'cursor-pointer hover:bg-ink/5' : ''
+                    className={`border-l border-rule pl-3 py-2 hover:border-ink transition-colors ${
+                      clickable ? 'cursor-pointer' : ''
                     }`}
                     title={clickable ? 'Click to preview the PDF' : undefined}
                   >
                     <div
-                      className={`font-display text-[0.9rem] ${clickable ? 'text-blue-700 hover:underline' : 'text-ink-2'}`}
+                      className={`text-body ${clickable ? 'text-ink underline-offset-2 hover:underline decoration-ink-2' : 'text-ink-2'}`}
                     >
                       {display}
                     </div>
-                    <div className="font-mono text-[0.65rem] text-graphite-soft truncate">
+                    <div className="font-mono text-meta text-graphite-soft truncate mt-0.5">
                       {DOC_TYPE_LABELS[docType] ?? docType} · {entry.filename}
                     </div>
                   </li>
@@ -1608,7 +1659,7 @@ function ExhibitCategoryCard({
           )}
 
           {spec.generators.length > 0 && (
-            <div className="border-t border-rule pt-3 flex flex-wrap gap-2">
+            <div className="border-t border-rule pt-4 flex flex-wrap gap-2">
               {spec.generators.map((g) => (
                 <button
                   key={g.generator}
@@ -1620,7 +1671,7 @@ function ExhibitCategoryCard({
                     }
                   }}
                   title="Opens the preview → approve modal. NO output ships without attorney sign-off."
-                  className="text-[0.72rem] font-mono px-3 py-1.5 border border-ink-2 hover:bg-ink hover:text-paper transition-colors smcp"
+                  className="text-meta smcp px-3 py-2 border border-ink hover:bg-ink hover:text-paper transition-colors"
                 >
                   {g.label}
                 </button>
@@ -1652,11 +1703,11 @@ function MemoryBucket({
     <section>
       <button
         onClick={onToggle}
-        className="w-full flex items-baseline justify-between border-b border-rule pb-1.5 mb-3 group hover:border-ink-2 transition-colors text-left"
+        className="w-full flex items-baseline justify-between pb-2 mb-3 group hover:border-ink transition-colors text-left border-b border-rule"
       >
         <div className="flex items-baseline gap-3">
           <span
-            className="font-mono text-[0.78rem] text-graphite-soft transition-transform group-hover:text-ink-2"
+            className="font-mono text-meta text-graphite-soft transition-transform group-hover:text-ink"
             style={{
               display: 'inline-block',
               transform: collapsed ? 'rotate(0deg)' : 'rotate(90deg)',
@@ -1666,19 +1717,19 @@ function MemoryBucket({
           >
             ▶
           </span>
-          <h2 className="font-display text-[1.05rem] group-hover:text-rubric transition-colors">
+          <h2 className="smcp text-graphite group-hover:text-ink transition-colors">
             {DOC_TYPE_LABEL[docType]}
           </h2>
-          <span className="font-mono text-[0.7rem] text-graphite tracking-widest">
+          <span className="font-mono text-meta text-graphite-soft tabular-nums">
             {entries.length} {entries.length === 1 ? 'entry' : 'entries'}
           </span>
         </div>
-        <span className="font-mono text-[0.62rem] text-graphite-soft tracking-widest">
+        <span className="font-mono text-label text-graphite-soft">
           {docType}
         </span>
       </button>
       {!collapsed && (
-        <ul className="space-y-1.5">
+        <ul className="grid gap-1.5">
           {entries.map((e) => {
             const key = entryKey(docType, e.filename);
             const label = entryLabels[key] ?? getSuggestedDocLabel(e);
@@ -1686,27 +1737,27 @@ function MemoryBucket({
               <li key={key}>
                 <button
                   onClick={onOpenMatter}
-                  className="w-full text-left flex items-baseline gap-2 px-3 py-1 border-l-2 border-rule hover:border-rubric hover:bg-paper-2/40 transition-colors group"
+                  className="w-full text-left flex items-baseline gap-2 px-3 py-2 border-l border-rule hover:border-ink hover:bg-paper-deep/30 transition-colors group"
                 >
-                  <span className="shrink-0 font-mono text-[0.6rem] text-graphite-soft tracking-widest group-hover:text-rubric">
+                  <span className="shrink-0 font-mono text-meta text-graphite-soft group-hover:text-ink">
                     →
                   </span>
                   <div className="flex-1 min-w-0">
                     <div
-                      className="font-display text-[0.92rem] truncate group-hover:text-rubric"
+                      className="text-body text-ink-2 truncate group-hover:text-ink"
                       title={label}
                     >
                       {label}
                     </div>
                     <div
-                      className="font-mono text-[0.65rem] text-graphite-soft truncate"
+                      className="font-mono text-label text-graphite-soft truncate mt-0.5"
                       title={e.filename}
                     >
                       {e.filename}
                     </div>
                   </div>
                   {e.error && (
-                    <span className="shrink-0 font-mono text-[0.62rem] text-rubric tracking-widest">
+                    <span className="shrink-0 smcp text-ink font-semibold">
                       error
                     </span>
                   )}
@@ -1857,16 +1908,16 @@ function MemoryFactsList({ facts }: { facts: Record<string, unknown> }) {
   }
   if (rows.length === 0) {
     return (
-      <div className="font-display italic text-[0.78rem] text-graphite-soft mt-1">
+      <div className="text-meta italic text-graphite-soft mt-1">
         all fields null
       </div>
     );
   }
   return (
-    <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 text-[0.78rem]">
+    <dl className="mt-1 grid grid-cols-[max-content_1fr] gap-x-3 gap-y-0.5 text-meta">
       {rows.map((r) => (
         <Fragment key={r.key}>
-          <dt className="font-mono text-[0.7rem] text-graphite tracking-wide">{r.key}</dt>
+          <dt className="font-mono text-label text-graphite tracking-wide">{r.key}</dt>
           <dd className="text-ink-2 truncate" title={r.value}>
             {r.value}
           </dd>
@@ -2117,7 +2168,7 @@ function DossierTabs({
                 className={
                   'pb-3 pt-0.5 border-b-2 transition-colors flex items-baseline gap-1.5 ' +
                   (active
-                    ? 'border-rubric text-ink'
+                    ? 'border-ink text-ink'
                     : 'border-transparent text-graphite hover:text-ink-2')
                 }
               >
@@ -2158,7 +2209,7 @@ function FactsPane({
         matterId={matterId}
       />
       <details className="border border-rule paper-recess">
-        <summary className="cursor-pointer px-5 py-3 font-mono text-[0.75rem] text-graphite hover:bg-ink/5">
+        <summary className="cursor-pointer px-5 py-3 font-mono text-meta text-graphite hover:bg-ink/5">
           ▸ raw extracted facts (full schema dump)
         </summary>
         <div className="px-5 py-4 grid gap-7 border-t border-rule">
@@ -2238,16 +2289,16 @@ function MissingFieldsList({ facts }: { facts: Record<string, unknown> }) {
   return (
     <section className="border border-rule paper-recess">
       <header className="px-5 py-3 border-b border-rule flex items-baseline justify-between">
-        <span className="smcp text-rubric tracking-[0.22em]">⁂  missing fields</span>
+        <span className="smcp text-ink ">·  missing fields</span>
         <span className="font-mono text-meta text-graphite-soft tabular-nums">
           {missing.length} {missing.length === 1 ? 'item' : 'items'}
         </span>
       </header>
       <ul className="px-5 py-4 grid gap-1.5 text-body text-graphite leading-snug list-disc list-inside">
         {missing.map((p) => (
-          <li key={p} className="font-mono text-[0.78rem]">
+          <li key={p} className="font-mono text-meta">
             <span className="text-ink">{humanizePath(p)}</span>
-            <span className="text-graphite-soft text-[0.7rem] ml-2">{p}</span>
+            <span className="text-graphite-soft text-label ml-2">{p}</span>
           </li>
         ))}
       </ul>
@@ -2507,7 +2558,7 @@ function CaseProfileEditor({
 
   return (
     <details className="border border-rule paper-recess" open>
-      <summary className="cursor-pointer px-5 py-3 font-mono text-[0.75rem] text-graphite hover:bg-ink/5">
+      <summary className="cursor-pointer px-5 py-3 font-mono text-meta text-graphite hover:bg-ink/5">
         ▾ case profile
       </summary>
       <div className="grid gap-4 px-5 py-4 border-t border-rule grid-cols-1 md:grid-cols-2">
@@ -2857,7 +2908,7 @@ function AuditPane({
     <div className="px-9 py-7 grid gap-6 fade-in">
       <header>
         <div className="smcp text-graphite-soft mb-1">missingness audit</div>
-        <h2 className="text-section leading-snug">
+        <h2 className="text-title font-bold leading-snug">
           {filledRequired} of {required.length} required slots filled
         </h2>
         <p className="text-meta text-graphite mt-1 flex items-center gap-3 flex-wrap">
@@ -3048,7 +3099,7 @@ function BinderPane({
     <div className="px-9 py-7 grid gap-6 fade-in">
       <header>
         <div className="smcp text-graphite-soft mb-1">binder manifest</div>
-        <h2 className="text-section leading-snug">{manifest.binder_profile.profile_id}</h2>
+        <h2 className="text-title font-bold leading-snug">{manifest.binder_profile.profile_id}</h2>
         <p className="text-meta text-graphite mt-1 flex items-center gap-3 flex-wrap">
           <span>
             {manifest.total_pages_filed} pages filed · {manifest.total_pages_capped} count toward
@@ -3062,12 +3113,12 @@ function BinderPane({
           )}
         </p>
         {overCap && (
-          <div className="mt-2 border border-[#B91C1C] bg-[#B91C1C]/[0.05] text-[#B91C1C] px-3 py-2 text-meta">
-            PAGE CAP EXCEEDED — {manifest.total_pages_capped} / {cap}
+          <div className="mt-2 border-l-[3px] border-ink bg-paper-deep/30 text-ink font-semibold px-3 py-2 text-meta smcp">
+            page cap exceeded — {manifest.total_pages_capped} / {cap}
           </div>
         )}
         {nearCap && !overCap && (
-          <div className="mt-2 border border-[#C2410C] bg-[#C2410C]/[0.05] text-[#C2410C] px-3 py-2 text-meta">
+          <div className="mt-2 border-l-[3px] border-rule-strong text-ink-2 px-3 py-2 text-meta">
             Approaching page cap — {manifest.total_pages_capped} / {cap}
           </div>
         )}
@@ -3479,15 +3530,15 @@ function IntakeBlock({
   onChange: (next: IntakeFields) => void;
 }) {
   return (
-    <section className="border border-rule paper-recess">
-      <header className="px-5 py-3 border-b border-rule-strong flex items-baseline justify-between">
+    <section className="border border-rule bg-paper">
+      <header className="px-5 py-3 border-b border-rule paper-recess flex items-baseline justify-between gap-3">
         <div className="flex items-baseline gap-3">
-          <span className="font-mono text-[0.75rem] text-rubric tabular-nums">{roman}.</span>
-          <span className="font-display italic text-[1.05rem] text-ink-2">{title}</span>
-          <span className="font-mono text-[0.62rem] text-graphite-soft">attorney attestation · merges into draft</span>
+          <span className="font-mono text-meta text-graphite-soft tabular-nums">{roman}</span>
+          <span className="smcp text-graphite">{title}</span>
         </div>
+        <span className="text-meta text-graphite-soft italic">attorney attestation · merges into draft</span>
       </header>
-      <dl className="px-5 py-4 grid grid-cols-[12rem_1fr] gap-x-6 gap-y-3">
+      <dl className="px-5 py-5 grid grid-cols-[12rem_1fr] gap-x-6 gap-y-4">
         <IntakeRow
           label="Address"
           value={intake.address}
@@ -3523,14 +3574,13 @@ function IntakeRow({
   onChange: (v: string) => void;
 }) {
   const [draft, setDraft] = useState(value);
-  // Sync draft when matter switches.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft(value);
   }, [value]);
   return (
     <>
-      <dt className="font-display text-[0.85rem] text-graphite pt-1.5">{label}</dt>
+      <dt className="smcp text-graphite-soft pt-2">{label}</dt>
       <dd>
         <input
           value={draft}
@@ -3539,7 +3589,7 @@ function IntakeRow({
             if (draft !== value) onChange(draft);
           }}
           placeholder={placeholder}
-          className="w-full max-w-md border border-rule px-2 py-1.5 font-mono text-[0.78rem] text-ink-2 focus:outline-none focus:border-ink-2"
+          className="w-full max-w-md border border-rule px-3 py-2 font-mono text-meta text-ink-2 focus:outline-none focus:border-ink"
         />
       </dd>
     </>
@@ -3733,7 +3783,7 @@ function FactSection({ label, value, top }: { label: string; value: unknown; top
       <div>
         <SectionLabel label={label} count={value.length} />
         {value.length === 0 ? (
-          <div className="font-display italic text-graphite text-[0.9rem]">— none on record</div>
+          <div className="text-body italic text-graphite text-body">— none on record</div>
         ) : (
           <ol className="grid gap-2.5">
             {value.map((item, i) => (
@@ -3741,7 +3791,7 @@ function FactSection({ label, value, top }: { label: string; value: unknown; top
                 key={i}
                 className="grid grid-cols-[2rem_1fr] gap-3 border-b border-rule pb-2.5 last:border-b-0"
               >
-                <span className="font-mono text-[0.7rem] text-graphite-soft pt-0.5">
+                <span className="font-mono text-label text-graphite-soft pt-0.5">
                   {(i + 1).toString().padStart(2, '0')}.
                 </span>
                 <ArrayItem item={item} />
@@ -3766,8 +3816,8 @@ function FactSection({ label, value, top }: { label: string; value: unknown; top
     );
   }
   return (
-    <div className="text-[0.92rem]">
-      <span className="smcp text-[0.62rem] text-graphite mr-2">{humanLabel(label)}</span>
+    <div className="text-body">
+      <span className="smcp text-label text-graphite mr-2">{humanLabel(label)}</span>
       {String(value)}
     </div>
   );
@@ -3788,7 +3838,7 @@ function FactDefRow({ label, value }: { label: string; value: unknown }) {
   if (isFieldLeaf(value)) {
     return (
       <>
-        <dt className="smcp text-[0.65rem] text-graphite pt-1">{humanLabel(label)}</dt>
+        <dt className="smcp text-label text-graphite pt-1">{humanLabel(label)}</dt>
         <dd>
           <FactLine field={value} compact />
         </dd>
@@ -3798,7 +3848,7 @@ function FactDefRow({ label, value }: { label: string; value: unknown }) {
   if (Array.isArray(value)) {
     return (
       <>
-        <dt className="smcp text-[0.65rem] text-graphite pt-1">
+        <dt className="smcp text-label text-graphite pt-1">
           {humanLabel(label)}{' '}
           <span className="font-mono normal-case tracking-normal text-graphite-soft">
             ({value.length})
@@ -3819,7 +3869,7 @@ function FactDefRow({ label, value }: { label: string; value: unknown }) {
   if (value && typeof value === 'object') {
     return (
       <>
-        <dt className="smcp text-[0.65rem] text-graphite pt-1">{humanLabel(label)}</dt>
+        <dt className="smcp text-label text-graphite pt-1">{humanLabel(label)}</dt>
         <dd>
           <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-1.5">
             {Object.entries(value as Record<string, unknown>).map(([k, v]) => (
@@ -3832,8 +3882,8 @@ function FactDefRow({ label, value }: { label: string; value: unknown }) {
   }
   return (
     <>
-      <dt className="smcp text-[0.65rem] text-graphite pt-1">{humanLabel(label)}</dt>
-      <dd className="text-[0.9rem]">{String(value)}</dd>
+      <dt className="smcp text-label text-graphite pt-1">{humanLabel(label)}</dt>
+      <dd className="text-body">{String(value)}</dd>
     </>
   );
 }
@@ -3849,13 +3899,13 @@ function ArrayItem({ item, compact }: { item: unknown; compact?: boolean }) {
       </dl>
     );
   }
-  return <span className="text-[0.9rem]">{String(item)}</span>;
+  return <span className="text-body">{String(item)}</span>;
 }
 
 function FactLine({ field, compact }: { field: FieldProvenance; compact?: boolean }) {
   return (
     <div className={'flex flex-wrap items-baseline gap-x-3 gap-y-0.5 ' + (compact ? '' : 'py-1')}>
-      <span className={(compact ? 'text-[0.92rem]' : 'text-[1rem]') + ' text-ink'}>
+      <span className={(compact ? 'text-body' : 'text-body') + ' text-ink'}>
         {field.value === null ? (
           <span className="text-graphite-soft italic font-display">— none on record</span>
         ) : typeof field.value === 'object' ? (
@@ -3876,7 +3926,7 @@ function FactLine({ field, compact }: { field: FieldProvenance; compact?: boolea
         </sup>
       )}
       {field.source_quote && (
-        <span className="block w-full font-display italic text-[0.86rem] text-ink-2 mt-0.5 pl-3 border-l-2 border-paper-deep">
+        <span className="block w-full text-meta italic text-ink-2 mt-0.5 pl-3 border-l-2 border-paper-deep">
           “{field.source_quote}”
         </span>
       )}
@@ -4332,7 +4382,7 @@ const DOCTRINE: Record<CaseType, { glyph: string; refs: { mark: string; text: st
   E2: {
     glyph: 'E·II',
     refs: [
-      { mark: '§', text: '8 C.F.R. § 214.2(e) — Treaty trader/investor.' },
+      { mark: '§', text: '8 C.F.R. ·  214.2(e) — Treaty trader/investor.' },
       { mark: '§', text: '9 FAM 402.9 — Substantiality, marginality, real & operating.' },
       { mark: '¶', text: 'Source-of-funds traceability is the most common RFE driver.' },
     ],
@@ -4340,7 +4390,7 @@ const DOCTRINE: Record<CaseType, { glyph: string; refs: { mark: string; text: st
   EB1A: {
     glyph: 'EB·IA',
     refs: [
-      { mark: '§', text: '8 C.F.R. § 204.5(h) — Ten regulatory criteria.' },
+      { mark: '§', text: '8 C.F.R. ·  204.5(h) — Ten regulatory criteria.' },
       { mark: '¶', text: 'Kazarian v. USCIS, 596 F.3d 1115 — Two-step review.' },
       { mark: '¶', text: 'Final merits: sustained acclaim + small percentage at top.' },
     ],
@@ -4348,7 +4398,7 @@ const DOCTRINE: Record<CaseType, { glyph: string; refs: { mark: string; text: st
   EB1B: {
     glyph: 'EB·IB',
     refs: [
-      { mark: '§', text: '8 C.F.R. § 204.5(i) — Outstanding researcher.' },
+      { mark: '§', text: '8 C.F.R. ·  204.5(i) — Outstanding researcher.' },
       { mark: '¶', text: 'Two of six criteria + international recognition.' },
       { mark: '¶', text: 'Three years of teaching/research experience required.' },
     ],
@@ -4356,7 +4406,7 @@ const DOCTRINE: Record<CaseType, { glyph: string; refs: { mark: string; text: st
   EB1C: {
     glyph: 'EB·IC',
     refs: [
-      { mark: '§', text: '8 C.F.R. § 204.5(j) — Multinational manager/executive.' },
+      { mark: '§', text: '8 C.F.R. ·  204.5(j) — Multinational manager/executive.' },
       { mark: '¶', text: 'Qualifying relationship between US and foreign entity.' },
       { mark: '¶', text: 'One year abroad in last three; managerial capacity in both.' },
     ],
@@ -4856,9 +4906,9 @@ function StatusBar({
   const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 
   return (
-    <footer className="px-6 flex items-center justify-between text-[0.7rem] text-graphite font-mono border-t border-rule paper-grain tracking-wide">
+    <footer className="px-6 flex items-center justify-between text-label text-graphite font-mono border-t border-rule paper-grain tracking-wide">
       <div className="flex items-center gap-4">
-        <span className={loading ? 'text-rubric' : 'text-verdant'}>
+        <span className={loading ? 'text-ink' : 'text-graphite'}>
           {loading ? '● working' : '○ ready'}
         </span>
         <span className="text-rule-strong">·</span>
@@ -4886,13 +4936,12 @@ function StatusBar({
 function DragOverlay() {
   return (
     <div className="absolute inset-0 pointer-events-none grid place-items-center fade-in bg-paper/95">
-      <div className="text-center pointer-events-none">
-        <div className="dinkus mb-6">⁂</div>
-        <div className="font-display text-[28px] font-medium text-ink leading-none">
-          release to deposit.
+      <div className="text-center pointer-events-none border border-ink bg-paper px-12 py-10">
+        <div className="text-display font-bold text-ink leading-none tracking-[-0.02em]">
+          release to deposit
         </div>
-        <div className="mt-4 smcp text-graphite text-[0.78rem]">
-          ※ pdfs · folders · exhibits
+        <div className="mt-4 smcp text-graphite">
+          pdfs · folders · exhibits
         </div>
       </div>
     </div>
@@ -5118,8 +5167,8 @@ function PdfDetailModal({
               </section>
             )}
             {entry.error && (
-              <section className="border border-rule paper-recess px-3 py-2 border-l-2 border-l-[#B91C1C]">
-                <div className="smcp text-[#B91C1C] mb-1">extraction error</div>
+              <section className="border border-rule paper-recess px-3 py-2 border-l-[3px] border-l-ink">
+                <div className="smcp text-ink font-semibold mb-1">extraction error</div>
                 <div className="text-meta font-mono text-ink">{entry.error.code}</div>
                 <div className="text-meta text-graphite mt-0.5">{entry.error.message}</div>
               </section>
@@ -5227,21 +5276,21 @@ function MatterOverlayHeader({
       <div>
         <button
           onClick={onClose}
-          className="font-mono text-[0.78rem] text-graphite hover:text-rubric transition-colors smcp tracking-widest flex items-center gap-2"
+          className="font-mono text-meta text-graphite hover:text-ink transition-colors smcp  flex items-center gap-2"
         >
-          <span className="text-[1rem]">←</span>
+          <span className="text-body">←</span>
           <span>back to dossier</span>
         </button>
       </div>
       <div className="text-center">
-        <div className="smcp text-[0.62rem] text-graphite-soft tracking-widest mb-1">
+        <div className="smcp text-label text-graphite-soft  mb-1">
           ※ matter
         </div>
-        <div className="font-display text-[1.4rem] leading-none">
+        <div className="font-display text-title font-bold leading-none">
           {basenameOf(matterName)}
         </div>
       </div>
-      <div className="flex items-center justify-end gap-4 font-mono text-[0.7rem] text-graphite tracking-widest">
+      <div className="flex items-center justify-end gap-4 font-mono text-label text-graphite ">
         <span>{bucketCount} categories</span>
         <span className="text-rule-strong">·</span>
         <span>{totalEntries} documents</span>
@@ -5278,8 +5327,8 @@ function MatterDashboard({
   if (!ready || !e2Facts) {
     return (
       <section>
-        <SectionTitle marker="⁂" label="dashboard" />
-        <div className="paper-recess border border-rule px-7 py-10 font-display italic text-[1rem] text-graphite text-center">
+        <SectionTitle marker="·" label="dashboard" />
+        <div className="paper-recess border border-rule px-7 py-10 text-body italic text-graphite text-center">
           Matter dashboard pending — the aggregator hasn&rsquo;t finished
           reconciling the typed memory yet.
         </div>
@@ -5338,7 +5387,7 @@ function MatterDashboard({
 
   return (
     <section className="space-y-9">
-      <SectionTitle marker="⁂" label="dashboard" />
+      <SectionTitle marker="·" label="dashboard" />
 
       <DashboardPanel title="Case meta">
         {subtypeRows.map((r) => (
@@ -5397,13 +5446,13 @@ function MatterDashboard({
           <ul className="divide-y divide-rule">
             {own.map((o, i) => (
               <li key={i} className="py-2 grid grid-cols-[1fr_auto_auto] gap-4 items-baseline">
-                <div className="font-display text-[0.95rem]">
+                <div className="font-display text-body">
                   {readFieldValue(o.owner_name) ?? '(unnamed)'}
                 </div>
-                <div className="font-mono text-[0.78rem] text-graphite">
+                <div className="font-mono text-meta text-graphite">
                   {readFieldValue(o.nationality) ?? '—'}
                 </div>
-                <div className="font-mono text-[0.85rem] text-ink-2">
+                <div className="font-mono text-meta text-ink-2">
                   {readFieldValue(o.ownership_percent) ?? '—'}%
                 </div>
               </li>
@@ -5417,21 +5466,21 @@ function MatterDashboard({
           <ul className="space-y-3">
             {sof.map((s, i) => (
               <li key={i} className="border-l-2 border-rule pl-3">
-                <div className="font-display text-[0.95rem]">
+                <div className="font-display text-body">
                   {readFieldValue(s.origin_category) ?? '(category unknown)'}
                   {readFieldValue(s.origin_amount_usd) && (
-                    <span className="font-mono text-[0.78rem] text-graphite ml-2">
+                    <span className="font-mono text-meta text-graphite ml-2">
                       · ${readFieldValue(s.origin_amount_usd)}
                     </span>
                   )}
                 </div>
                 {readFieldValue(s.origin_evidence) && (
-                  <div className="font-mono text-[0.75rem] text-graphite-soft mt-0.5">
+                  <div className="font-mono text-meta text-graphite-soft mt-0.5">
                     {readFieldValue(s.origin_evidence)}
                   </div>
                 )}
                 {readFieldValue(s.notes) && (
-                  <div className="font-display italic text-[0.82rem] text-ink-2 mt-1">
+                  <div className="text-meta italic text-ink-2 mt-1">
                     {readFieldValue(s.notes)}
                   </div>
                 )}
@@ -5446,10 +5495,10 @@ function MatterDashboard({
           <ul className="space-y-2">
             {criticalConflicts.map((c, i) => (
               <li key={i} className="flex items-baseline gap-3">
-                <span className="font-mono text-[0.62rem] text-rubric tracking-widest shrink-0">
+                <span className="font-mono text-label text-ink  shrink-0">
                   sev {readFieldValue(c.severity)}
                 </span>
-                <span className="font-display text-[0.88rem] text-ink-2">
+                <span className="font-display text-meta text-ink-2">
                   {readFieldValue(c.description) ?? '(no description)'}
                 </span>
               </li>
@@ -5463,12 +5512,9 @@ function MatterDashboard({
 
 function SectionTitle({ marker, label }: { marker: string; label: string }) {
   return (
-    <div className="flex items-baseline gap-3 mb-5">
-      <span className="font-display italic text-[1.1rem] text-rubric">{marker}</span>
-      <span className="smcp text-[0.78rem] text-graphite tracking-[0.2em]">
-        {label}
-      </span>
-      <div className="flex-1 border-b border-rule mb-1.5" />
+    <div className="flex items-baseline gap-3 mb-4 pb-2 border-b border-rule">
+      <span className="font-mono text-meta text-graphite-soft tabular-nums">{marker}</span>
+      <span className="smcp text-graphite">{label}</span>
     </div>
   );
 }
@@ -5482,7 +5528,7 @@ function DashboardPanel({
 }) {
   return (
     <div className="paper-recess border border-rule px-7 py-5">
-      <div className="smcp text-[0.7rem] text-rubric tracking-widest mb-3 pb-2 border-b border-rule">
+      <div className="smcp text-label text-ink  mb-3 pb-2 border-b border-rule">
         {title}
       </div>
       {children}
@@ -5510,7 +5556,7 @@ function DashboardRow({
 
   return (
     <div className="grid grid-cols-[10rem_1fr_auto] gap-4 items-baseline py-1.5">
-      <div className="font-mono text-[0.7rem] text-graphite tracking-wide uppercase">
+      <div className="font-mono text-label text-graphite tracking-wide uppercase">
         {label}
       </div>
       {editing ? (
@@ -5526,13 +5572,13 @@ function DashboardRow({
               setEditing(false);
             }
           }}
-          className="font-display text-[0.95rem] bg-transparent border-b border-rubric outline-none pb-0.5"
+          className="font-display text-body bg-transparent border-b border-ink outline-none pb-0.5"
         />
       ) : (
-        <div className="font-display text-[0.95rem] text-ink-2 break-words">
+        <div className="font-display text-body text-ink-2 break-words">
           {display ?? <span className="italic text-graphite-soft">not extracted</span>}
           {overridden && (
-            <span className="ml-2 font-mono text-[0.6rem] text-ochre tracking-widest">
+            <span className="ml-2 font-mono text-label text-ink-2 ">
               edited
             </span>
           )}
@@ -5544,7 +5590,7 @@ function DashboardRow({
             onSave(path, draft);
             setEditing(false);
           }}
-          className="font-mono text-[0.62rem] text-rubric tracking-widest smcp hover:text-ink"
+          className="font-mono text-label text-ink  smcp hover:text-ink"
         >
           save
         </button>
@@ -5554,7 +5600,7 @@ function DashboardRow({
             setDraft(display ?? '');
             setEditing(true);
           }}
-          className="font-mono text-[0.62rem] text-graphite hover:text-rubric tracking-widest smcp"
+          className="font-mono text-label text-graphite hover:text-ink  smcp"
         >
           ✎
         </button>
@@ -5590,7 +5636,7 @@ function MatterDocumentsSection({
 
   return (
     <section>
-      <SectionTitle marker="⁂" label="documents · click to preview" />
+      <SectionTitle marker="·" label="documents · click to preview" />
       <div className="space-y-5">
         {buckets.map(([docType, entries]) => {
           const isCollapsed = !!collapsed[docType];
@@ -5604,7 +5650,7 @@ function MatterDocumentsSection({
               >
                 <div className="flex items-baseline gap-3">
                   <span
-                    className="font-mono text-[0.78rem] text-graphite-soft transition-transform group-hover:text-rubric"
+                    className="font-mono text-meta text-graphite-soft transition-transform group-hover:text-ink"
                     style={{
                       display: 'inline-block',
                       transform: isCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
@@ -5614,14 +5660,14 @@ function MatterDocumentsSection({
                   >
                     ▶
                   </span>
-                  <span className="font-display text-[1.05rem] group-hover:text-rubric transition-colors">
+                  <span className="font-display text-title group-hover:text-ink transition-colors">
                     {DOC_TYPE_LABEL[docType]}
                   </span>
-                  <span className="font-mono text-[0.65rem] text-graphite tracking-widest">
+                  <span className="font-mono text-label text-graphite ">
                     {entries.length}
                   </span>
                 </div>
-                <span className="font-mono text-[0.6rem] text-graphite-soft tracking-widest">
+                <span className="font-mono text-label text-graphite-soft ">
                   {docType}
                 </span>
               </button>
@@ -5643,7 +5689,7 @@ function MatterDocumentsSection({
                           }
                         >
                           <span
-                            className="font-mono text-[0.62rem] text-graphite-soft shrink-0"
+                            className="font-mono text-label text-graphite-soft shrink-0"
                             style={{
                               display: 'inline-block',
                               transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
@@ -5656,22 +5702,22 @@ function MatterDocumentsSection({
                           <div className="flex-1 min-w-0">
                             <div
                               className={
-                                'font-display text-[0.92rem] truncate ' +
-                                (expanded ? 'text-rubric' : 'text-ink-2 group-hover:text-rubric')
+                                'font-display text-body truncate ' +
+                                (expanded ? 'text-ink' : 'text-ink-2 group-hover:text-ink')
                               }
                               title={label}
                             >
                               {label}
                             </div>
                             <div
-                              className="font-mono text-[0.62rem] text-graphite-soft truncate"
+                              className="font-mono text-label text-graphite-soft truncate"
                               title={e.filename}
                             >
                               {basenameOf(e.filename)}
                             </div>
                           </div>
                           {e.error && (
-                            <span className="shrink-0 font-mono text-[0.6rem] text-rubric tracking-widest">
+                            <span className="shrink-0 font-mono text-label text-ink ">
                               error
                             </span>
                           )}
@@ -5743,21 +5789,21 @@ function DocumentInlinePreview({
                   setEditing(false);
                 }
               }}
-              className="flex-1 font-display italic text-[1.25rem] bg-transparent border-b border-rubric outline-none pb-1"
+              className="flex-1 text-title font-semibold bg-transparent border-b border-ink outline-none pb-1"
             />
             <button
               onClick={() => {
                 if (draft.trim()) onSetLabel(entryKeyValue, draft.trim());
                 setEditing(false);
               }}
-              className="font-mono text-[0.62rem] text-rubric tracking-widest smcp hover:text-ink"
+              className="smcp text-meta text-ink hover:text-graphite"
             >
               save
             </button>
           </div>
         ) : (
           <div className="flex items-baseline justify-between gap-3">
-            <h3 className="font-display italic text-[1.25rem] leading-tight">
+            <h3 className="text-title font-semibold leading-tight text-ink">
               {label}
             </h3>
             <button
@@ -5765,13 +5811,13 @@ function DocumentInlinePreview({
                 setDraft(label);
                 setEditing(true);
               }}
-              className="shrink-0 font-mono text-[0.62rem] text-graphite hover:text-rubric tracking-widest smcp"
+              className="shrink-0 smcp text-meta text-graphite hover:text-ink"
             >
-              ✎ rename
+              rename
             </button>
           </div>
         )}
-        <div className="mt-1 font-mono text-[0.65rem] text-graphite-soft truncate" title={entry.filename}>
+        <div className="mt-1 font-mono text-label text-graphite-soft truncate" title={entry.filename}>
           {DOC_TYPE_LABEL[docType]} · {entry.filename}
           {!overridden && (
             <span className="ml-2 text-rule-strong">(auto-named)</span>
@@ -5789,23 +5835,23 @@ function DocumentInlinePreview({
           />
         </div>
       ) : (
-        <div className="border border-rule paper-recess px-5 py-12 text-center font-display italic text-graphite">
+        <div className="border border-rule paper-recess px-5 py-12 text-center text-body italic text-graphite">
           PDF preview unavailable — matter root not set.
         </div>
       )}
 
       <div>
-        <div className="smcp text-[0.62rem] text-graphite-soft tracking-widest mb-2">
-          ⁂  facts
+        <div className="smcp text-label text-graphite-soft  mb-2">
+          ·  facts
         </div>
         {entry.error ? (
-          <div className="font-mono text-[0.78rem] text-rubric">
+          <div className="font-mono text-meta text-ink">
             error · {entry.error.code}: {entry.error.message}
           </div>
         ) : entry.facts ? (
           <MemoryFactsList facts={entry.facts} />
         ) : (
-          <div className="font-display italic text-[0.85rem] text-graphite-soft">
+          <div className="text-meta italic text-graphite-soft">
             No facts extracted.
           </div>
         )}

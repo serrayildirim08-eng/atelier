@@ -38,7 +38,7 @@ interface Props {
 export function SofChainTable({ matterId, rows }: Props) {
   return (
     <div className="overflow-x-auto -mx-1">
-      <table className="w-full border-collapse text-[0.86rem]">
+      <table className="w-full border-collapse">
         <thead>
           <tr className="border-b border-ink-2">
             <Th w="w-9">#</Th>
@@ -55,9 +55,9 @@ export function SofChainTable({ matterId, rows }: Props) {
             return (
               <tr
                 key={i}
-                className="border-b border-rule align-top hover:bg-paper-2/40 transition-colors"
+                className="border-b border-rule last:border-b-0 align-top hover:bg-paper-2/40 transition-colors"
               >
-                <td className="py-2.5 pr-2 font-mono text-[0.72rem] text-graphite-soft tracking-widest tabular-nums">
+                <td className="py-3 pr-2 font-mono text-meta text-graphite-soft tabular-nums">
                   {String(i + 1).padStart(2, '0')}
                 </td>
                 <Td>
@@ -104,10 +104,8 @@ export function SofChainTable({ matterId, rows }: Props) {
         </tbody>
         <tfoot>
           <tr className="border-t border-ink-2">
-            <td colSpan={2} className="pt-3 smcp text-[0.66rem] text-graphite tracking-[0.2em]">
-              Σ chain total
-            </td>
-            <td className="pt-3 text-right font-mono text-[0.92rem] tabular-nums text-ink">
+            <td colSpan={2} className="pt-3 smcp text-graphite">Σ chain total</td>
+            <td className="pt-3 text-right font-mono text-title font-semibold tabular-nums text-ink">
               {fmtUSD(
                 rows.reduce<number>(
                   (acc, r) => acc + (r.origin_amount_usd.value ?? 0),
@@ -119,7 +117,7 @@ export function SofChainTable({ matterId, rows }: Props) {
           </tr>
         </tfoot>
       </table>
-      <p className="mt-3 text-[0.72rem] text-graphite italic font-display max-w-[68ch]">
+      <p className="mt-4 text-meta text-graphite-soft max-w-[68ch] leading-relaxed">
         Click any cell to edit. Saves on blur (⏎ to commit, esc to revert). Account
         identifiers display as last-four only; full digits never leave the audit log.
       </p>
@@ -139,7 +137,7 @@ function Th({
   return (
     <th
       className={
-        'pb-2 smcp text-[0.62rem] text-graphite tracking-[0.2em] font-medium ' +
+        'pb-2.5 smcp text-graphite font-medium ' +
         (right ? 'text-right' : 'text-left') +
         (w ? ` ${w}` : '')
       }
@@ -159,7 +157,7 @@ function Td({
   return (
     <td
       className={
-        'py-2.5 pr-3 align-top ' + (right ? 'text-right tabular-nums' : '')
+        'py-3 pr-3 align-top ' + (right ? 'text-right tabular-nums' : '')
       }
     >
       {children}
@@ -275,7 +273,7 @@ function EditableCell({
 
   if (state === 'editing' || state === 'saving') {
     const sharedClass =
-      'w-full bg-paper border border-ink-2 px-1.5 py-0.5 outline-none text-ink text-[0.86rem] ' +
+      'w-full bg-paper border border-ink px-2 py-1 outline-none text-ink text-body ' +
       (kind === 'currency' ? 'font-mono tabular-nums text-right' : 'font-body');
     if (multiline) {
       return (
@@ -309,9 +307,9 @@ function EditableCell({
   const empty = display === dash;
   const stateRing =
     state === 'saved'
-      ? 'after:bg-verdant'
+      ? 'after:bg-ink'
       : state === 'error'
-        ? 'after:bg-rubric'
+        ? 'after:bg-ink'
         : 'after:bg-transparent';
 
   return (
@@ -326,7 +324,7 @@ function EditableCell({
             : 'click to edit'
       }
       className={
-        'group relative w-full text-left -mx-1.5 px-1.5 py-0.5 cursor-text ' +
+        'group relative w-full text-left -mx-1.5 px-1.5 py-0.5 cursor-text text-body ' +
         'hover:bg-paper-2/70 hover:outline hover:outline-1 hover:outline-rule transition-colors ' +
         'after:content-[""] after:absolute after:left-0 after:top-0 after:bottom-0 after:w-[2px] ' +
         'after:transition-colors ' +
@@ -334,12 +332,12 @@ function EditableCell({
         ' ' +
         (kind === 'currency' ? 'font-mono tabular-nums' : '') +
         ' ' +
-        (empty ? 'text-graphite-soft italic font-display' : 'text-ink')
+        (empty ? 'text-graphite-soft italic' : 'text-ink')
       }
     >
       <span className="block min-h-[1.2em] whitespace-pre-wrap break-words">{display}</span>
       {leaf.source_page !== null && !empty && (
-        <span className="font-mono text-[0.62rem] text-graphite-soft tracking-wider align-top opacity-0 group-hover:opacity-100 transition-opacity">
+        <span className="font-mono text-label text-graphite-soft align-top opacity-0 group-hover:opacity-100 transition-opacity">
           {' '}
           p.{leaf.source_page}
         </span>

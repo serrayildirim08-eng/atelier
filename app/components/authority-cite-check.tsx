@@ -2,33 +2,36 @@ import type { CitationVerifyResult, CitationVerifyStatus } from '@/lib/verify/ty
 
 const STATUS_META: Record<
   CitationVerifyStatus,
-  { tag: string; tone: string; ring: string; blurb: string }
+  { tag: string; weight: 'heavy' | 'med' | 'light'; blurb: string }
 > = {
   on_allowlist: {
     tag: 'OK',
-    tone: 'text-verdant',
-    ring: 'border-verdant/40',
+    weight: 'light',
     blurb: 'matches allowlist',
   },
   off_allowlist: {
     tag: 'OFF',
-    tone: 'text-rubric',
-    ring: 'border-rubric',
+    weight: 'heavy',
     blurb: 'not authorized for this case type',
   },
   aao_route_to_human: {
     tag: 'AAO',
-    tone: 'text-ochre',
-    ring: 'border-ochre/60',
+    weight: 'med',
     blurb: 'attorney review (uncheckable)',
   },
   unparseable: {
     tag: 'BAD',
-    tone: 'text-rubric',
-    ring: 'border-rubric/60',
+    weight: 'heavy',
     blurb: 'malformed citation',
   },
 };
+
+const weightClass = (w: 'heavy' | 'med' | 'light') =>
+  w === 'heavy'
+    ? 'border-ink text-ink font-semibold'
+    : w === 'med'
+      ? 'border-rule-strong text-ink-2 font-medium'
+      : 'border-rule text-graphite';
 
 interface Props {
   result: CitationVerifyResult;
@@ -49,20 +52,18 @@ export function AuthorityCiteCheck({ result }: Props) {
 
   return (
     <div>
-      <div className="flex items-baseline gap-3 mb-4 flex-wrap">
-        <span className="smcp text-[0.62rem] text-graphite tracking-[0.2em]">
-          authority status
-        </span>
+      <div className="flex items-baseline gap-2 mb-5 flex-wrap">
+        <span className="smcp text-graphite mr-2">authority</span>
         <span
           className={
-            'inline-flex items-baseline gap-2 border px-2.5 py-0.5 text-[0.66rem] smcp tracking-widest ' +
-            (cleared ? 'border-verdant/50 text-verdant' : 'border-rubric text-rubric')
+            'inline-flex items-baseline gap-1.5 border rounded-full px-2.5 py-0.5 text-meta ' +
+            (cleared
+              ? 'border-rule text-graphite'
+              : 'border-ink text-ink font-semibold')
           }
         >
           <span>{cleared ? 'cleared' : 'gated'}</span>
-          <span className="font-mono tabular-nums text-ink">
-            {result.total_citations}
-          </span>
+          <span className="font-mono tabular-nums">{result.total_citations}</span>
         </span>
         {counters.map(({ status, count }) => {
           const meta = STATUS_META[status];
@@ -70,21 +71,21 @@ export function AuthorityCiteCheck({ result }: Props) {
             <span
               key={status}
               className={
-                'inline-flex items-baseline gap-1.5 border px-2 py-0.5 text-[0.66rem] smcp tracking-widest ' +
-                meta.ring +
+                'inline-flex items-baseline gap-1.5 border rounded-full px-2.5 py-0.5 text-meta ' +
+                weightClass(meta.weight) +
                 ' ' +
                 (count === 0 ? 'opacity-40' : '')
               }
             >
-              <span className={meta.tone}>{meta.tag.toLowerCase()}</span>
-              <span className="font-mono tabular-nums text-ink">{count}</span>
+              <span>{meta.tag.toLowerCase()}</span>
+              <span className="font-mono tabular-nums">{count}</span>
             </span>
           );
         })}
       </div>
 
       {result.findings.length === 0 ? (
-        <p className="font-display italic text-[0.95rem] text-graphite px-1">
+        <p className="text-body text-graphite leading-relaxed">
           No citations extracted yet — draft the cover letter first, then re-run the verifier.
         </p>
       ) : (
@@ -94,25 +95,30 @@ export function AuthorityCiteCheck({ result }: Props) {
             return (
               <li
                 key={i}
-                className="grid grid-cols-[5rem_1fr_auto] gap-x-4 items-baseline border-b border-rule py-2.5"
+                className="grid grid-cols-[4.5rem_1fr_auto] gap-x-4 items-baseline border-b border-rule last:border-b-0 py-3"
               >
                 <span
                   className={
-                    'smcp text-[0.62rem] tracking-[0.18em] ' + meta.tone
+                    'smcp ' +
+                    (meta.weight === 'heavy'
+                      ? 'text-ink font-semibold'
+                      : meta.weight === 'med'
+                        ? 'text-ink-2'
+                        : 'text-graphite')
                   }
                   title={meta.blurb}
                 >
                   {meta.tag}
                 </span>
                 <div className="min-w-0">
-                  <div className="font-mono text-[0.82rem] text-ink truncate">
+                  <div className="font-mono text-body text-ink truncate">
                     {finding.citation.normalized || finding.citation.raw}
                   </div>
-                  <div className="text-[0.74rem] text-graphite italic font-display truncate">
+                  <div className="text-meta text-graphite-soft mt-0.5 truncate">
                     {finding.message}
                   </div>
                 </div>
-                <span className="font-mono text-[0.66rem] text-graphite-soft tracking-wider">
+                <span className="font-mono text-meta text-graphite-soft">
                   {finding.citation.kind}
                 </span>
               </li>

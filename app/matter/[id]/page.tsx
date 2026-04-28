@@ -741,66 +741,6 @@ function GeneratePane({ id }: { id: string }) {
 
 /* ──────────────────────────────────────────────────────────── primitives ── */
 
-function BlockSection({
-  label,
-  right,
-  className = '',
-  children,
-}: {
-  label: string;
-  right?: React.ReactNode;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className={className}>
-      <header className="flex items-baseline justify-between gap-4 pb-3 mb-5 border-b border-rule">
-        <span className="smcp text-graphite">{label}</span>
-        {right}
-      </header>
-      {children}
-    </section>
-  );
-}
-
-function DataLine({
-  k,
-  v: value,
-  tail,
-  mono,
-  long,
-  inline,
-}: {
-  k: string;
-  v: string | null;
-  tail?: string;
-  mono?: boolean;
-  long?: boolean;
-  inline?: boolean;
-}) {
-  const display = value ?? dash;
-  if (inline) {
-    return (
-      <div className="border-l border-rule pl-3">
-        <div className="smcp text-graphite-soft mb-1">{k}</div>
-        <div className={(mono ? 'font-mono tabular-nums ' : '') + 'text-body text-ink'}>{display}</div>
-        {tail && <div className="text-meta text-graphite mt-0.5">{tail}</div>}
-      </div>
-    );
-  }
-  return (
-    <div className="grid grid-cols-[10rem_1fr] gap-x-6 py-2 border-b border-rule last:border-b-0 items-baseline">
-      <div className="smcp text-graphite-soft pt-0.5">{k}</div>
-      <div>
-        <span className={(mono ? 'font-mono tabular-nums ' : '') + (long ? 'text-body text-ink-2 leading-relaxed' : 'text-body text-ink')}>
-          {display}
-        </span>
-        {tail && <span className="text-meta text-graphite-soft ml-3">{tail}</span>}
-      </div>
-    </div>
-  );
-}
-
 function SectionHeader({
   title,
   right,
@@ -1202,6 +1142,13 @@ function AuditCard({
 
 function Empty({ children }: { children: React.ReactNode }) {
   return (
-    <div className="py-16 text-body text-graphite">{children}</div>
+    <div className="border border-rule bg-paper grid place-items-center py-20 px-6 text-center">
+      <div className="grid gap-3 max-w-md">
+        <div className="sigil mx-auto" style={{ width: '2.4rem', height: '2.4rem', fontSize: '0.85rem' }}>
+          —
+        </div>
+        <p className="text-body text-graphite leading-relaxed">{children}</p>
+      </div>
+    </div>
   );
 }

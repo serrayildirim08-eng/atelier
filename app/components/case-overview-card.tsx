@@ -76,34 +76,34 @@ export function CaseOverviewCard({ matter }: Props) {
     <article className="border border-rule-strong paper-recess">
       <header className="flex items-baseline justify-between gap-6 px-7 pt-6 pb-3 border-b border-rule">
         <div className="flex items-baseline gap-4 min-w-0">
-          <span className="smcp text-[0.7rem] text-graphite tracking-[0.22em]">
+          <span className="smcp text-label text-graphite ">
             ⁂  the matter
           </span>
-          <h1 className="font-display text-[1.55rem] leading-[1.05] tracking-[-0.012em] text-ink truncate">
+          <h1 className="font-display text-title font-bold leading-[1.05] tracking-[-0.012em] text-ink truncate">
             {investorName ?? matter.filename}
           </h1>
-          <span className="display-italic text-[1rem] text-rubric whitespace-nowrap">
+          <span className="font-semibold text-body text-ink whitespace-nowrap">
             E-2 · {subtype ? SUBTYPE_LABEL[subtype.principal_subtype] : 'unspecified subtype'}
           </span>
         </div>
         <div className="flex items-center gap-2 shrink-0">
           {subtype && (
-            <span className="border border-ink-2 px-2.5 py-0.5 text-[0.66rem] smcp text-ink-2 tracking-widest">
+            <span className="border border-ink-2 px-2.5 py-0.5 text-label smcp text-ink-2 ">
               {POSTURE_LABEL[subtype.procedural_posture]}
             </span>
           )}
           {subtype?.has_dependents && (
-            <span className="border border-rule px-2.5 py-0.5 text-[0.66rem] smcp text-graphite tracking-widest">
+            <span className="border border-rule px-2.5 py-0.5 text-label smcp text-graphite ">
               + {subtype.dependent_count} dep
             </span>
           )}
-          <span className="border border-rubric/60 text-rubric px-2.5 py-0.5 text-[0.66rem] smcp tracking-widest">
+          <span className="border border-ink/60 text-ink px-2.5 py-0.5 text-label smcp ">
             {subtype?.detection_confidence ?? 'UNCAL'}
           </span>
         </div>
       </header>
 
-      <dl className="grid grid-cols-4 gap-x-8 gap-y-5 px-7 py-6 text-[0.86rem]">
+      <dl className="grid grid-cols-4 gap-x-8 gap-y-5 px-7 py-6 text-meta">
         <PinnedField
           eyebrow="Nationality"
           value={nationality ?? dash}
@@ -181,21 +181,21 @@ interface PinnedFieldProps {
 function PinnedField({ eyebrow, value, tail, mono, accent }: PinnedFieldProps) {
   return (
     <div className="border-l border-rule pl-3 min-w-0">
-      <dt className="smcp text-[0.62rem] text-graphite-soft tracking-[0.2em] mb-1">
+      <dt className="smcp text-label text-graphite-soft  mb-1">
         {eyebrow}
       </dt>
       <dd
         className={
-          (mono ? 'font-mono text-[0.92rem]' : 'font-display text-[1.04rem]') +
+          (mono ? 'font-mono text-body' : 'font-display text-[1.04rem]') +
           ' text-ink leading-tight truncate ' +
-          (accent === 'warn' ? 'text-ochre' : '')
+          (accent === 'warn' ? 'text-ink-2' : '')
         }
         title={value}
       >
         {value}
       </dd>
       {tail && (
-        <div className="mt-1 text-[0.72rem] text-graphite truncate" title={tail}>
+        <div className="mt-1 text-label text-graphite truncate" title={tail}>
           {tail}
         </div>
       )}

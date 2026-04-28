@@ -20,20 +20,20 @@ export function SectionAccordion({
   return (
     <details className="group border-b border-rule" open={defaultOpen}>
       <summary className="flex items-baseline gap-3 cursor-pointer select-none py-4 px-7 hover:bg-paper-2/50 transition-colors list-none [&::-webkit-details-marker]:hidden">
-        <span className="font-mono text-[0.7rem] text-rubric tracking-[0.18em] w-8 shrink-0">
+        <span className="font-mono text-label text-ink  w-8 shrink-0">
           {numeral}
         </span>
-        <h2 className="font-display text-[1.08rem] tracking-[-0.005em] text-ink leading-none">
+        <h2 className="font-display text-title tracking-[-0.005em] text-ink leading-none">
           {title}
         </h2>
         {subtitle && (
-          <span className="display-italic text-[0.85rem] text-graphite-soft leading-none">
+          <span className="font-semibold text-meta text-graphite-soft leading-none">
             — {subtitle}
           </span>
         )}
         <span className="ml-auto flex items-baseline gap-4">
           {rightSlot}
-          <span className="font-mono text-[0.78rem] text-graphite-soft transition-transform duration-200 group-open:rotate-90">
+          <span className="font-mono text-meta text-graphite-soft transition-transform duration-200 group-open:rotate-90">
             ›
           </span>
         </span>
