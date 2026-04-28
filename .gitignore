@@ -57,10 +57,17 @@ db/filename-aliases.json
 db/previews/
 db/audit/
 
-# claude code session state — ignore everything in .claude/ except shared skills
+# claude code session state — ignore everything in .claude/ except shared, checked-in tooling
 .claude/*
 !.claude/skills
 !.claude/skills/**
+!.claude/hooks
+!.claude/hooks/**
+!.claude/commands
+!.claude/commands/**
+!.claude/scripts
+!.claude/scripts/**
+!.claude/settings.json
 
 # electron build output
 dist-electron/
