@@ -590,3 +590,47 @@ Phase-8 baseline: 253 active + 1 skipped. Phase-9 total: **264 active + 1 skippe
 
 - `npx tsc --noEmit` — clean.
 - `npx vitest run` — 264 active + 1 skipped (265 total). 253 prior + 11 new active. No prior tests broke (2 registry-order tests updated to reflect the new 11-gate registry).
+
+## Phase 10 — 2026-04-29 (FINAL CODE-ONLY PHASE)
+
+Closes the carried Phase-8/9 item "Vector embeddings — paraphrase-tolerant comparator". Replaces (alongside, not instead of) the Phase-5 LLM-based `material-change-comparator.ts` with an embedding-based comparator that uses cosine similarity against the same embedder the RAG layer already uses (`lib/rag/embed.ts` — OpenAI `text-embedding-3-large` @1024d when `OPENAI_API_KEY` is set, local bge-small-en-v1.5 @384d otherwise). Cheaper per call (no Haiku invocation), faster (no network round-trip when local embeddings are warm), and shares the embedding stack the repo already has wired so we don't add a second model dependency.
+
+### Files changed (Phase 10)
+
+| File | Phase-9 lines | Phase-10 lines | Δ |
+|---|---:|---:|---:|
+| `reason/embedding-comparator.ts` | — | 121 | new (`embeddingMaterialChangeComparator(a, b, opts)` returning `{same, similarity}` + `createEmbeddingAssertionComparator(opts)` adapter to the existing `AssertionComparator` contract + `EMBEDDING_COMPARATOR_DEFAULT_THRESHOLD` const) |
+| `reason/checker.ts` | 1056 | 1071 | +15 (`ComparatorOption` type — `'llm' \| 'embedding' \| AssertionComparator \| null` — + `resolveComparator` switch + `runFullReviewWithEmbeddingComparator` convenience export; default behavior unchanged for callers that don't pass `comparator`) |
+| `reason/index.ts` | 42 | 53 | +11 (re-export embedding comparator entrypoints + `runFullReviewWithEmbeddingComparator` + `ComparatorOption`) |
+| `test/lib/phase10.test.ts` | — | 282 | new (6 unit tests on `embeddingMaterialChangeComparator` + 4 integration tests via `runFullReview` + 1 gate-level smoke through the adapter) |
+
+### New behavior
+
+**Comparator.** `embeddingMaterialChangeComparator(a, b, opts?)` embeds both inputs as queries (the embedder is symmetric so document/query distinction doesn't matter for assertion-vs-assertion comparison), normalizes both vectors, and returns `{ same: cos >= threshold, similarity: cos }`. Default threshold 0.85 — empirical RAG retrieval sweet spot for "semantically equivalent" pairs (model-dependent: 0.85 conservative for OpenAI 3-large @1024d, slightly low for bge-small @384d). Caller-owned `Map<string, number>` cache keys on order-independent JSON-quoted (a, b) pair; cache stores the cosine similarity (not `same`), so a caller varying `threshold` across calls reuses the same vectors. Failure-tolerant: any embedder throw degrades to string-equality + `console.warn`, mirroring the `lib/rag/retrieve.ts` posture (RAG returns `[]` on index miss; we return same-on-equal here).
+
+**Adapter.** `createEmbeddingAssertionComparator(opts)` lifts the embedding comparator into the `AssertionComparator` contract used by `materialChangeInResponseToUscisGateAsync`. Maps cosine onto the gate's existing `confidence >= 0.7` floor: `confidence = same ? similarity : 1 - similarity`. The gate's semantics — "fire only on confident-different" — survive unchanged when the embedding path replaces the LLM path.
+
+**`runFullReview` switch.** `comparator` option now accepts `'llm' | 'embedding' | <AssertionComparator> | null`. Default `'llm'` — every existing callsite is byte-identical. `'embedding'` constructs a fresh `createEmbeddingAssertionComparator()` per call. Passing an explicit comparator (e.g. for tests) still works. `null` still skips the comparator entirely (Phase-2 string-equality fallback). Convenience export `runFullReviewWithEmbeddingComparator(facts, draft, verifyReport?, options?)` pins `comparator: 'embedding'` for callers that don't want to thread the option through.
+
+**Configuration knob.** The repo can now flip from LLM to embedding comparator by switching `runFullReview`'s `comparator` option at the callsite, no code changes needed. `app/api/review/route.ts` and any future caller can plumb a feature flag onto the option without touching `reason/`.
+
+### Test count
+
+Phase-9 baseline: 264 active + 1 skipped. Phase-10 total: **275 active + 1 skipped** (276 total). Δ = +11 active (slightly above the +10 target). Coverage breakdown:
+- 6 `embeddingMaterialChangeComparator` (exact-match short-circuit / above-threshold same / below-threshold different / custom threshold / cache hit on order-reversed pair / failure-tolerant fallback + warn).
+- 4 `runFullReview` integration (embedding suppresses paraphrase / embedding fires on orthogonal pair / default LLM path back-compat / `runFullReviewWithEmbeddingComparator` routes through `embedBatch`).
+- 1 gate-level smoke through the embedding adapter (`materialChangeInResponseToUscisGateAsync` doesn't fire when embedder says same with high confidence).
+
+### No further code-only phases viable
+
+Phase-10 is the LAST viable code-only phase. The remaining items genuinely require new input or out-of-band work:
+
+- **EB-1A / EB-1B / EB-1C deterministic gate parity.** Carried from every prior phase. Requires new EB case data — Eylul's calibration batch was E-2 only; without empirical EB-1A/B/C cases to anchor gates against (the way Flatturbo / B&B International / Cemre anchor the E-2 gates), authoring an EB gate registry would be guesswork and produce false-positive-prone code. **Blocked on data, not engineering.**
+- **Automated external puller (Yelp / Google / BBB / Wayback).** Carried from Phase-5/6/8/9. Requires API integration / scraping / TOS decisions outside code-only scope. The Phase-6 `observed_business_model_manual_input` slot lets the attorney type observed-model evidence today; closing the loop with an automated puller is a separate workstream. **Blocked on integration / legal decisions.**
+- **I-129E investment-amount validation, MITA payment-terms enrichment, single-year horizon drift severities, drift-gate denominator policy, schema-overlap consolidation.** All carried open items from Phase-7/8/9. Each is now subsumed by one of the above two blockers OR is a low-leverage cosmetic refinement that should wait for empirical signal from production use rather than speculative authoring. **Closed by Phase 8/9/10 as code-only items.**
+- **Electron IPC `runFullReview` callsite wiring.** Carried. The Electron desktop wrapper already proxies the Next.js `/api/review` route; no separate IPC handler needed.
+
+### Verification (Phase 10)
+
+- `npx tsc --noEmit` — clean.
+- `npx vitest run` — 275 active + 1 skipped (276 total). 264 prior + 11 new active. No prior tests broke.

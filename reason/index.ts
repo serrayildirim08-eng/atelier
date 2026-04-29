@@ -21,18 +21,28 @@ export {
   runE2DeterministicGatesAsync,
   renderGateBlock,
   runFullReview,
+  runFullReviewWithEmbeddingComparator,
   type GateOutcome,
   type GateName,
   type GateFn,
   type GateRunResult,
   type FullReviewResult,
   type RunFullReviewOptions,
+  type ComparatorOption,
 } from './checker';
 export {
   createAssertionComparator,
   type AssertionComparator,
   type AssertionComparison,
 } from './material-change-comparator';
+export {
+  embeddingMaterialChangeComparator,
+  createEmbeddingAssertionComparator,
+  EMBEDDING_COMPARATOR_DEFAULT_THRESHOLD,
+  type EmbeddingComparatorOptions,
+  type EmbeddingComparison,
+  type EmbedFn,
+} from './embedding-comparator';
 export {
   ReviewReportSchema,
   type ReviewReport,

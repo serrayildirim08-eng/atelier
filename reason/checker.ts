@@ -9,6 +9,7 @@ import {
   createAssertionComparator,
   type AssertionComparator,
 } from './material-change-comparator';
+import { createEmbeddingAssertionComparator } from './embedding-comparator';
 
 const SHARED_REVIEW_FRAMEWORK = `Conduct five checks and produce a structured review report.
 
@@ -997,15 +998,29 @@ export interface FullReviewResult {
   llm: ReviewResult;
 }
 
+export type ComparatorOption =
+  | 'llm'
+  | 'embedding'
+  | AssertionComparator
+  | null;
+
 export interface RunFullReviewOptions extends CheckDraftOptions {
   /**
    * Override the assertion comparator used by the
-   * `material_change_in_response_to_uscis` gate. Defaults to a fresh
-   * Haiku-backed comparator per call (cache is per-call). Tests pass a
-   * mock implementation. Set to `null` to skip the comparator entirely
-   * and fall back to string-equality (the legacy Phase-2 behavior).
+   * `material_change_in_response_to_uscis` gate.
+   * - `'llm'` (default): fresh Haiku-backed comparator per call.
+   * - `'embedding'` (Phase-10): cosine-similarity over the RAG embedder.
+   * - `AssertionComparator`: caller-provided implementation (tests).
+   * - `null`: skip the comparator and use string-equality (Phase-2 legacy).
    */
-  comparator?: AssertionComparator | null;
+  comparator?: ComparatorOption;
+}
+
+function resolveComparator(option: ComparatorOption | undefined): AssertionComparator | null {
+  if (option === null) return null;
+  if (option === undefined || option === 'llm') return createAssertionComparator();
+  if (option === 'embedding') return createEmbeddingAssertionComparator();
+  return option;
 }
 
 /**
@@ -1018,6 +1033,10 @@ export interface RunFullReviewOptions extends CheckDraftOptions {
  * Phase-5: routes the `material_change_in_response_to_uscis` gate
  * through an LLM comparator so paraphrased same-fact assertions don't
  * false-positive. Pass `comparator: null` to opt out.
+ *
+ * Phase-10: `comparator` accepts `'llm' | 'embedding' | <fn> | null`.
+ * Default `'llm'` keeps every prior callsite stable. `'embedding'` swaps
+ * in the cosine-similarity path for cheaper/faster paraphrase tolerance.
  */
 export async function runFullReview(
   caseFacts: CaseFacts,
@@ -1027,13 +1046,27 @@ export async function runFullReview(
 ): Promise<FullReviewResult> {
   let deterministic: GateRunResult[] = [];
   if (caseFacts.case_type === 'E2') {
-    if (options?.comparator === null) {
+    const comparator = resolveComparator(options?.comparator);
+    if (comparator === null) {
       deterministic = runE2DeterministicGates(caseFacts.facts);
     } else {
-      const comparator = options?.comparator ?? createAssertionComparator();
       deterministic = await runE2DeterministicGatesAsync(caseFacts.facts, comparator);
     }
   }
   const llm = await checkDraft(caseFacts, draft, verifyReport, options);
   return { deterministic, llm };
+}
+
+/**
+ * Convenience wrapper that pins the comparator to `'embedding'`. Same
+ * shape as `runFullReview` otherwise — for callers that want the
+ * embedding path without threading the option through their stack.
+ */
+export async function runFullReviewWithEmbeddingComparator(
+  caseFacts: CaseFacts,
+  draft: string,
+  verifyReport?: VerifyReport,
+  options?: Omit<RunFullReviewOptions, 'comparator'>,
+): Promise<FullReviewResult> {
+  return runFullReview(caseFacts, draft, verifyReport, { ...options, comparator: 'embedding' });
 }
