@@ -36,6 +36,12 @@ import {
   type SlotResolution,
   type Severity,
 } from '@/lib/e2';
+import {
+  GATE_SEVERITY_LABEL,
+  severityPillClass,
+  gateDefaultOpen,
+  passedGatesSummary,
+} from '@/lib/gates-ui';
 
 /* ---------------------------------------------------------------------- */
 /* Types                                                                   */
@@ -810,6 +816,11 @@ export default function Page() {
           onOpenMatter={() => setMatterOverlayOpen(true)}
           onOpenPdf={(name) => setPdfDetailFilename(name)}
           streamingDraft={streamingDraft}
+          onResultUpdate={(updater) => {
+            setResults((prev) =>
+              prev.map((r, i) => (i === selectedIdx ? updater(r) : r)),
+            );
+          }}
         />
         <Marginalia
           result={selected}
@@ -1147,6 +1158,7 @@ function Dossier({
   onOpenMatter,
   onOpenPdf,
   streamingDraft,
+  onResultUpdate,
 }: {
   result: IngestResult | undefined;
   tab: DossierTab;
@@ -1160,6 +1172,7 @@ function Dossier({
   onOpenMatter: () => void;
   onOpenPdf: (filename: string) => void;
   streamingDraft?: string;
+  onResultUpdate?: (updater: (r: IngestResult) => IngestResult) => void;
 }) {
   const memoryHasEntries = Object.values(typedMemory).some(
     (list) => Array.isArray(list) && list.length > 0,
@@ -1216,7 +1229,9 @@ function Dossier({
             matterRoot={matterRoot}
           />
         )}
-        {tab === 'review' && <ReviewPane result={result} />}
+        {tab === 'review' && (
+          <ReviewPane result={result} onResultUpdate={onResultUpdate} />
+        )}
         {tab === 'audit' && (
           <AuditPane
             key={`audit:${result.filename}`}
@@ -4472,54 +4487,167 @@ function DraftPane({
 /* Review pane                                                             */
 /* ---------------------------------------------------------------------- */
 
-function DeterministicGatesPanel({ gates }: { gates?: GateRunResult[] }) {
+function DeterministicGatesPanel({
+  gates,
+  onRerun,
+  rerunning,
+}: {
+  gates?: GateRunResult[];
+  onRerun?: () => void;
+  rerunning?: boolean;
+}) {
   if (!gates || gates.length === 0) return null;
   const fired = gates.filter((g) => g.outcome.fired);
   const dataIncomplete = gates.filter(
     (g) => !g.outcome.fired && g.outcome.reason === 'data_incomplete',
   );
-  if (fired.length === 0 && dataIncomplete.length === 0) return null;
+  const passed = gates.filter(
+    (g) => !g.outcome.fired && g.outcome.reason === 'not_applicable',
+  );
   return (
     <div>
       <div className="flex items-baseline gap-3 mb-4 pb-2 border-b border-rule">
         <h3 className="smcp text-graphite">Deterministic gates</h3>
         <span className="font-mono text-meta text-graphite-soft tabular-nums">
-          {fired.length} fired · {dataIncomplete.length} data_incomplete
+          {fired.length} fired · {dataIncomplete.length} data_incomplete · {passed.length} passed
         </span>
+        {onRerun && (
+          <button
+            type="button"
+            onClick={onRerun}
+            disabled={rerunning}
+            className={
+              'ml-auto smcp text-meta px-3 py-1 border border-rule-strong bg-paper hover:bg-stone-50 disabled:opacity-50 disabled:cursor-wait ' +
+              (rerunning ? 'animate-pulse' : '')
+            }
+          >
+            {rerunning ? 'Re-running…' : 'Re-run review'}
+          </button>
+        )}
       </div>
       {fired.length === 0 ? (
         <p className="text-body text-graphite leading-relaxed">
-          No deterministic gates fired. {dataIncomplete.length > 0
+          No deterministic gates fired.{' '}
+          {dataIncomplete.length > 0
             ? `${dataIncomplete.length} gate(s) returned data_incomplete — extractor inputs are missing.`
             : null}
         </p>
       ) : (
         <div className="grid gap-3">
           {fired.map((g, i) => {
-            // Severity 5 = block (critical-equivalent); 4 = warning (major).
-            const sev = g.outcome.fired ? g.outcome.severity : null;
-            const severityLabel = sev === 5 ? 'critical' : sev === 4 ? 'major' : 'minor';
+            if (!g.outcome.fired) return null;
+            const sev = g.outcome.severity;
+            const sevLabel = GATE_SEVERITY_LABEL[sev as 4 | 5];
+            const pillClass = severityPillClass(sev as 1 | 2 | 3 | 4 | 5);
+            const defaultOpen = gateDefaultOpen(g);
             return (
-              <FindingCard key={i} severity={severityLabel} eyebrow={g.name}>
-                {g.outcome.fired && (
-                  <>
-                    <div className="text-body text-ink mb-2 leading-relaxed">
-                      {g.outcome.finding}
-                    </div>
-                    <DefMini label="severity" value={String(g.outcome.severity)} />
-                    <DefMini label="authority" value={g.outcome.authority} />
-                  </>
-                )}
-              </FindingCard>
+              <details
+                key={i}
+                open={defaultOpen}
+                className="border border-rule bg-paper px-5 py-4 border-l-rule-strong border-l-[3px]"
+              >
+                <summary className="cursor-pointer flex items-baseline gap-3 list-none">
+                  <span
+                    className={
+                      'smcp text-meta px-2 py-0.5 tracking-wider ' + pillClass
+                    }
+                  >
+                    sev {sev} · {sevLabel}
+                  </span>
+                  <span className="smcp text-graphite-soft">
+                    {humanLabel(g.name)}
+                  </span>
+                  <span className="ml-auto text-meta text-graphite-soft">
+                    {defaultOpen ? '−' : '+'}
+                  </span>
+                </summary>
+                <div className="mt-3">
+                  <div className="text-body text-ink mb-2 leading-relaxed">
+                    {g.outcome.finding}
+                  </div>
+                  <DefMini label="severity" value={String(sev)} />
+                  <DefMini label="authority" value={g.outcome.authority} />
+                  <DefMini label="gate" value={g.name} />
+                </div>
+              </details>
             );
           })}
         </div>
+      )}
+      {gates.length > fired.length && (
+        <details className="mt-4 border border-rule bg-paper px-4 py-2">
+          <summary className="cursor-pointer smcp text-meta text-graphite">
+            ✓ {passedGatesSummary(gates)}
+          </summary>
+          <div className="mt-3 grid gap-1">
+            {gates
+              .filter((g) => !g.outcome.fired)
+              .map((g, i) => (
+                <div
+                  key={i}
+                  className="grid grid-cols-[1fr_auto] gap-3 py-1 text-meta items-baseline"
+                >
+                  <span className="font-mono text-ink-2">{g.name}</span>
+                  <span className="smcp text-graphite-soft">
+                    {!g.outcome.fired ? g.outcome.reason : ''}
+                  </span>
+                </div>
+              ))}
+          </div>
+        </details>
       )}
     </div>
   );
 }
 
-function ReviewPane({ result }: { result: IngestResult }) {
+function ReviewPane({
+  result,
+  onResultUpdate,
+}: {
+  result: IngestResult;
+  onResultUpdate?: (updater: (r: IngestResult) => IngestResult) => void;
+}) {
+  const [rerunning, setRerunning] = useState(false);
+  const [rerunError, setRerunError] = useState<string | null>(null);
+
+  const onRerun =
+    onResultUpdate && result.caseFacts && result.draft
+      ? async () => {
+          setRerunning(true);
+          setRerunError(null);
+          try {
+            const res = await fetch('/api/review', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                case_facts: result.caseFacts,
+                draft: result.draft,
+              }),
+            });
+            const data = (await res.json()) as {
+              review?: ReviewReport;
+              deterministic_gates?: GateRunResult[];
+              error?: string;
+              message?: string;
+            };
+            if (!res.ok || data.error) {
+              setRerunError(data.message ?? data.error ?? `HTTP ${res.status}`);
+            } else {
+              onResultUpdate((r) => ({
+                ...r,
+                review: data.review,
+                deterministic_gates: data.deterministic_gates,
+                reviewError: undefined,
+              }));
+            }
+          } catch (e) {
+            setRerunError(e instanceof Error ? e.message : String(e));
+          } finally {
+            setRerunning(false);
+          }
+        }
+      : undefined;
+
   if (result.reviewError) {
     return (
       <div className="px-9 py-7">
@@ -4561,7 +4689,17 @@ function ReviewPane({ result }: { result: IngestResult }) {
         <p className="text-lede text-ink leading-relaxed">{r.summary}</p>
       </div>
 
-      <DeterministicGatesPanel gates={result.deterministic_gates} />
+      <DeterministicGatesPanel
+        gates={result.deterministic_gates}
+        onRerun={onRerun}
+        rerunning={rerunning}
+      />
+      {rerunError && (
+        <div className="border border-ink paper-recess p-4">
+          <div className="smcp text-ink mb-1">re-run failed</div>
+          <div className="text-body text-ink-2 leading-relaxed">{rerunError}</div>
+        </div>
+      )}
 
       <FindingGroup
         title="Inconsistencies"

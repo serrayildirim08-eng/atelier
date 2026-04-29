@@ -41,6 +41,7 @@ import type { IncentiveDocumentFacts } from './extractors/incentive-document.sch
 import type { CoverLetterRichFacts } from './extractors/cover-letter.schema';
 import type { RfeNoticeFacts } from './extractors/rfe-notice.schema';
 import type { I129ESupplementFacts } from './extractors/i129e-supplement.schema';
+import type { BusinessPlanRichFacts } from './extractors/business-plan.schema';
 
 const Field = <T extends z.ZodTypeAny>(value: T) =>
   z.preprocess(
@@ -787,6 +788,14 @@ export interface PerPdfResult {
    * to a 3-source comparison.
    */
   i129eSupplement?: I129ESupplementFacts;
+  /**
+   * Rich business-plan extraction (Phase-9). Routes when the thin
+   * doc_type='business_plan'. Pulls year-1 / year-3 / year-5 revenue +
+   * year-5 employee count for the
+   * `five_year_horizon_vs_business_plan_drift` gate to compare against
+   * the cover-letter narrative claim.
+   */
+  businessPlan?: BusinessPlanRichFacts;
   error?: { code: string; message: string };
 }
 

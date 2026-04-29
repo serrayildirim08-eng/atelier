@@ -15,6 +15,7 @@ import type { E2Facts } from '@/ingest/schema';
 import {
   developAndDirectRoleAuthorityThinGate,
   fiveYearHorizonMarginalFailureGate,
+  fiveYearHorizonVsBusinessPlanDriftGate,
 } from '@/reason';
 
 function baseFacts(): E2Facts {
@@ -145,5 +146,146 @@ describe('fiveYearHorizonMarginalFailureGate', () => {
       fired: false,
       reason: 'data_incomplete',
     });
+  });
+});
+
+describe('fiveYearHorizonVsBusinessPlanDriftGate', () => {
+  it('fires when year-5 revenue diverges by more than 25% across the two sources', () => {
+    const facts = baseFacts();
+    facts.cover_letter_phase7 = {
+      five_year_horizon: {
+        year_1_revenue_usd: 250000,
+        year_3_revenue_usd: 600000,
+        year_5_revenue_usd: 1000000,
+        year_5_employee_count: 5,
+      },
+    };
+    facts.business_plan_phase9 = {
+      five_year_horizon: {
+        year_1_revenue_usd: 250000,
+        year_3_revenue_usd: 600000,
+        year_5_revenue_usd: 2000000,
+        year_5_employee_count: 5,
+      },
+    };
+    const out = fiveYearHorizonVsBusinessPlanDriftGate(facts);
+    expect(out.fired).toBe(true);
+    if (out.fired) {
+      expect(out.severity).toBe(4);
+      expect(out.authority).toContain('Matter of Ho');
+      expect(out.finding).toContain('year-5 revenue');
+    }
+  });
+
+  it("doesn't fire when year-5 revenue and headcount are within tolerance", () => {
+    const facts = baseFacts();
+    facts.cover_letter_phase7 = {
+      five_year_horizon: {
+        year_1_revenue_usd: null,
+        year_3_revenue_usd: null,
+        year_5_revenue_usd: 1000000,
+        year_5_employee_count: 6,
+      },
+    };
+    facts.business_plan_phase9 = {
+      five_year_horizon: {
+        year_1_revenue_usd: null,
+        year_3_revenue_usd: null,
+        year_5_revenue_usd: 1100000, // 10% drift, under 25% threshold
+        year_5_employee_count: 8, // 25% drift, under 50% threshold
+      },
+    };
+    expect(fiveYearHorizonVsBusinessPlanDriftGate(facts).fired).toBe(false);
+  });
+
+  it('null-safe — either side absent returns data_incomplete', () => {
+    expect(fiveYearHorizonVsBusinessPlanDriftGate(baseFacts())).toEqual({
+      fired: false,
+      reason: 'data_incomplete',
+    });
+    const onlyCover = baseFacts();
+    onlyCover.cover_letter_phase7 = {
+      five_year_horizon: {
+        year_1_revenue_usd: 0,
+        year_3_revenue_usd: 0,
+        year_5_revenue_usd: 1000000,
+        year_5_employee_count: 5,
+      },
+    };
+    expect(fiveYearHorizonVsBusinessPlanDriftGate(onlyCover)).toEqual({
+      fired: false,
+      reason: 'data_incomplete',
+    });
+    const bothPresentBothNumbersNull = baseFacts();
+    bothPresentBothNumbersNull.cover_letter_phase7 = {
+      five_year_horizon: {
+        year_1_revenue_usd: null,
+        year_3_revenue_usd: null,
+        year_5_revenue_usd: null,
+        year_5_employee_count: null,
+      },
+    };
+    bothPresentBothNumbersNull.business_plan_phase9 = {
+      five_year_horizon: {
+        year_1_revenue_usd: null,
+        year_3_revenue_usd: null,
+        year_5_revenue_usd: null,
+        year_5_employee_count: null,
+      },
+    };
+    expect(fiveYearHorizonVsBusinessPlanDriftGate(bothPresentBothNumbersNull)).toEqual({
+      fired: false,
+      reason: 'data_incomplete',
+    });
+  });
+
+  it('threshold edge — exactly 25% revenue drift does NOT fire; just over does', () => {
+    const facts = baseFacts();
+    facts.cover_letter_phase7 = {
+      five_year_horizon: {
+        year_1_revenue_usd: null,
+        year_3_revenue_usd: null,
+        year_5_revenue_usd: 800000,
+        year_5_employee_count: null,
+      },
+    };
+    facts.business_plan_phase9 = {
+      five_year_horizon: {
+        year_1_revenue_usd: null,
+        year_3_revenue_usd: null,
+        // |800k - 1.0M| / 1.0M = 0.20, well under 0.25 → no fire.
+        year_5_revenue_usd: 1000000,
+        year_5_employee_count: null,
+      },
+    };
+    expect(fiveYearHorizonVsBusinessPlanDriftGate(facts).fired).toBe(false);
+
+    // Bump business plan to 1.07M → drift = (1.07M - 800k) / 1.07M ≈ 0.252
+    facts.business_plan_phase9.five_year_horizon!.year_5_revenue_usd = 1070000;
+    expect(fiveYearHorizonVsBusinessPlanDriftGate(facts).fired).toBe(true);
+
+    // Employee-only path: 50% drift exactly does not fire; 51% does.
+    const facts2 = baseFacts();
+    facts2.cover_letter_phase7 = {
+      five_year_horizon: {
+        year_1_revenue_usd: null,
+        year_3_revenue_usd: null,
+        year_5_revenue_usd: null,
+        year_5_employee_count: 4,
+      },
+    };
+    facts2.business_plan_phase9 = {
+      five_year_horizon: {
+        year_1_revenue_usd: null,
+        year_3_revenue_usd: null,
+        year_5_revenue_usd: null,
+        // |4 - 8| / 8 = 0.5 — exactly 50%, does NOT exceed threshold.
+        year_5_employee_count: 8,
+      },
+    };
+    expect(fiveYearHorizonVsBusinessPlanDriftGate(facts2).fired).toBe(false);
+    facts2.business_plan_phase9.five_year_horizon!.year_5_employee_count = 9;
+    // |4 - 9| / 9 ≈ 0.555 → fire.
+    expect(fiveYearHorizonVsBusinessPlanDriftGate(facts2).fired).toBe(true);
   });
 });

@@ -51,6 +51,7 @@ import { extractIncentiveDocument } from './extractors/incentive-document';
 import { extractCoverLetter } from './extractors/cover-letter';
 import { extractRfeNotice } from './extractors/rfe-notice';
 import { extractI129ESupplement } from './extractors/i129e-supplement';
+import { extractBusinessPlan } from './extractors/business-plan';
 
 /**
  * Doc types that route through the rich contract extractor as a second
@@ -299,6 +300,15 @@ const INCENTIVE_DOCUMENT_PATTERN_RE =
  */
 const COVER_LETTER_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
   new Set<DocType>(['cover_letter']);
+
+/**
+ * Business-plan rich extractor (Phase-9). Routes when the thin classifier
+ * returns doc_type='business_plan'. Pulls the four numeric projections
+ * the `five_year_horizon_vs_business_plan_drift` gate compares against
+ * the cover-letter narrative claim.
+ */
+const BUSINESS_PLAN_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
+  new Set<DocType>(['business_plan']);
 
 /**
  * RFE / NOID rich extractor. Filename + content pattern OR thin status_doc
@@ -1008,6 +1018,7 @@ export async function classifyAndExtractOnePdf(
     coverLetterResult,
     rfeNoticeResult,
     i129eSupplementResult,
+    businessPlanResult,
   ] = await Promise.all([
     CONTRACT_FLAVORED_DOC_TYPES.has(facts.doc_type)
       ? extractContract(richInput)
@@ -1088,6 +1099,9 @@ export async function classifyAndExtractOnePdf(
     coverLetterPlainMatch ? extractCoverLetter(richInput) : Promise.resolve(null),
     rfeNoticeMatch ? extractRfeNotice(richInput) : Promise.resolve(null),
     i129eSupplementMatch ? extractI129ESupplement(richInput) : Promise.resolve(null),
+    BUSINESS_PLAN_FLAVORED_DOC_TYPES.has(facts.doc_type)
+      ? extractBusinessPlan(richInput)
+      : Promise.resolve(null),
   ]);
 
   let contract;
@@ -1315,6 +1329,15 @@ export async function classifyAndExtractOnePdf(
     );
   }
 
+  let businessPlan;
+  if (businessPlanResult?.facts) {
+    businessPlan = businessPlanResult.facts;
+  } else if (businessPlanResult?.error) {
+    console.warn(
+      `[business-plan-extract] ${input.filename}: ${businessPlanResult.error.code} — ${businessPlanResult.error.message}`,
+    );
+  }
+
   const entry = {
     pageCount: parsed.pageCount,
     facts,
@@ -1343,6 +1366,7 @@ export async function classifyAndExtractOnePdf(
     coverLetter,
     rfeNotice,
     i129eSupplement,
+    businessPlan,
   };
   writePdfCache(hash, entry);
 

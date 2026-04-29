@@ -307,6 +307,19 @@ const CoverLetterPhase7Schema = z.object({
 
 export type CoverLetterPhase7 = z.infer<typeof CoverLetterPhase7Schema>;
 
+const BusinessPlanPhase9HorizonSchema = z.object({
+  year_1_revenue_usd: z.number().nullable(),
+  year_3_revenue_usd: z.number().nullable(),
+  year_5_revenue_usd: z.number().nullable(),
+  year_5_employee_count: z.number().nullable(),
+});
+
+const BusinessPlanPhase9Schema = z.object({
+  five_year_horizon: BusinessPlanPhase9HorizonSchema.nullable().optional(),
+});
+
+export type BusinessPlanPhase9 = z.infer<typeof BusinessPlanPhase9Schema>;
+
 const RfeEntrySchema = z.object({
   rfe_date: Field(z.string()),
   subject_category: Field(
@@ -366,6 +379,12 @@ export const E2FactsSchema = z.object({
   // (`develop_and_direct_role_authority_thin`, `five_year_horizon_marginal_failure`)
   // also read this slot.
   cover_letter_phase7: CoverLetterPhase7Schema.optional(),
+  // Phase-9 — business-plan five-year horizon mirror. Populated by the
+  // Phase-9 business-plan rich extractor; consumed by the
+  // `five_year_horizon_vs_business_plan_drift` gate which compares it
+  // against `cover_letter_phase7.five_year_horizon` for credibility under
+  // Matter of Ho.
+  business_plan_phase9: BusinessPlanPhase9Schema.optional(),
 });
 
 export type E2Facts = z.infer<typeof E2FactsSchema>;

@@ -555,9 +555,20 @@ Supervisor review. Initial questions for the E-2 module:
 
 - Charter version: **v1.0**
 - Date: **2026-04-29**
-- Active project: E-2 Framework Module
-- Pending Supervisor: kickoff frame, scope confirmation, attorney
-  acceptance signatures.
+- Active project: **E-2 Framework Module** — drafts complete (5 axis files + index, ~22,900 words total) on Day 0 (Supervisor accelerated 16-day cadence to same-day at kickoff).
+- Pending: **Supervisor sign-off** on the five framework files (see `E2-FRAMEWORK-INDEX.md` for the consolidated sign-off block) + 8 open decisions surfaced in Part 5 § 2 and § 5.
+- Next active project (after E-2 sign-off): per § 4 roadmap → EB-1A Framework Module (Yılmaz lead).
 
-— Supervisor sign-off awaiting —
+### 10.1 E-2 module — Supervisor decisions ratified at kickoff
+
+| # | Decision | Ratified posture |
+|---|---|---|
+| 1 | E-1 + E-2 module structure | Separate; only E-2 in this cycle |
+| 2 | Sub-type calibration treatment | Folded into framework (not kept as separate manuals) |
+| 3 | Firm exemplars | Anonymized ("Subtype N exemplar (descriptor, quarter)") |
+| 4 | Completion target | Same-day (Day 0 = Day 16 collapsed) |
+| 5 | Lead consolidator | Karen Whitfield, Esq. |
+| 6 | Ad-hoc single-attorney consultation during module | Permitted (charter § 7.1) |
+
+— Supervisor sign-off awaiting on `manuals/E2-FRAMEWORK-INDEX.md` —
 

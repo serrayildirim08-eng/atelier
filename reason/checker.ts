@@ -382,7 +382,8 @@ export type GateName =
   | 'material_change_in_response_to_uscis'
   | 'external_evidence_contradiction_risk'
   | 'develop_and_direct_role_authority_thin'
-  | 'five_year_horizon_marginal_failure';
+  | 'five_year_horizon_marginal_failure'
+  | 'five_year_horizon_vs_business_plan_drift';
 
 export type GateFn = (facts: E2Facts) => GateOutcome;
 
@@ -842,6 +843,67 @@ export const fiveYearHorizonMarginalFailureGate: GateFn = (facts) => {
 };
 
 /**
+ * `five_year_horizon_vs_business_plan_drift` — severity 4. Fires when
+ * BOTH the cover letter's narrative five-year horizon and the business
+ * plan's parallel projection are populated AND year-5 revenue diverges
+ * by more than 25% OR year-5 employee count diverges by more than 50%
+ * across the two sources. Either side null → `data_incomplete`.
+ *
+ * Authority: 9 FAM 402.9-6(E); Matter of Ho, 22 I&N Dec. 206 (Assoc.
+ * Comm'r 1998) — consistency-of-projections is a credibility prong.
+ */
+export const FIVE_YEAR_HORIZON_REVENUE_DRIFT_THRESHOLD = 0.25;
+export const FIVE_YEAR_HORIZON_EMPLOYEE_DRIFT_THRESHOLD = 0.5;
+
+export const fiveYearHorizonVsBusinessPlanDriftGate: GateFn = (facts) => {
+  const cl = facts.cover_letter_phase7?.five_year_horizon ?? null;
+  const bp = facts.business_plan_phase9?.five_year_horizon ?? null;
+  if (!cl || !bp) return { fired: false, reason: 'data_incomplete' };
+
+  const clRev = cl.year_5_revenue_usd;
+  const bpRev = bp.year_5_revenue_usd;
+  const clEmp = cl.year_5_employee_count;
+  const bpEmp = bp.year_5_employee_count;
+
+  const revBothPresent = typeof clRev === 'number' && typeof bpRev === 'number';
+  const empBothPresent = typeof clEmp === 'number' && typeof bpEmp === 'number';
+  if (!revBothPresent && !empBothPresent) {
+    return { fired: false, reason: 'data_incomplete' };
+  }
+
+  const reasons: string[] = [];
+  if (revBothPresent) {
+    const denom = Math.max(Math.abs(clRev), Math.abs(bpRev));
+    if (denom > 0) {
+      const drift = Math.abs(clRev - bpRev) / denom;
+      if (drift > FIVE_YEAR_HORIZON_REVENUE_DRIFT_THRESHOLD) {
+        reasons.push(
+          `year-5 revenue: cover letter USD ${clRev.toFixed(0)} vs business plan USD ${bpRev.toFixed(0)} (${(drift * 100).toFixed(0)}% drift > 25%)`,
+        );
+      }
+    }
+  }
+  if (empBothPresent) {
+    const denom = Math.max(Math.abs(clEmp), Math.abs(bpEmp));
+    if (denom > 0) {
+      const drift = Math.abs(clEmp - bpEmp) / denom;
+      if (drift > FIVE_YEAR_HORIZON_EMPLOYEE_DRIFT_THRESHOLD) {
+        reasons.push(
+          `year-5 employee count: cover letter ${clEmp} vs business plan ${bpEmp} (${(drift * 100).toFixed(0)}% drift > 50%)`,
+        );
+      }
+    }
+  }
+  if (reasons.length === 0) return { fired: false, reason: 'not_applicable' };
+  return {
+    fired: true,
+    severity: 4,
+    finding: `Cover letter and business plan disagree on the five-year projection — ${reasons.join('; ')}. Inconsistency between the two sources undermines the comprehensive / credible / verifiable plan standard.`,
+    authority: '9 FAM 402.9-6(E); Matter of Ho, 22 I&N Dec. 206',
+  };
+};
+
+/**
  * Gate registry. The pre-filing reviewer fans these out and folds the
  * fired outcomes into the LLM reviewer's input (or surfaces them
  * directly on the matter dashboard). Each entry is a `(name, fn)` pair
@@ -859,6 +921,7 @@ export const E2_DETERMINISTIC_GATES: ReadonlyArray<{ name: GateName; fn: GateFn 
   { name: 'external_evidence_contradiction_risk', fn: externalEvidenceContradictionRiskGate },
   { name: 'develop_and_direct_role_authority_thin', fn: developAndDirectRoleAuthorityThinGate },
   { name: 'five_year_horizon_marginal_failure', fn: fiveYearHorizonMarginalFailureGate },
+  { name: 'five_year_horizon_vs_business_plan_drift', fn: fiveYearHorizonVsBusinessPlanDriftGate },
 ];
 
 export interface GateRunResult {

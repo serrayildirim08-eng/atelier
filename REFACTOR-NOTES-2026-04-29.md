@@ -520,3 +520,73 @@ Skipped per the brief; tracked here for the next batch:
 
 - `npx tsc --noEmit` — clean.
 - `npx vitest run` — 253 active + 1 skipped (254 total). 237 prior + 16 new active. No prior tests broke (2 registry-order tests updated to reflect the new 10-gate registry).
+
+## Phase 9 — 2026-04-29 (one more)
+
+Closes the Phase-8 carried items "Dossier UI work" (severity badges, expand/collapse, re-run affordance, gate-not-fired summary on `DeterministicGatesPanel`) and "`five_year_business_horizon` ↔ `business_plan` projections drift gate". Adds a thin `business_plan` rich extractor, an 11th deterministic gate, a re-run review API route, and a small pure-helpers module so the panel's UI decisions are testable inside the node-env Vitest harness.
+
+### Files changed (Phase 9)
+
+| File | Phase-8 lines | Phase-9 lines | Δ |
+|---|---:|---:|---:|
+| `ingest/schema.ts` | 588 | 605 | +17 (`BusinessPlanPhase9HorizonSchema` + `BusinessPlanPhase9Schema` + optional slot on `E2FactsSchema`) |
+| `ingest/extractors/business-plan.schema.ts` | — | 30 | new (`BusinessPlanRichFactsSchema`: 4 numeric Field<T> leaves) |
+| `ingest/extractors/business-plan.ts` | — | 153 | new (single Haiku 4.5 call, matches cover-letter.ts pattern) |
+| `ingest/typed-memory.ts` | 800 | 810 | +10 (`businessPlan?` slot on `PerPdfResult` + import) |
+| `ingest/typed-extract.ts` | 1359 | 1380 | +21 (`BUSINESS_PLAN_FLAVORED_DOC_TYPES` + Promise.all entry + result un-wrap + entry write) |
+| `ingest/typed-aggregate.ts` | 5230 | 5286 | +56 (`enrichPhase9Fields` orchestrator + invocation site after `enrichPhase8Fields`) |
+| `reason/checker.ts` | 989 | 1056 | +67 (1 new gate `fiveYearHorizonVsBusinessPlanDriftGate` + 2 threshold consts + new `GateName` literal + entry on `E2_DETERMINISTIC_GATES`) |
+| `reason/index.ts` | 39 | 42 | +3 (re-export gate + 2 threshold consts) |
+| `lib/gates-ui.ts` | — | 60 | new (severity → Tailwind class table, `gateDefaultOpen`, `passedGatesSummary` — pure / testable) |
+| `app/api/review/route.ts` | — | 65 | new (POST handler — `case_facts` + `draft` → `runFullReview` → `{ review, deterministic_gates }`) |
+| `app/page.tsx` | 6500ish | +120 | severity-badge pills + `<details>`-based expand/collapse + re-run button wired to `/api/review` + collapsed "gates passed" summary; `Dossier`/`ReviewPane` thread an `onResultUpdate` callback so the rerun replaces the in-state review |
+| `test/lib/e2-gates.test.ts` | 454 | 456 | +2 (registry-order test 10 → 11 + Markdown row count 12 → 13) |
+| `test/lib/phase5.test.ts` | 366 | 368 | +2 (deterministic length 10 → 11 + registry-order test extended) |
+| `test/lib/phase8-gates.test.ts` | 138 | 290 | +152 (4 new tests: fires / doesn't-fire / null-safe / threshold-edge) |
+| `test/lib/gates-ui.test.ts` | — | 130 | new (7 tests: severity-class collisions / labels / default-open rules / gates-passed summary / re-run POST contract) |
+
+### New behavior
+
+**Schema slot.** `E2FactsSchema.business_plan_phase9?` carries an optional `five_year_horizon: { year_1_revenue_usd, year_3_revenue_usd, year_5_revenue_usd, year_5_employee_count }` mirroring the `cover_letter_phase7.five_year_horizon` shape. The drift gate compares the two slots.
+
+**Phase-9 enricher.** `enrichPhase9Fields(facts, memory)` runs after `enrichPhase8Fields` in `aggregateTypedMemoryToE2`. Walks every `PerPdfResult.businessPlan` (the new rich-extraction slot), picks the FIRST entry with at least one populated numeric leaf, and writes it onto `facts.business_plan_phase9.five_year_horizon`. Idempotent.
+
+**Reviewer integration.** New gate on `E2_DETERMINISTIC_GATES` (now 11 gates total):
+
+| Gate | Severity | Trigger | Authority |
+|---|---|---|---|
+| `five_year_horizon_vs_business_plan_drift` | 4 | BOTH `cover_letter_phase7.five_year_horizon` AND `business_plan_phase9.five_year_horizon` populated AND year-5 revenue diverges by > 25% OR year-5 employee count diverges by > 50% across the two sources. | 9 FAM 402.9-6(E); *Matter of Ho*, 22 I&N Dec. 206 |
+
+Pure, null-safe (`data_incomplete` when either side absent or both numeric leaves are null), and threshold-defensive (uses `max(|a|, |b|)` as the divergence denominator so the comparison is symmetric and stable when one side is small).
+
+**UI — `DeterministicGatesPanel`.**
+- **Severity pills** (Phase-9): each fired gate gets a colored pill — sev 5 = red (`bg-red-100 text-red-900 border-red-300`), sev 4 = orange, sev 3 = yellow, sev 2 = blue, sev 1 = stone. The class table lives in `lib/gates-ui.ts` so the test suite can pin the palette without mounting React.
+- **Expand/collapse** (Phase-9): each fired gate is a `<details>` element. Severity-5 gates default open; sev 1-4 default closed. The summary row renders `sev N · label · gate-name · [+/−]` so the attorney sees the headline before expanding.
+- **Re-run review button** (Phase-9): a new button at the top of the panel, label "Re-run review", visible only when the matter has both `caseFacts` and `draft`. On click, posts `{ case_facts, draft }` to `/api/review` (new route — runs `runFullReview` server-side and returns `{ review, deterministic_gates }`); during the request the button shows "Re-running…" + `animate-pulse` and is disabled. On success, `onResultUpdate` replaces the result's `review` and `deterministic_gates` in page state. On failure, an inline `re-run failed` panel surfaces the error message.
+- **Gates-passed summary** (Phase-9): collapsed-by-default `<details>` block at the bottom of the panel showing `✓ M of N gates passed` (or `All N gates passed.` when zero fired). Inside, every not-fired gate row renders `gate_name · reason` so the attorney can audit which checks the system actually ran.
+
+### Test count
+
+Phase-8 baseline: 253 active + 1 skipped. Phase-9 total: **264 active + 1 skipped** (265 total). Δ = +11 active (slightly above the +10 target). Coverage breakdown:
+- 4 `fiveYearHorizonVsBusinessPlanDriftGate` (fires-on-revenue-drift / doesn't-fire-when-within-tolerance / null-safe / threshold-edge for both revenue 25% and employees 50%).
+- 2 `severityPillClass` (5 distinct classes / human label table).
+- 2 `gateDefaultOpen` (sev 5 fired opens / sev 4 fired and not-fired collapse).
+- 2 `passedGatesSummary` (`All N` form / `M of N` form).
+- 1 re-run POST contract test (`/api/review` with `{ case_facts, draft }`).
+
+### Phase-10+ explicit (carried + new)
+
+- [ ] **Vector embeddings.** Paraphrase-tolerant comparator for NAICS phrase drift (Phase-6 carried) and granular `develop_and_direct` scope-match. Wait for firm green-light on paid embeddings.
+- [ ] **EB-1A / EB-1B / EB-1C deterministic gate parity.** Carried from every prior phase. The `runFullReview` orchestrator already returns `deterministic: GateRunResult[]` for any case type; adding EB gate registries is a routine additive pass once the EB-flavored cover-letter / RFE schemas are scoped.
+- [ ] **Automated external puller (Yelp / Google / BBB / Wayback).** Carried from Phase-5/6/8. Without it, `external_evidence_contradiction_risk` operates as a checklist prompt anchored to the manual-input stub.
+- [ ] **I-129E investment-amount validation.** Carried from Phase-7/8.
+- [ ] **`runFullReview` callsite wiring on Electron IPC.** Carried.
+- [ ] **Co-petitioner role enrichment from MITA payment terms.** Carried from Phase-3 / Phase-6 / Phase-7 / Phase-8.
+- [ ] **Single-year horizon drift severities.** Phase-9 fires at severity 4 on either year-5 revenue >25% drift OR year-5 employee >50% drift. The original brief sketched a separate severity-3 single-year mismatch tier; not carved out — the LLM reviewer's qualitative pass surfaces year-1/year-3 anomalies adequately for the current MVP.
+- [ ] **Drift-gate denominator policy.** Phase-9 uses `max(|a|, |b|)` as the symmetric divergence denominator. When one side is zero, the gate falls back to `not_applicable` for that pair (rather than firing on a divide-by-zero or treating zero as 100% drift). If the firm later wants asymmetric "cover letter must not exceed business plan by >25%" semantics, the gate body has the explicit branch ready.
+- [ ] **Phase-9 rich-extractor schema overlap with thin `BusinessPlanFactsSchema`.** The new `BusinessPlanRichFactsSchema` (year-1 / year-3 / year-5 revenue + year-5 employee count) overlaps the thin schema's `projected_revenue_year1_usd` / `projected_revenue_year5_usd`. Both populate per-PDF; the aggregator reads the rich slot for the gate, but the thin slot remains canonical for memory display + downstream LLM prompts. A future pass could remove the overlap by promoting the rich fields onto the thin schema.
+
+### Verification (Phase 9)
+
+- `npx tsc --noEmit` — clean.
+- `npx vitest run` — 264 active + 1 skipped (265 total). 253 prior + 11 new active. No prior tests broke (2 registry-order tests updated to reflect the new 11-gate registry).

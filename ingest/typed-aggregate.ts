@@ -3819,6 +3819,52 @@ export function enrichPhase8Fields(facts: E2Facts, memory: TypedMemory): E2Facts
 }
 
 /**
+ * Phase-9 — surfaces the business-plan rich extractor's five-year
+ * horizon (year-1 / year-3 / year-5 revenue + year-5 employee count)
+ * onto facts.business_plan_phase9. The
+ * `five_year_horizon_vs_business_plan_drift` gate compares this against
+ * facts.cover_letter_phase7.five_year_horizon for credibility under
+ * Matter of Ho. Idempotent — never overwrites a populated slot. Picks
+ * the FIRST populated business_plan rich entry (case folders rarely
+ * carry multiple plans; when they do, the LLM aggregator's preference
+ * cascade keeps the most authoritative source elsewhere).
+ */
+export function enrichPhase9Fields(facts: E2Facts, memory: TypedMemory): E2Facts {
+  if (facts.business_plan_phase9?.five_year_horizon != null) return facts;
+
+  type Horizon = {
+    year_1_revenue_usd: number | null;
+    year_3_revenue_usd: number | null;
+    year_5_revenue_usd: number | null;
+    year_5_employee_count: number | null;
+  };
+  let horizon: Horizon | null = null;
+  for (const entry of iterMemoryEntries(memory)) {
+    const bp = entry.businessPlan;
+    if (!bp) continue;
+    const y1 = bp.year_1_revenue_usd?.value ?? null;
+    const y3 = bp.year_3_revenue_usd?.value ?? null;
+    const y5 = bp.year_5_revenue_usd?.value ?? null;
+    const e5 = bp.year_5_employee_count?.value ?? null;
+    if (y1 == null && y3 == null && y5 == null && e5 == null) continue;
+    horizon = {
+      year_1_revenue_usd: y1,
+      year_3_revenue_usd: y3,
+      year_5_revenue_usd: y5,
+      year_5_employee_count: e5,
+    };
+    break;
+  }
+  if (horizon) {
+    facts.business_plan_phase9 = {
+      ...(facts.business_plan_phase9 ?? {}),
+      five_year_horizon: horizon,
+    };
+  }
+  return facts;
+}
+
+/**
  * Phase-3 orchestrator. Mutates `facts` in place to populate any of the
  * Phase-1 / Phase-2 optional gate inputs that the LLM aggregator left
  * absent. Idempotent: never overwrites a populated field. Returns the
@@ -4105,6 +4151,12 @@ export async function aggregateTypedMemoryToE2(
   // grant) onto facts.cover_letter_phase7 so the drafter and the two
   // new Phase-8 gates can read them as canonical inputs.
   enrichPhase8Fields(parsed.data, memory);
+
+  // Phase-9 enrichment — surface the business-plan rich extractor's
+  // five-year horizon onto facts.business_plan_phase9 so the
+  // five_year_horizon_vs_business_plan_drift gate can compare it
+  // against the cover-letter narrative claim.
+  enrichPhase9Fields(parsed.data, memory);
 
   // Manual §4.5 quality gate: deterministic backstop for the Sonnet
   // reasoning. If the membership_interest_transfer total_consideration

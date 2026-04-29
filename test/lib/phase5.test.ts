@@ -108,11 +108,11 @@ describe('runFullReview integration', () => {
     expect(out).toHaveProperty('deterministic');
     expect(out).toHaveProperty('llm');
     expect(Array.isArray(out.deterministic)).toBe(true);
-    expect(out.deterministic).toHaveLength(10);
+    expect(out.deterministic).toHaveLength(11);
     expect(out.llm.report.summary).toBe('Mocked review.');
   });
 
-  it('runs all 10 gates in registry order via the async path', async () => {
+  it('runs all 11 gates in registry order via the async path', async () => {
     const facts = baseFacts();
     const caseFacts: CaseFacts = { case_type: 'E2', facts };
     const out = await runFullReview(caseFacts, 'draft', undefined, {
@@ -129,6 +129,7 @@ describe('runFullReview integration', () => {
       'external_evidence_contradiction_risk',
       'develop_and_direct_role_authority_thin',
       'five_year_horizon_marginal_failure',
+      'five_year_horizon_vs_business_plan_drift',
     ]);
   });
 

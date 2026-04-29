@@ -421,7 +421,7 @@ describe('externalEvidenceContradictionRiskGate', () => {
 });
 
 describe('runE2DeterministicGates registry', () => {
-  it('runs all 10 gates and returns one outcome per gate, in registry order', () => {
+  it('runs all 11 gates and returns one outcome per gate, in registry order', () => {
     const results = runE2DeterministicGates(baseFacts());
     expect(results.map((r) => r.name)).toEqual([
       'ownership_volatility',
@@ -434,6 +434,7 @@ describe('runE2DeterministicGates registry', () => {
       'external_evidence_contradiction_risk',
       'develop_and_direct_role_authority_thin',
       'five_year_horizon_marginal_failure',
+      'five_year_horizon_vs_business_plan_drift',
     ]);
     for (const r of results) expect(r.outcome.fired).toBe(false);
   });
@@ -448,7 +449,7 @@ describe('runE2DeterministicGates registry', () => {
     const block = renderGateBlock(runE2DeterministicGates(facts));
     expect(block).toContain('Deterministic gate findings');
     expect(block).toContain('| status_gap_pre_filing | 5 | fired |');
-    // 10 gate rows + header row + separator row (`|---|...|`)
-    expect(block.split('\n').filter((l) => l.startsWith('|'))).toHaveLength(12);
+    // 11 gate rows + header row + separator row (`|---|...|`)
+    expect(block.split('\n').filter((l) => l.startsWith('|'))).toHaveLength(13);
   });
 });
