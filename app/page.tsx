@@ -399,6 +399,11 @@ export default function Page() {
     total: 0,
   });
   const [matterRoot, setMatterRoot] = useState<string | null>(null);
+  // Per-matter root map (filename → absolute folder). Persisted to
+  // localStorage so HMR / page reloads can restore matterRoot from the
+  // currently-selected matter. Without this, rename / re-aggregate would
+  // silently no-op after a full refresh until the folder is re-picked.
+  const [matterRoots, setMatterRoots] = useState<Record<string, string>>({});
   const [matterOverlayOpen, setMatterOverlayOpen] = useState(false);
   // PDF detail modal state — when set, opens the PdfDetailModal showing
   // preview + structured rich extraction + audit findings for that PDF.
@@ -624,7 +629,45 @@ export default function Page() {
     } catch {
       /* ignore — corrupt storage just means the binder starts empty */
     }
+    try {
+      const rawRoots = localStorage.getItem('akalan:matter-roots:v1');
+      if (rawRoots) {
+        const parsed = JSON.parse(rawRoots) as Record<string, string>;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setMatterRoots(parsed);
+        }
+      }
+    } catch {
+      /* ignore — corrupt storage just means roots are not restored */
+    }
   }, []);
+
+  // Persist matter-root map whenever it changes.
+  useEffect(() => {
+    try {
+      if (Object.keys(matterRoots).length === 0) {
+        localStorage.removeItem('akalan:matter-roots:v1');
+      } else {
+        localStorage.setItem('akalan:matter-roots:v1', JSON.stringify(matterRoots));
+      }
+    } catch {
+      /* localStorage full or disabled — non-fatal */
+    }
+  }, [matterRoots]);
+
+  // Whenever the selected matter changes, rehydrate matterRoot from the
+  // persisted map. Lets rename / re-aggregate keep working after a full
+  // page reload (where transient matterRoot state is lost).
+  useEffect(() => {
+    const selectedFilename = results[selectedIdx]?.filename;
+    if (!selectedFilename) return;
+    const persisted = matterRoots[selectedFilename];
+    if (persisted && persisted !== matterRoot) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMatterRoot(persisted);
+    }
+  }, [selectedIdx, results, matterRoots, matterRoot]);
 
   useEffect(() => {
     try {
@@ -745,6 +788,7 @@ export default function Page() {
     setTypedMemory({});
     setPerPdfCount({ done: 0, total: 0 });
     setMatterRoot(rootPath);
+    setMatterRoots((prev) => ({ ...prev, [rootPath.split('/').pop() ?? rootPath]: rootPath }));
     setMatterOverride(null);
     setStreamingDraft('');
     setStreamEvents([]);
@@ -2690,6 +2734,7 @@ function DossierHeader({
   const [editingMatterName, setEditingMatterName] = useState(false);
   const [matterNameDraft, setMatterNameDraft] = useState('');
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const saveMatterName = async (raw: string) => {
     if (!onSetMatterDisplayName) {
@@ -2698,13 +2743,22 @@ function DossierHeader({
     }
     const trimmed = raw.trim();
     setSaving(true);
+    setSaveError(null);
     try {
       // Empty input clears the override; same name as folder also clears.
       const next = trimmed.length === 0 || trimmed === result.filename ? null : trimmed;
-      await onSetMatterDisplayName(next);
+      const ok = await onSetMatterDisplayName(next);
+      if (!ok) {
+        setSaveError(
+          matterRoot
+            ? 'Save failed — see console.'
+            : 'Re-pick the folder first (matter root unset).',
+        );
+        return;
+      }
+      setEditingMatterName(false);
     } finally {
       setSaving(false);
-      setEditingMatterName(false);
     }
   };
 
@@ -2712,42 +2766,71 @@ function DossierHeader({
     <header className="px-9 pt-7 pb-5">
       <div className="flex items-center gap-3 font-mono text-meta text-graphite mb-3">
         {editingMatterName ? (
-          <input
-            autoFocus
-            value={matterNameDraft}
-            disabled={saving}
-            onChange={(e) => setMatterNameDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void saveMatterName(matterNameDraft);
-              else if (e.key === 'Escape') setEditingMatterName(false);
-            }}
-            onBlur={() => void saveMatterName(matterNameDraft)}
-            className="font-mono text-meta text-ink bg-transparent border-b border-ink outline-none min-w-[10rem] max-w-[20rem] truncate"
-            placeholder={result.filename}
-            aria-label="Rename matter"
-            maxLength={200}
-          />
+          <span className="flex items-center gap-2">
+            <input
+              autoFocus
+              value={matterNameDraft}
+              disabled={saving}
+              onChange={(e) => setMatterNameDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void saveMatterName(matterNameDraft);
+                else if (e.key === 'Escape') {
+                  setSaveError(null);
+                  setEditingMatterName(false);
+                }
+              }}
+              className="font-mono text-meta text-ink bg-transparent border-b border-ink outline-none min-w-[10rem] max-w-[20rem] truncate"
+              placeholder={result.filename}
+              aria-label="Rename matter"
+              maxLength={200}
+            />
+            {saving && (
+              <span className="font-mono text-label text-graphite-soft animate-pulse">
+                saving…
+              </span>
+            )}
+            {saveError && (
+              <span
+                className="font-mono text-label text-ink border border-ink px-1.5 py-0.5"
+                role="alert"
+              >
+                {saveError}
+              </span>
+            )}
+          </span>
         ) : (
-          <button
-            type="button"
-            onClick={() => {
-              if (!onSetMatterDisplayName) return;
-              setMatterNameDraft(effectiveMatterName);
-              setEditingMatterName(true);
-            }}
-            disabled={!onSetMatterDisplayName}
-            title={
-              onSetMatterDisplayName
-                ? 'Rename matter (display only — source folder is not renamed)'
-                : undefined
-            }
-            className={
-              'truncate text-left hover:text-ink transition-colors ' +
-              (onSetMatterDisplayName ? 'cursor-text' : 'cursor-default')
-            }
-          >
-            {effectiveMatterName}
-          </button>
+          <span className="flex items-center gap-2 min-w-0">
+            <span className="truncate" title={effectiveMatterName}>
+              {effectiveMatterName}
+            </span>
+            {onSetMatterDisplayName && (
+              <button
+                type="button"
+                onClick={() => {
+                  setMatterNameDraft(effectiveMatterName);
+                  setEditingMatterName(true);
+                }}
+                title="Rename matter (display only — source folder is not renamed)"
+                aria-label="Rename matter"
+                className="shrink-0 inline-flex items-center justify-center w-6 h-6 border border-rule text-graphite hover:text-ink hover:border-rule-strong hover:bg-paper-2 transition-colors"
+              >
+                <svg
+                  width="11"
+                  height="11"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M11.5 1.5l3 3-9 9H2.5v-3l9-9z" />
+                  <path d="M9.5 3.5l3 3" />
+                </svg>
+              </button>
+            )}
+          </span>
         )}
         {matterRenamed && !editingMatterName && (
           <span
@@ -6655,8 +6738,117 @@ function MatterDocumentsSection({
     return init;
   });
 
+  // Compute the "needs review" pile: extraction errors, plus docs the
+  // classifier dropped into 'other' that haven't been manually reclassified
+  // yet. These are the docs the attorney most likely wants to triage first.
+  const needsReview: { docType: DocType; entry: PerPdfMemoryEntry }[] = [];
+  for (const [docType, entries] of buckets) {
+    for (const entry of entries) {
+      const ovr = documentOverrides?.[entry.filename] ?? null;
+      const hasOverride = !!ovr?.doc_type_override;
+      if (entry.error) {
+        needsReview.push({ docType, entry });
+      } else if (docType === 'other' && !hasOverride) {
+        needsReview.push({ docType, entry });
+      }
+    }
+  }
+
   return (
     <section>
+      {needsReview.length > 0 && (
+        <div className="mb-7 border-2 border-ink paper-recess">
+          <div className="px-5 py-3 border-b-2 border-ink flex items-baseline justify-between">
+            <div className="flex items-baseline gap-3">
+              <span className="font-display text-title text-ink">needs review</span>
+              <span className="font-mono text-label text-graphite">
+                {needsReview.length} document{needsReview.length === 1 ? '' : 's'}
+              </span>
+            </div>
+            <span className="smcp text-label text-graphite-soft">
+              · classify or rename to clear
+            </span>
+          </div>
+          <ul>
+            {needsReview.map(({ docType, entry }) => {
+              const key = entryKey(docType, entry.filename);
+              const expanded = selectedEntryKey === key;
+              const persistedLabel =
+                documentOverrides?.[entry.filename]?.display_name ?? null;
+              const label =
+                entryLabels[key] ?? persistedLabel ?? getSuggestedDocLabel(entry);
+              return (
+                <li key={key} className="border-b border-rule last:border-b-0">
+                  <button
+                    onClick={() => onSelectEntry(expanded ? null : key)}
+                    className={
+                      'w-full text-left flex items-baseline gap-3 px-5 py-2.5 transition-colors group ' +
+                      (expanded ? 'bg-paper-2/40' : 'hover:bg-paper-2/30')
+                    }
+                  >
+                    <span
+                      className="font-mono text-label text-graphite-soft shrink-0"
+                      style={{
+                        display: 'inline-block',
+                        transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                        transformOrigin: '50% 55%',
+                        width: '0.7rem',
+                      }}
+                    >
+                      ▶
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div
+                        className={
+                          'font-display text-body truncate ' +
+                          (expanded
+                            ? 'text-ink'
+                            : 'text-ink-2 group-hover:text-ink')
+                        }
+                        title={label}
+                      >
+                        {label}
+                      </div>
+                      <div
+                        className="font-mono text-label text-graphite-soft truncate"
+                        title={entry.filename}
+                      >
+                        {basenameOf(entry.filename)}
+                      </div>
+                    </div>
+                    {entry.error ? (
+                      <span className="shrink-0 font-mono text-label text-ink border border-ink px-1.5 py-0.5 smcp">
+                        error · {entry.error.code}
+                      </span>
+                    ) : (
+                      <span className="shrink-0 font-mono text-label text-ink border border-ink px-1.5 py-0.5 smcp">
+                        unclassified
+                      </span>
+                    )}
+                  </button>
+                  {expanded && (
+                    <DocumentInlinePreview
+                      entry={entry}
+                      entryKeyValue={key}
+                      docType={docType}
+                      matterRoot={matterRoot}
+                      label={label}
+                      onSetLabel={onSetLabel}
+                      overridden={
+                        entryLabels[key] !== undefined || persistedLabel !== null
+                      }
+                      docTypeOverride={
+                        documentOverrides?.[entry.filename]?.doc_type_override ?? null
+                      }
+                      onApplyDocOverride={onApplyDocOverride}
+                    />
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
       <SectionTitle marker="·" label="documents · click to preview" />
       <div className="space-y-5">
         {buckets.map(([docType, entries]) => {
