@@ -4,7 +4,7 @@
     "B2": { "pod": "backend", "status": "done", "owner": "backend-senior" },
     "B3": { "pod": "backend", "status": "done", "owner": "backend-senior" },
     "B4": { "pod": "backend", "status": "done", "owner": "backend-senior" },
-    "B5": { "pod": "backend", "status": "blocked", "owner": "backend-senior", "blocker": "backend-1" },
+    "B5": { "pod": "backend", "status": "deferred", "owner": "backend-senior", "deferred_reason": "E-2 only this sprint; EB-1A moved to EB-parity batch (decision 2026-04-29)" },
     "F1": { "pod": "frontend", "status": "todo", "owner": "frontend-senior" },
     "F2": { "pod": "frontend", "status": "todo", "owner": "frontend-junior-1" },
     "F3": { "pod": "frontend", "status": "todo", "owner": "frontend-junior-2" },
@@ -12,6 +12,6 @@
     "D2": { "pod": "design", "status": "done", "owner": "ui-designer" }
   },
   "last_session": "2026-04-29T21:35:36+03:00",
-  "open_questions": ["backend-1"],
+  "open_questions": [],
   "version": 1
 }

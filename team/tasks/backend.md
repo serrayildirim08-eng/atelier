@@ -64,16 +64,16 @@ Senior: `backend-senior`. ID prefix `B`.
 **Files (likely):** test/ingest/subtype-detect.test.ts, test/fixtures/imm-464-2023.json
 **Notes:** Senior'a danış: gerçek case PDF'i fixture'a sığdırılmaz; `CaseFacts` JSON sample'ı yeterli.
 
+_Kuyruk şu an boş — yeni task'lar `/team plan` ile gelir._
+
+---
+
+## Ertelenenler (sprint dışı)
+
 ### B5 — EB-1A drafter manual-block loader migration
-**Status:** blocked
-**Owner:** backend-senior
-**Why:** REFACTOR-NOTES TODO: EB-1A/B/C drafter'ları hâlâ inline prompt'la çalışıyor — `// TODO: migrate to manual-block loader (see E-2)` comment'ı orada. E-2 path'i Master OS § 3'ün 7-block stack'ini kullanıyor, EB-1A geride kaldı.
-**Acceptance:**
-- [ ] `EB1A-PREPARATION-MANUAL.md` ve `EB1A-MANUAL-FOR-CLAUDE-CODE.md` mevcut mu kontrol — yoksa BLOCKED, content gerekiyor (Serra'ya soru: research'a mı yazdıralım, manuel mi?)
-- [ ] Mevcutsa: `draft/cover-letter.ts` EB-1A path'i E-2 ile aynı 7-block pattern'i kullanır
-- [ ] EB-1A için en az 1 fixture-based draft test
-**Files (likely):** draft/cover-letter.ts, manuals/EB1A/, lib/manual-loader.ts (yoksa)
-**Notes:** Manuals yoksa BLOCKED — questions/backend-<n>.md yaz. EB-1B/C bu sprintte değil; sadece EB-1A.
+**Status:** deferred (2026-04-29)
+**Karar:** Serra → Seçenek C. Şu an sadece E-2 odağı; EB-1A migration EB-parity batch'ine (Phase-9 sonrası) ertelendi. EB1A manuals'i yokken zorlamaya gerek yok.
+**Notes:** Yeniden açılacaksa: önce `manuals/EB1A/{EB1A-PREPARATION-MANUAL.md,EB1A-MANUAL-FOR-CLAUDE-CODE.md}` üretilmeli (research pod task'ı), sonra `draft/cover-letter.ts` EB-1A path'i E-2'nin 7-block pattern'ine migrate edilir.
 
 ---
 
