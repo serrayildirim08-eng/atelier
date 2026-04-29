@@ -128,3 +128,150 @@ export function classifyByTier0(input: FallbackInput): FallbackClassification {
 export function tier0Hint(input: FallbackInput): string | null {
   return classifyByTier0(input).doc_type_id;
 }
+
+/**
+ * Map fine-grained doc-taxonomy ids (e.g., `passport_bio`, `diploma`,
+ * `tapu_senedi`) to the coarse `DocType` enum used by the typed-memory
+ * pipeline. Used by the image-classification path (no first-page text →
+ * filename signals only) to take a Tier-0 hit and route the document
+ * into the right per-DocType bucket.
+ *
+ * Returns `null` for ids that legitimately have no coarse mapping
+ * (industry-evidence stat reports, organizational charts, raw photos);
+ * the caller should fall back to `'other'` in that case.
+ */
+export function coarseFromFineDocTypeId(
+  id: string | null | undefined,
+): import('./typed-memory').DocType | null {
+  if (!id) return null;
+  const map: Record<string, import('./typed-memory').DocType> = {
+    // Identity
+    passport_bio: 'passport',
+    passport_full: 'passport',
+    donor_passport: 'passport',
+    visa_stamp: 'status_doc',
+    ead: 'status_doc',
+    prior_approval_notice: 'status_doc',
+    i94: 'i94',
+    naturalization_certificate: 'vital_record',
+    birth_certificate: 'vital_record',
+    marriage_certificate: 'vital_record',
+    adoption_decree: 'vital_record',
+    // USCIS / DOS / consular forms
+    i129: 'uscis_or_dos_form',
+    i129_e_supplement: 'uscis_or_dos_form',
+    i539: 'uscis_or_dos_form',
+    i539a: 'uscis_or_dos_form',
+    ds156e: 'uscis_or_dos_form',
+    ds160_confirmation: 'uscis_or_dos_form',
+    g28: 'uscis_or_dos_form',
+    g1145: 'uscis_or_dos_form',
+    g1650: 'uscis_or_dos_form',
+    mita: 'uscis_or_dos_form',
+    cover_letter: 'cover_letter',
+    // Money / banking
+    bank_statement_personal: 'bank_statement',
+    bank_statement_business: 'bank_statement',
+    bank_receipt: 'money_movement',
+    cancelled_check: 'money_movement',
+    fx_conversion_receipt: 'money_movement',
+    wire_confirmation: 'money_movement',
+    wire_swift_mt103: 'money_movement',
+    crypto_blockchain_txid: 'money_movement',
+    // Source of funds
+    gift_letter: 'source_of_funds',
+    inheritance_estate_accounting: 'source_of_funds',
+    loan_agreement: 'source_of_funds',
+    crypto_liquidation_record: 'source_of_funds',
+    crypto_trade_ledger: 'source_of_funds',
+    // Tax
+    tax_return_1040: 'tax_doc',
+    tax_return_1065: 'tax_doc',
+    tax_return_1120: 'tax_doc',
+    tax_return_1120s: 'tax_doc',
+    tax_return_foreign: 'tax_doc',
+    tax_return_schedule_c: 'tax_doc',
+    vergi_levhasi: 'tax_doc',
+    w2: 'tax_doc',
+    amigos_treaty_country_tax_cert: 'tax_doc',
+    // Formation / corporate
+    articles_of_incorporation: 'formation_doc',
+    articles_of_organization: 'formation_doc',
+    bylaws: 'formation_doc',
+    operating_agreement: 'formation_doc',
+    member_resolution: 'formation_doc',
+    board_minutes: 'formation_doc',
+    ein_cp575: 'formation_doc',
+    employer_registration: 'formation_doc',
+    certificate_of_good_standing: 'formation_doc',
+    merchant_processing_approval: 'formation_doc',
+    foreign_corporate_registry_companies_house: 'formation_doc',
+    foreign_corporate_registry_handelsregister: 'formation_doc',
+    foreign_corporate_registry_kbis: 'formation_doc',
+    foreign_corporate_registry_other: 'formation_doc',
+    foreign_corporate_registry_ticaret_sicil_gazetesi: 'formation_doc',
+    foreign_corporate_registry_visura: 'formation_doc',
+    // Ownership
+    cap_table: 'ownership_evidence',
+    stock_subscription: 'ownership_evidence',
+    // Real estate / lease
+    title_deed_us: 'title_deed',
+    tapu_senedi: 'title_deed',
+    lease_commercial: 'lease_or_property',
+    lease_residential: 'lease_or_property',
+    // Contracts / business
+    customer_contract: 'business_contract',
+    supplier_contract: 'business_contract',
+    vendor_contract: 'business_contract',
+    franchise_agreement: 'business_contract',
+    sale_contract: 'business_contract',
+    bill_of_sale: 'business_contract',
+    collateral_schedule: 'business_contract',
+    payroll_provider_contract: 'business_contract',
+    insurance_general_liability: 'business_contract',
+    insurance_workers_comp: 'business_contract',
+    fdd: 'business_contract',
+    fdd_item7: 'business_contract',
+    fdd_item19: 'business_contract',
+    // Invoices / receipts
+    paid_invoice: 'invoice_or_receipt',
+    vendor_invoice: 'invoice_or_receipt',
+    delivery_receipt: 'invoice_or_receipt',
+    equipment_po: 'invoice_or_receipt',
+    // Payroll
+    payroll_register: 'payroll_doc',
+    salary_payslip_treaty_country: 'payroll_doc',
+    // Financial
+    audited_financial_statement: 'financial_statement',
+    balance_sheet: 'financial_statement',
+    profit_loss_statement: 'financial_statement',
+    business_profit_distribution: 'financial_statement',
+    investment_portfolio_statement: 'financial_statement',
+    // Credentials / licenses
+    diploma: 'credential',
+    professional_license: 'credential',
+    professional_business_license: 'credential',
+    state_business_license: 'credential',
+    contractor_license: 'credential',
+    sales_tax_permit: 'credential',
+    food_permit: 'credential',
+    health_department_permit: 'credential',
+    liquor_license: 'credential',
+    cbi_certificate: 'credential',
+    training_certificate: 'credential',
+    // Letters
+    recommendation_letter: 'expert_letter',
+    cpa_letter: 'expert_letter',
+    employment_record_treaty_country: 'employer_letter',
+    employment_record_us: 'employer_letter',
+    service_record: 'employer_letter',
+    offer_letter: 'employer_letter',
+    // CV / resume
+    cv: 'cv_or_resume',
+    // Translation
+    certified_translation: 'translation_certification',
+    // Business plan
+    business_plan_5yr: 'business_plan',
+  };
+  return map[id] ?? null;
+}

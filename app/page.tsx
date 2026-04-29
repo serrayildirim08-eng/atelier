@@ -1856,6 +1856,7 @@ function Dossier({
             streamingDraft={streamingDraft}
             typedMemory={typedMemory}
             matterRoot={matterRoot}
+            documentOverrides={documentOverrides}
           />
         )}
         {tab === 'review' && (
@@ -2281,6 +2282,84 @@ const EXHIBIT_CATEGORIES: ExhibitCategorySpec[] = [
 ];
 
 /**
+ * Document preview shim — picks the right render for the file's extension:
+ *   - .pdf       → <iframe>           (browser native PDF viewer)
+ *   - images     → <img>              (.jpg/.jpeg/.png/.gif/.webp)
+ *   - .docx      → fallback box with "open externally" link
+ *   - other      → fallback box
+ *
+ * Behaviour switch via `fillContainer`: full-bleed (PdfDetailModal) vs
+ * fixed-height inline preview (DocumentInlinePreview).
+ */
+function DocumentPreviewFrame({
+  src,
+  filename,
+  label,
+  heightStyle,
+  fillContainer = false,
+}: {
+  src: string;
+  filename: string;
+  label: string;
+  heightStyle?: React.CSSProperties;
+  fillContainer?: boolean;
+}) {
+  const ext = (filename.toLowerCase().match(/\.[a-z0-9]+$/) ?? [''])[0];
+  const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
+  const isPdf = ext === '.pdf';
+  const isDocx = ext === '.docx';
+
+  const wrapperClass = fillContainer
+    ? 'w-full h-full grid place-items-center bg-paper-2 overflow-auto'
+    : 'w-full grid place-items-center bg-paper-2 overflow-auto';
+  const wrapperStyle = fillContainer ? undefined : heightStyle;
+
+  if (isImage) {
+    return (
+      <div className={wrapperClass} style={wrapperStyle}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={src}
+          alt={label}
+          className="max-w-full max-h-full object-contain p-3"
+          style={fillContainer ? { maxHeight: '100%' } : { maxHeight: '60vh' }}
+        />
+      </div>
+    );
+  }
+
+  if (isPdf) {
+    return (
+      <iframe
+        src={src}
+        title={`Preview — ${label}`}
+        className={fillContainer ? 'w-full h-full' : 'w-full'}
+        style={fillContainer ? { border: 0 } : { ...(heightStyle ?? {}), border: 0 }}
+      />
+    );
+  }
+
+  return (
+    <div className={wrapperClass} style={wrapperStyle}>
+      <div className="text-center px-6 py-10">
+        <div className="smcp text-graphite-soft mb-2">
+          {isDocx ? 'docx — preview not rendered inline' : `${ext || 'file'} — preview not supported`}
+        </div>
+        <a
+          href={src}
+          target="_blank"
+          rel="noreferrer"
+          className="font-mono text-meta text-ink hover:underline"
+          download={filename.split('/').pop()}
+        >
+          download · {filename.split('/').pop()}
+        </a>
+      </div>
+    </div>
+  );
+}
+
+/**
  * Time-based estimated progress — ticks from 0 to ~94% over an expected
  * duration (default 35s, the rough Sonnet aggregator wall-clock for a
  * mid-sized matter), then holds. The actual completion is driven by the
@@ -2489,35 +2568,8 @@ function MemoryPane({
   const populated = categoryEntries.filter((c) => c.entries.length > 0);
   const totalEntries = populated.reduce((acc, c) => acc + c.entries.length, 0);
 
-  // Generation gate: Serra's rule is that no artifact may be drafted
-  // until the corpus is at least 80% classified (i.e., not sitting in
-  // the 'other' bucket and not stuck on an extraction error). A doc
-  // that the attorney has manually moved out of 'other' counts as
-  // classified, which is why we resolve the override before checking.
-  const GENERATE_GATE_PERCENT = 80;
-  let classifiedCount = 0;
-  for (const { entries } of categoryEntries) {
-    for (const { docType, entry } of entries) {
-      const ovr = documentOverrides?.[entry.filename] ?? null;
-      const effectiveType = ovr?.doc_type_override ?? docType;
-      if (!entry.error && effectiveType !== 'other') {
-        classifiedCount += 1;
-      }
-    }
-  }
-  const classifyPercent =
-    totalEntries > 0 ? Math.floor((classifiedCount / totalEntries) * 100) : 0;
-  const generateGateOpen = classifyPercent >= GENERATE_GATE_PERCENT;
-
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [openGenerator, setOpenGenerator] = useState<PreviewGenerator | null>(null);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
-  const [recentOutput, setRecentOutput] = useState<{
-    generator: PreviewGenerator;
-    output_path: string | null;
-    output_inline: string | null;
-    approved_at: string;
-  } | null>(null);
 
   if (totalEntries === 0) {
     const canReload = !!matterRoot && !!onReaggregate;
@@ -2623,11 +2675,6 @@ function MemoryPane({
           collapsed={!!collapsed[spec.key]}
           onToggle={() => setCollapsed((s) => ({ ...s, [spec.key]: !s[spec.key] }))}
           entryLabels={entryLabels}
-          onOpenMatter={onOpenMatter}
-          onPickGenerator={(g) => setOpenGenerator(g)}
-          generateGateOpen={generateGateOpen}
-          classifyPercent={classifyPercent}
-          generateGateThreshold={GENERATE_GATE_PERCENT}
           onPickDocument={
             matterRoot
               ? (filename) => {
@@ -2641,91 +2688,6 @@ function MemoryPane({
           }
         />
       ))}
-
-      {recentOutput && (
-        <section className="border border-rule bg-paper">
-          <header className="flex items-baseline justify-between gap-3 px-5 py-3 border-b border-rule paper-recess">
-            <span className="smcp text-graphite">recent output</span>
-            <span className="font-mono text-meta text-graphite-soft">
-              {recentOutput.generator.replace(/_/g, ' ')} · {new Date(recentOutput.approved_at).toLocaleString()}
-            </span>
-          </header>
-          <div className="px-5 py-5 font-mono text-meta">
-            {recentOutput.output_path && (
-              <div className="text-graphite mb-3 break-all">
-                → {recentOutput.output_path}
-              </div>
-            )}
-            {recentOutput.output_inline && (
-              <>
-                <div className="mb-3 flex gap-2">
-                  <button
-                    onClick={() =>
-                      downloadInlineAsDocx(
-                        recentOutput.output_inline ?? '',
-                        `${recentOutput.generator}.docx`,
-                      )
-                    }
-                    className="px-3 py-1.5 border border-ink smcp text-meta hover:bg-ink hover:text-paper transition-colors"
-                  >
-                    download .docx
-                  </button>
-                  <button
-                    onClick={() =>
-                      downloadInlineAsMarkdown(
-                        recentOutput.output_inline ?? '',
-                        `${recentOutput.generator}.md`,
-                      )
-                    }
-                    className="px-3 py-1.5 border border-rule smcp text-meta text-graphite hover:border-ink hover:text-ink transition-colors"
-                  >
-                    download .md
-                  </button>
-                </div>
-                <details>
-                  <summary className="cursor-pointer text-meta text-graphite hover:text-ink">
-                    ▸ view inline ({recentOutput.output_inline.length.toLocaleString()} chars)
-                  </summary>
-                  <pre className="mt-2 whitespace-pre-wrap text-meta bg-paper-deep/30 p-3 max-h-96 overflow-y-auto leading-relaxed">
-                    {recentOutput.output_inline}
-                  </pre>
-                </details>
-              </>
-            )}
-          </div>
-        </section>
-      )}
-
-      {matterId && (
-        <PreGenerationApprovalModal
-          open={openGenerator !== null}
-          matterId={matterId}
-          generator={openGenerator ?? 'cover_letter'}
-          // Merge attorney-intake (phone/email/address) into caseFacts
-          // before the modal POSTs them. Empty intake fields don't
-          // overwrite extracted values.
-          caseFacts={
-            caseFacts && (caseFacts as { facts?: unknown }).facts
-              ? mergeIntakeIntoCaseFacts(
-                  caseFacts as { facts: { investor?: unknown } },
-                  readIntakeForm(matterId),
-                )
-              : caseFacts
-          }
-          typedMemory={typedMemory}
-          onClose={() => setOpenGenerator(null)}
-          onApproved={(result: ApprovalResult) => {
-            if (openGenerator) {
-              setRecentOutput({
-                generator: openGenerator,
-                output_path: result.output_path,
-                output_inline: result.output_inline,
-                approved_at: result.preview.approved_at ?? new Date().toISOString(),
-              });
-            }
-          }}
-        />
-      )}
 
       {previewPath && (
         <DocumentPreviewModal path={previewPath} onClose={() => setPreviewPath(null)} />
@@ -2804,11 +2766,6 @@ function ExhibitCategoryCard({
   collapsed,
   onToggle,
   entryLabels,
-  onOpenMatter,
-  onPickGenerator,
-  generateGateOpen,
-  classifyPercent,
-  generateGateThreshold,
   onPickDocument,
 }: {
   spec: ExhibitCategorySpec;
@@ -2816,11 +2773,6 @@ function ExhibitCategoryCard({
   collapsed: boolean;
   onToggle: () => void;
   entryLabels: Record<string, string>;
-  onOpenMatter: () => void;
-  onPickGenerator?: (g: PreviewGenerator) => void;
-  generateGateOpen: boolean;
-  classifyPercent: number;
-  generateGateThreshold: number;
   onPickDocument?: (filename: string) => void;
 }) {
   const empty = entries.length === 0;
@@ -2881,40 +2833,6 @@ function ExhibitCategoryCard({
             </ul>
           )}
 
-          {spec.generators.length > 0 && (
-            <div className="border-t border-rule pt-4 grid gap-2">
-              {!generateGateOpen && (
-                <p className="font-mono text-meta text-graphite-soft">
-                  classify ≥{generateGateThreshold}% of documents before
-                  generating · currently {classifyPercent}%
-                </p>
-              )}
-              <div className="flex flex-wrap gap-2">
-                {spec.generators.map((g) => (
-                  <button
-                    key={g.generator}
-                    disabled={!generateGateOpen}
-                    onClick={() => {
-                      if (!generateGateOpen) return;
-                      if (onPickGenerator) {
-                        onPickGenerator(g.generator as PreviewGenerator);
-                      } else {
-                        onOpenMatter();
-                      }
-                    }}
-                    title={
-                      generateGateOpen
-                        ? 'Opens the preview → approve modal. NO output ships without attorney sign-off.'
-                        : `Locked until ${generateGateThreshold}% of documents are classified (currently ${classifyPercent}%).`
-                    }
-                    className="text-meta smcp px-3 py-2 border border-ink hover:bg-ink hover:text-paper transition-colors disabled:opacity-40 disabled:hover:bg-paper disabled:hover:text-ink disabled:cursor-not-allowed"
-                  >
-                    {g.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
     </section>
@@ -3698,8 +3616,8 @@ function DossierTabs({
     { key: 'exhibits', label: 'Exhibits' },
     {
       key: 'draft',
-      label: 'Draft',
-      suffix: result.draft ? undefined : result.draftError ? '!' : '…',
+      label: 'Drafts',
+      suffix: result.draft ? undefined : result.draftError ? '!' : undefined,
     },
     {
       key: 'review',
@@ -3805,7 +3723,11 @@ function collectMissingPaths(node: unknown, prefix: string, out: string[]): void
   if (node === null || node === undefined) return;
   if (typeof node !== 'object') return;
   if (isFieldWrapper(node)) {
-    if (isMissingValue(node.value)) out.push(prefix || '(root)');
+    // confidence === 1 with a null value is the deterministic-gate convention
+    // for "intentionally not applicable" (cross-document conflicts that don't
+    // anchor to a single page). Don't surface those as missing.
+    const intentionallyNull = node.value === null && node.confidence === 1;
+    if (!intentionallyNull && isMissingValue(node.value)) out.push(prefix || '(root)');
     return;
   }
   if (Array.isArray(node)) {
@@ -5578,28 +5500,103 @@ function ParagraphWithExhibitLinks({
   );
 }
 
+interface DraftGenerateGroup {
+  title: string;
+  items: { generator: PreviewGenerator; label: string; description: string }[];
+}
+
+const DRAFT_GENERATE_GROUPS: DraftGenerateGroup[] = [
+  {
+    title: 'Cover letter and exhibit index',
+    items: [
+      { generator: 'cover_letter', label: 'Cover letter', description: '~16K tokens · Sonnet/Opus by case_type' },
+      { generator: 'exhibit_list', label: 'Exhibit list', description: 'Mechanical · A–L tab convention' },
+      { generator: 'business_plan', label: 'Business plan (E-2)', description: '5-year P&L · Sonnet 4.6 + adaptive thinking' },
+    ],
+  },
+  {
+    title: 'Declarations',
+    items: [
+      { generator: 'declaration_beneficiary', label: 'Beneficiary', description: 'Investor’s own under-penalty-of-perjury declaration' },
+      { generator: 'declaration_spouse', label: 'Spouse', description: 'Dependent spouse declaration (E-2D)' },
+      { generator: 'declaration_enterprise_rep', label: 'Enterprise rep', description: 'Petitioner officer’s declaration' },
+    ],
+  },
+  {
+    title: 'USCIS / DOS forms',
+    items: [
+      { generator: 'forms_i129', label: 'I-129', description: 'Petition for a Nonimmigrant Worker' },
+      { generator: 'forms_i129e', label: 'I-129E', description: 'E-1/E-2 Classification Supplement' },
+      { generator: 'forms_g28', label: 'G-28', description: 'Notice of Entry of Appearance' },
+      { generator: 'forms_i539', label: 'I-539', description: 'Spouse — Application to Extend / Change Status' },
+      { generator: 'forms_i539a', label: 'I-539A', description: 'Child — Supplemental Information' },
+    ],
+  },
+  {
+    title: 'Notices of Intent to Depart',
+    items: [
+      { generator: 'noid_principal', label: 'NoID · Principal', description: 'Principal beneficiary notice' },
+      { generator: 'noid_dependent', label: 'NoID · Dependent', description: 'Accompanying spouse / minor notice' },
+    ],
+  },
+];
+
+const DRAFT_GATE_PERCENT = 80;
+
 function DraftPane({
   result,
   streamingDraft,
   typedMemory,
   matterRoot,
+  documentOverrides,
 }: {
   result: IngestResult;
   streamingDraft?: string;
   typedMemory?: TypedMemory;
   matterRoot?: string | null;
+  documentOverrides?:
+    | Record<string, { display_name?: string | null; doc_type_override?: DocType | null }>
+    | null;
 }) {
   const [copied, setCopied] = useState(false);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
+  const [openGenerator, setOpenGenerator] = useState<PreviewGenerator | null>(null);
+  const [recentOutput, setRecentOutput] = useState<{
+    generator: PreviewGenerator;
+    output_path: string | null;
+    output_inline: string | null;
+    approved_at: string;
+  } | null>(null);
 
-  // Pre-compute "Tab letter → ordered filenames[]" so the inline
-  // ParagraphWithExhibitLinks can resolve "Tab E.4" → 4th item under
-  // Tab E. Memoize across renders since typedMemory is stable inside a
-  // single matter view.
   const exhibitRefMap = useMemo(
     () => buildExhibitRefMap(typedMemory),
     [typedMemory],
   );
+
+  // Generation gate: no artifact may be drafted until ≥80% of the
+  // corpus has been classified out of 'other' (manual reclassification
+  // counts).
+  const { classifyPercent, totalDocs } = useMemo(() => {
+    let total = 0;
+    let classified = 0;
+    if (typedMemory) {
+      for (const entries of Object.values(typedMemory)) {
+        if (!Array.isArray(entries)) continue;
+        for (const entry of entries) {
+          total += 1;
+          const ovr = documentOverrides?.[entry.filename] ?? null;
+          const effectiveType = ovr?.doc_type_override ?? entry.doc_type ?? 'other';
+          if (!entry.error && effectiveType !== 'other') classified += 1;
+        }
+      }
+    }
+    const pct = total > 0 ? Math.floor((classified / total) * 100) : 0;
+    return { classifyPercent: pct, totalDocs: total };
+  }, [typedMemory, documentOverrides]);
+
+  const gateOpen = classifyPercent >= DRAFT_GATE_PERCENT;
+  const matterId = result.filename;
+  const caseFacts = result.caseFacts;
 
   function onPickRef(ref: string) {
     if (!matterRoot) return;
@@ -5609,40 +5606,8 @@ function DraftPane({
     setPreviewPath(`${matterRoot}${sep}${filename}`);
   }
 
-  if (result.draftError) {
-    return (
-      <div className="px-9 py-7">
-        <div className="border border-ink paper-recess p-5">
-          <div className="smcp text-ink mb-2">draft failed</div>
-          <div className="font-mono text-meta text-graphite mb-3">
-            [{result.draftError.code}]
-          </div>
-          <div className="text-body text-ink-2 leading-relaxed">
-            {result.draftError.message}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   const text = result.draft || streamingDraft || '';
-
-  if (!text) {
-    return (
-      <div className="px-9 py-16 grid place-items-center">
-        <div className="border border-rule bg-paper grid place-items-center py-16 px-8 text-center max-w-md">
-          <div className="grid gap-3">
-            <div className="sigil mx-auto" style={{ width: '2.4rem', height: '2.4rem', fontSize: '0.85rem' }}>
-              —
-            </div>
-            <p className="text-body text-graphite leading-relaxed">
-              The draft is not yet on the desk.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const hasDraft = text.length > 0;
 
   const onCopy = async () => {
     try {
@@ -5654,35 +5619,207 @@ function DraftPane({
     }
   };
 
-  const paragraphs = text.split(/\n\s*\n/).filter((p) => p.trim().length > 0);
+  const paragraphs = hasDraft
+    ? text.split(/\n\s*\n/).filter((p) => p.trim().length > 0)
+    : [];
 
   return (
-    <div className="px-9 py-7 fade-in">
-      <div className="flex items-baseline justify-between mb-5">
-        <div className="grid gap-1">
-          <div className="smcp text-graphite">cover letter</div>
-          <div className="text-meta text-graphite-soft">
-            drafted in the firm&rsquo;s voice · exhibit refs underlined
+    <div className="px-9 py-7 fade-in grid gap-7">
+      <section className="grid gap-4">
+        <header className="flex items-baseline justify-between">
+          <div className="grid gap-1">
+            <div className="smcp text-graphite">generate</div>
+            <div className="text-meta text-graphite-soft">
+              attorney sign-off required · every artifact routes through preview → approve
+            </div>
           </div>
-        </div>
-        <button
-          onClick={onCopy}
-          className="px-3 py-2 border border-ink smcp text-meta hover:bg-ink hover:text-paper transition-colors"
-        >
-          {copied ? '✓ copied' : 'copy to clipboard'}
-        </button>
-      </div>
-      <article className="max-w-[68ch] mx-auto bg-paper border border-rule px-10 py-9 text-body leading-[1.75] text-ink">
-        {paragraphs.map((p, i) => (
-          <p key={i} className="mb-4 last:mb-0">
-            <ParagraphWithExhibitLinks
-              text={p.trim()}
-              onPickRef={onPickRef}
-              refMap={exhibitRefMap}
-            />
+          <div className="font-mono text-meta tabular-nums">
+            {gateOpen ? (
+              <span className="text-graphite-soft">
+                {classifyPercent}% classified · gate open
+              </span>
+            ) : (
+              <span className="text-ink">
+                {classifyPercent}% classified · need ≥{DRAFT_GATE_PERCENT}%
+              </span>
+            )}
+          </div>
+        </header>
+        {totalDocs === 0 ? (
+          <p className="text-body text-graphite-soft italic">
+            Ingest a matter first — there are no documents to draft from yet.
           </p>
-        ))}
-      </article>
+        ) : (
+          <div className="grid gap-5">
+            {DRAFT_GENERATE_GROUPS.map((group) => (
+              <div key={group.title} className="border border-rule bg-paper">
+                <header className="flex items-baseline justify-between px-5 py-3 border-b border-rule paper-recess">
+                  <span className="smcp text-graphite">{group.title}</span>
+                  <span className="font-mono text-meta text-graphite-soft tabular-nums">
+                    {group.items.length}
+                  </span>
+                </header>
+                <div className="px-5 py-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {group.items.map((item) => (
+                    <button
+                      key={item.generator}
+                      disabled={!gateOpen}
+                      onClick={() => {
+                        if (!gateOpen) return;
+                        setOpenGenerator(item.generator);
+                      }}
+                      title={
+                        gateOpen
+                          ? 'Opens the preview → approve modal. NO output ships without attorney sign-off.'
+                          : `Locked until ${DRAFT_GATE_PERCENT}% of documents are classified (currently ${classifyPercent}%).`
+                      }
+                      className="text-left border border-rule bg-paper px-4 py-4 hover:border-ink transition-colors group disabled:opacity-40 disabled:hover:border-rule disabled:cursor-not-allowed"
+                    >
+                      <div className="text-title font-semibold text-ink leading-tight">
+                        {item.label}
+                      </div>
+                      <div className="text-meta text-graphite-soft mt-2 leading-snug">
+                        {item.description}
+                      </div>
+                      <div className="mt-3 flex items-baseline justify-between">
+                        <span className="smcp text-graphite-soft group-hover:text-ink transition-colors">
+                          {gateOpen ? 'approve & generate' : 'locked'}
+                        </span>
+                        <span className="font-mono text-meta text-graphite-soft group-hover:text-ink transition-colors">
+                          →
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {recentOutput && (
+        <section className="border border-rule bg-paper">
+          <header className="flex items-baseline justify-between gap-3 px-5 py-3 border-b border-rule paper-recess">
+            <span className="smcp text-graphite">recent output</span>
+            <span className="font-mono text-meta text-graphite-soft">
+              {recentOutput.generator.replace(/_/g, ' ')} ·{' '}
+              {new Date(recentOutput.approved_at).toLocaleString()}
+            </span>
+          </header>
+          <div className="px-5 py-5 font-mono text-meta">
+            {recentOutput.output_path && (
+              <div className="text-graphite mb-3 break-all">
+                → {recentOutput.output_path}
+              </div>
+            )}
+            {recentOutput.output_inline && (
+              <>
+                <div className="mb-3 flex gap-2">
+                  <button
+                    onClick={() =>
+                      downloadInlineAsDocx(
+                        recentOutput.output_inline ?? '',
+                        `${recentOutput.generator}.docx`,
+                      )
+                    }
+                    className="px-3 py-1.5 border border-ink smcp text-meta hover:bg-ink hover:text-paper transition-colors"
+                  >
+                    download .docx
+                  </button>
+                  <button
+                    onClick={() =>
+                      downloadInlineAsMarkdown(
+                        recentOutput.output_inline ?? '',
+                        `${recentOutput.generator}.md`,
+                      )
+                    }
+                    className="px-3 py-1.5 border border-rule smcp text-meta text-graphite hover:border-ink hover:text-ink transition-colors"
+                  >
+                    download .md
+                  </button>
+                </div>
+                <details>
+                  <summary className="cursor-pointer text-meta text-graphite hover:text-ink">
+                    ▸ view inline ({recentOutput.output_inline.length.toLocaleString()} chars)
+                  </summary>
+                  <pre className="mt-2 whitespace-pre-wrap text-meta bg-paper-deep/30 p-3 max-h-96 overflow-y-auto leading-relaxed">
+                    {recentOutput.output_inline}
+                  </pre>
+                </details>
+              </>
+            )}
+          </div>
+        </section>
+      )}
+
+      {result.draftError ? (
+        <section className="border border-ink paper-recess p-5">
+          <div className="smcp text-ink mb-2">cover letter — draft failed</div>
+          <div className="font-mono text-meta text-graphite mb-3">
+            [{result.draftError.code}]
+          </div>
+          <div className="text-body text-ink-2 leading-relaxed">
+            {result.draftError.message}
+          </div>
+        </section>
+      ) : hasDraft ? (
+        <section>
+          <div className="flex items-baseline justify-between mb-5">
+            <div className="grid gap-1">
+              <div className="smcp text-graphite">cover letter</div>
+              <div className="text-meta text-graphite-soft">
+                drafted in the firm&rsquo;s voice · exhibit refs underlined
+              </div>
+            </div>
+            <button
+              onClick={onCopy}
+              className="px-3 py-2 border border-ink smcp text-meta hover:bg-ink hover:text-paper transition-colors"
+            >
+              {copied ? '✓ copied' : 'copy to clipboard'}
+            </button>
+          </div>
+          <article className="max-w-[68ch] mx-auto bg-paper border border-rule px-10 py-9 text-body leading-[1.75] text-ink">
+            {paragraphs.map((p, i) => (
+              <p key={i} className="mb-4 last:mb-0">
+                <ParagraphWithExhibitLinks
+                  text={p.trim()}
+                  onPickRef={onPickRef}
+                  refMap={exhibitRefMap}
+                />
+              </p>
+            ))}
+          </article>
+        </section>
+      ) : null}
+
+      {matterId && (
+        <PreGenerationApprovalModal
+          open={openGenerator !== null}
+          matterId={matterId}
+          generator={openGenerator ?? 'cover_letter'}
+          caseFacts={
+            caseFacts && (caseFacts as { facts?: unknown }).facts
+              ? mergeIntakeIntoCaseFacts(
+                  caseFacts as { facts: { investor?: unknown } },
+                  readIntakeForm(matterId),
+                )
+              : caseFacts
+          }
+          typedMemory={typedMemory}
+          onClose={() => setOpenGenerator(null)}
+          onApproved={(approval: ApprovalResult) => {
+            if (openGenerator) {
+              setRecentOutput({
+                generator: openGenerator,
+                output_path: approval.output_path,
+                output_inline: approval.output_inline,
+                approved_at: approval.preview.approved_at ?? new Date().toISOString(),
+              });
+            }
+          }}
+        />
+      )}
 
       {previewPath && (
         <DocumentPreviewModal
@@ -6862,12 +6999,13 @@ function PdfDetailModal({
           </button>
         </header>
         <div className="flex-1 grid grid-cols-1 md:grid-cols-2 min-h-0">
-          <div className="border-r border-rule bg-paper-2 min-h-0">
+          <div className="border-r border-rule bg-paper-2 min-h-0 flex items-stretch">
             {pdfUrl ? (
-              <iframe
+              <DocumentPreviewFrame
                 src={pdfUrl}
-                className="w-full h-full"
-                title={`PDF preview — ${filename}`}
+                filename={filename}
+                label={renderedTitle}
+                fillContainer
               />
             ) : (
               <div className="p-6 text-meta text-graphite-soft">
@@ -7936,16 +8074,16 @@ function DocumentInlinePreview({
 
       {pdfSrc ? (
         <div className="border border-rule paper-recess">
-          <iframe
+          <DocumentPreviewFrame
             src={pdfSrc}
-            title={label}
-            className="w-full"
-            style={{ height: '60vh', border: 0 }}
+            filename={entry.filename}
+            label={label}
+            heightStyle={{ height: '60vh' }}
           />
         </div>
       ) : (
         <div className="border border-rule paper-recess px-5 py-12 text-center text-body italic text-graphite">
-          PDF preview unavailable — matter root not set.
+          Preview unavailable — matter root not set.
         </div>
       )}
 

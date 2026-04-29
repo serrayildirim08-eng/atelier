@@ -1657,7 +1657,14 @@ const CREDENTIALS: DocType[] = [
     category: 'credentials',
     definition: 'Professional certification or license held by applicant.',
     identifying_signals: {
-      filename_regex: [/professional.*license|certification|sertifika/i],
+      filename_regex: [
+        /professional.*license|certification|sertifika/i,
+        // Generic "Certificate" filenames common to credential evidence
+        // (e.g., "Adobe Photoshop Certificate.jpeg", "Accounting
+        // Certificate.jpeg"). Excludes the formation-doc "Certificate of
+        // Good Standing" via its own stronger regex which scores higher.
+        /\bcertificate\b/i,
+      ],
       keyword_phrases: ['Certification', 'License', 'Sertifika'],
     },
     fills_proof_slots: ['E5.specialized_knowledge_pack', 'E3.licenses_permits'],

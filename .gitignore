@@ -52,6 +52,9 @@ db/pdf-cache/
 # document-classifier-renamer alias map (per-matter sidecar — runtime state)
 db/filename-aliases.json
 
+# manual matter / document overrides (display names + doc_type overrides)
+db/matter-overrides.json
+
 # pre-generation approval flow (lib/preview-store.ts) — per-matter
 # preview JSON sidecars + append-only attorney-approval audit log.
 db/previews/

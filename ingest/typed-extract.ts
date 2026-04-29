@@ -19,7 +19,7 @@ import { pdfContentHash, readPdfCache, writePdfCache } from '@/lib/pdf-cache';
 import { sampleLongText } from '@/lib/token-count';
 import { extractPdfText } from './pdf';
 import { extractDocxText } from './docx';
-import { classifyByTier0 } from './classify-fallback';
+import { classifyByTier0, coarseFromFineDocTypeId } from './classify-fallback';
 import {
   PerPdfFactsSchema,
   type DocType,
@@ -688,9 +688,11 @@ export async function classifyAndExtractOnePdf(
             : null;
 
   // Raw image inputs skip text parsing entirely and go through the
-  // image-photo vision branch (parity with scanned PDFs). We still emit
-  // a thin doc_type='other' placeholder so the dashboard / downstream
-  // aggregator sees a normal PerPdfResult shape.
+  // image-photo vision branch (parity with scanned PDFs). Tier-0 runs
+  // first against the filename so common image evidence (passport scans,
+  // diplomas, certificates, ID cards) lands in the right doc_type bucket
+  // instead of getting dumped into 'other'. The image-photo extractor
+  // still runs regardless to surface signature/seal/photo facts.
   if (imageMediaType) {
     let scanImagePhoto;
     const scanImagePhotoResult = await extractImagePhoto({
@@ -712,7 +714,26 @@ export async function classifyAndExtractOnePdf(
       source_quote: null,
       confidence: null,
     };
-    const imageDocType: DocType = input.forcedDocType ?? 'other';
+    // Tier-0 deterministic classification for images — filename-only
+    // (no text). Picks the highest-scoring fine-grained doc_type_id and
+    // maps it to the coarse DocType bucket. We accept ANY positive score
+    // (not just the standard 0.6 confidence threshold) because filename
+    // is the only signal available; the alternative is `'other'` which
+    // is no better than a guess.
+    const imageTier0 = classifyByTier0({
+      filename: input.filename,
+      first_page_text: '',
+    });
+    const tier0Coarse = coarseFromFineDocTypeId(
+      imageTier0.candidates[0]?.doc_type_id ?? null,
+    );
+    const imageDocType: DocType =
+      input.forcedDocType ?? tier0Coarse ?? 'other';
+    if (TIMING_ENABLED && tier0Coarse) {
+      console.log(
+        `[image-tier0] ${input.filename} → ${tier0Coarse} (fine=${imageTier0.candidates[0]?.doc_type_id})`,
+      );
+    }
     const imageEntry: Omit<PerPdfResult, 'filename' | 'error'> = {
       pageCount: 1,
       facts: {
@@ -778,7 +799,19 @@ export async function classifyAndExtractOnePdf(
       source_quote: null,
       confidence: null,
     };
-    const scanDocType: DocType = input.forcedDocType ?? 'other';
+    // Tier-0 over filename + sparse text — same rationale as the image
+    // branch. Many scanned PDFs (e.g. "passport_kacar.pdf",
+    // "tapu_senedi_2024.pdf") carry strong filename signals that would
+    // otherwise be ignored if we leave them in 'other'.
+    const scanTier0 = classifyByTier0({
+      filename: input.filename,
+      first_page_text: parsed.text.slice(0, 4000),
+    });
+    const scanTier0Coarse = coarseFromFineDocTypeId(
+      scanTier0.candidates[0]?.doc_type_id ?? null,
+    );
+    const scanDocType: DocType =
+      input.forcedDocType ?? scanTier0Coarse ?? 'other';
     const scanEntry: Omit<PerPdfResult, 'filename' | 'error'> = {
       pageCount: parsed.pageCount,
       facts: {
