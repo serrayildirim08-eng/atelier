@@ -39,22 +39,22 @@ type CacheTtl = '1h' | '5m';
 type SystemBlock = {
   type: 'text';
   text: string;
-  cache_control: { type: 'ephemeral'; ttl: CacheTtl };
+  cache_control?: { type: 'ephemeral'; ttl: CacheTtl };
 };
 
-/**
- * Load a single manual file as a system block. Failure-tolerant: if the
- * file is absent (skeleton subtype, mid-renamed manual, dev environment
- * without the manuals dir mounted), warn once and return null instead of
- * crashing the drafter.
- */
+// Anthropic caps a single request at 4 cache_control breakpoints. Cache is
+// cumulative — a breakpoint covers everything before it — so we set
+// breakpoints only at meaningful layer boundaries (end of manuals, end of
+// voice corpus, end of doctrine, end of facts) rather than per-block.
 async function loadManualBlock(
   absPath: string,
-  ttl: CacheTtl,
+  ttl?: CacheTtl,
 ): Promise<SystemBlock | null> {
   try {
     const text = await fs.readFile(absPath, 'utf8');
-    return { type: 'text', text, cache_control: { type: 'ephemeral', ttl } };
+    return ttl
+      ? { type: 'text', text, cache_control: { type: 'ephemeral', ttl } }
+      : { type: 'text', text };
   } catch (e: unknown) {
     console.warn(
       `[draft] manual block missing, skipping: ${path.relative(process.cwd(), absPath)} — ${
@@ -360,39 +360,45 @@ async function buildE2SystemStack(
   blocks.push({
     type: 'text',
     text: buildE2SlimPrompt(caseFacts.subtype, draftMode),
-    cache_control: { type: 'ephemeral', ttl: '1h' },
   });
 
-  // Block 1 — Master OS
+  // Blocks 1-3 — shared manuals. No per-block breakpoint; the breakpoint
+  // at the end of Block 4 covers everything up to that point.
   const block1 = await loadManualBlock(
     path.join(MANUALS_DIR, '_ATELIER-SYSTEM-PROMPT.md'),
-    '1h',
   );
   if (block1) blocks.push(block1);
 
-  // Block 2 — practitioner manual
   const block2 = await loadManualBlock(
     path.join(MANUALS_DIR, 'E2-PREPARATION-MANUAL.md'),
-    '1h',
   );
   if (block2) blocks.push(block2);
 
-  // Block 3 — AI-facing sibling
   const block3 = await loadManualBlock(
     path.join(MANUALS_DIR, 'E2-MANUAL-FOR-CLAUDE-CODE.md'),
-    '1h',
   );
   if (block3) blocks.push(block3);
 
-  // Block 4 — sub-type manual
+  // Block 4 — sub-type manual. First cache breakpoint: covers Blocks 0-4.
   const block4 = await loadManualBlock(selectSubtypeManualPath(subtype), '1h');
   if (block4) blocks.push(block4);
 
-  // Block 5 — voice corpus per profile matrix (one or two files)
-  for (const corpusPath of selectVoiceCorpusPaths(subtype, draftMode)) {
-    const block = await loadManualBlock(corpusPath, '1h');
-    if (block) blocks.push(block);
+  // Block 5 — voice corpus per profile matrix (one or two files). Only
+  // the last loaded entry carries the cache breakpoint; the cumulative
+  // prefix already includes the earlier corpus files.
+  const corpusPaths = selectVoiceCorpusPaths(subtype, draftMode);
+  const corpusBlocks: SystemBlock[] = [];
+  for (const corpusPath of corpusPaths) {
+    const block = await loadManualBlock(corpusPath);
+    if (block) corpusBlocks.push(block);
   }
+  if (corpusBlocks.length > 0) {
+    corpusBlocks[corpusBlocks.length - 1].cache_control = {
+      type: 'ephemeral',
+      ttl: '1h',
+    };
+  }
+  blocks.push(...corpusBlocks);
 
   return blocks;
 }
