@@ -72,7 +72,13 @@ const IDENTITY: DocType[] = [
     category: 'identity',
     definition: 'Prior or current U.S. visa foil affixed to a passport page.',
     identifying_signals: {
-      filename_regex: [/visa.*stamp|us.*visa|nonimmigrant/i],
+      // Bare `\bvisa\b` (letter-bounded) covers "Visa issued <date>.jpeg"
+      // exports without false-matching "Visage" or "Vista". The strong
+      // patterns above stay first so they win on score-equal ties.
+      filename_regex: [
+        /visa.*stamp|us.*visa|nonimmigrant/i,
+        /(?<![a-z])visa(?![a-z])/i,
+      ],
       keyword_phrases: ['UNITED STATES OF AMERICA', 'NONIMMIGRANT VISA', 'Visa Type/Class', 'Annotation'],
       structural_hints: ['green-tinted foil', 'embossed seal'],
     },
@@ -114,12 +120,15 @@ const IDENTITY: DocType[] = [
   },
   {
     id: 'prior_approval_notice',
-    name: 'Prior I-797 approval notice',
+    name: 'Prior I-797 / I-20 status notice',
     category: 'identity',
-    definition: 'USCIS I-797 approval notice for a prior nonimmigrant petition or status grant.',
+    definition: 'USCIS I-797 approval notice or SEVIS I-20 Certificate of Eligibility for a prior nonimmigrant petition or status grant.',
     identifying_signals: {
-      filename_regex: [/i.?797|approval.*notice/i],
-      keyword_phrases: ['Form I-797', 'NOTICE OF ACTION', 'Receipt Number', 'Notice Type: Approval'],
+      // I-20 (F-1 SEVIS) covered here for filename-only routing — coarse
+      // status_doc bucket is correct; richer per-form extraction can
+      // split later.
+      filename_regex: [/i.?797|approval.*notice|i.?20\b/i],
+      keyword_phrases: ['Form I-797', 'NOTICE OF ACTION', 'Receipt Number', 'Notice Type: Approval', 'Form I-20', 'SEVIS', 'Certificate of Eligibility'],
     },
     fills_proof_slots: ['APP.prior_visas_and_status'],
     extractor_skill: null,
@@ -815,8 +824,10 @@ const FINANCIAL: DocType[] = [
     category: 'wire_or_receipt',
     definition: 'Bank-issued receipt for deposit, withdrawal, or transfer (e.g., Turkish "dekont").',
     identifying_signals: {
-      filename_regex: [/dekont|bank.*receipt|fiş/i],
-      keyword_phrases: ['Dekont', 'Hesap Hareketi', 'Banka Şubesi'],
+      // `gelis` matches Turkish "geliş" after NFD fold (incoming
+      // wire/transfer); `havale` is the generic Turkish word for transfer.
+      filename_regex: [/dekont|bank.*receipt|fis|gelis|havale|eft/i],
+      keyword_phrases: ['Dekont', 'Hesap Hareketi', 'Banka Şubesi', 'Geliş', 'Havale', 'EFT'],
     },
     foreign_language_equivalents: { tr: { native_name: 'Dekont' } },
     fills_proof_slots: ['E2.investment_amount_proof', 'E2.SOF.us_deployment'],
@@ -1119,8 +1130,22 @@ const CONTRACTS_AND_INVOICES: DocType[] = [
     category: 'business_contract',
     definition: 'Contract with paying customer — supports real-and-operating + revenue capacity.',
     identifying_signals: {
-      filename_regex: [/customer|client.*agreement|msa|sow/i],
-      keyword_phrases: ['Customer', 'Client', 'Master Services Agreement', 'Statement of Work'],
+      // `\bagreement\b` / `\bcontract\b` catch generic naming
+      // ("Indemnification Agreement.pdf", "Final Contract King Louis -
+      // Daria.pdf"); customer-specific signals stay above so the
+      // discriminator goes to customer_contract first.
+      filename_regex: [
+        /customer|client.*agreement|msa|sow/i,
+        /(?<![a-z])(agreement|contract)(?![a-z])/i,
+      ],
+      keyword_phrases: [
+        'Customer',
+        'Client',
+        'Master Services Agreement',
+        'Statement of Work',
+        'Agreement',
+        'Indemnification',
+      ],
     },
     fills_proof_slots: ['E3.operating_evidence', 'E4.financial_capacity'],
     extractor_skill: 'customer-contract',
@@ -1220,7 +1245,24 @@ const CONTRACTS_AND_INVOICES: DocType[] = [
     category: 'invoice_or_receipt',
     definition: 'Invoice marked paid — evidence funds were spent (at risk).',
     identifying_signals: {
-      filename_regex: [/paid|receipt|odendi|facture|recu|recibo|rechnung|makbuz/i],
+      filename_regex: [
+        /paid|receipt|odendi|facture|recu|recibo|rechnung|makbuz/i,
+        // Bare "$<amount>" or "payment" in filename — covers attorney
+        // expense exports like "07.02.25 $105.13.pdf", "$10,000
+        // payment.pdf", "branding design - april - 1000.pdf".
+        /\$\s*\d|(?<![a-z])payment(?![a-z])/i,
+        // Monthly expense summary pattern: "1- January 25.pdf",
+        // "2- February 2024.pdf", "5 -August 24.pdf". These are
+        // attorney-curated month-bucket expense rolls.
+        /\b\d+\s*-\s*(january|february|march|april|may|june|july|august|september|october|november|december)\b/i,
+        // Common SaaS / vendor subscription filenames the attorney
+        // exports as expense evidence. Pattern is purposely narrow:
+        // brand names, not generic words.
+        // Note: "adobe" omitted — overlaps with Adobe Photoshop
+        // certificate filenames; an Adobe subscription invoice should
+        // have "$" or "invoice" in the name and hit the patterns above.
+        /(?<![a-z])(godaddy|go.daddy|google.workspace|stripe|shopify|aws|microsoft.365|domain|workspace|agency.subs|subscription)(?![a-z])/i,
+      ],
       keyword_phrases: [
         'Paid',
         'Payment Received',
@@ -1607,12 +1649,12 @@ const PAYROLL_EMPLOYMENT: DocType[] = [
   },
   {
     id: 'employment_record_us',
-    name: 'U.S. employment record / verification letter',
+    name: 'U.S. employment record / verification letter / I-9',
     category: 'employment_evidence',
-    definition: 'Letter or record from U.S. employer evidencing prior employment.',
+    definition: 'Letter or record from U.S. employer evidencing prior employment, plus Form I-9 employment-eligibility verification.',
     identifying_signals: {
-      filename_regex: [/employment.*record|verification.*employment/i],
-      keyword_phrases: ['employed', 'verification of employment'],
+      filename_regex: [/employment.*record|verification.*employment|(?<![a-z0-9])i-?9(?![a-z0-9])/i],
+      keyword_phrases: ['employed', 'verification of employment', 'Form I-9', 'Employment Eligibility Verification'],
     },
     fills_proof_slots: ['E5.executive_supervisory_authority'],
     extractor_skill: null,
@@ -1642,8 +1684,8 @@ const PAYROLL_EMPLOYMENT: DocType[] = [
     category: 'employment_evidence',
     definition: 'Salary payslip from treaty country — supports salary-origin SOF.',
     identifying_signals: {
-      filename_regex: [/payslip|maas.*bordro|gehaltsabrechnung|bulletin.*paie|fiche.*paie|nomina/i],
-      keyword_phrases: ['Maaş Bordrosu', 'Net Salary', 'Gross Salary', 'Bulletin de Paie', 'Fiche de Paie'],
+      filename_regex: [/payslip|paystub|paystubs|maas.*bordro|gehaltsabrechnung|bulletin.*paie|fiche.*paie|nomina/i],
+      keyword_phrases: ['Maaş Bordrosu', 'Net Salary', 'Gross Salary', 'Bulletin de Paie', 'Fiche de Paie', 'Pay Stub', 'Earnings Statement'],
     },
     foreign_language_equivalents: { tr: { native_name: 'Maaş Bordrosu' } },
     fills_proof_slots: ['E2.SOF.origin_evidence'],
@@ -1699,8 +1741,11 @@ const CREDENTIALS: DocType[] = [
     category: 'credentials',
     definition: 'University or technical-school diploma.',
     identifying_signals: {
-      filename_regex: [/diploma|diplom|degree/i],
-      keyword_phrases: ['Diploma', 'Bachelor', 'Master', 'Doctor', 'Diplom'],
+      // `transcript` and `releve.*note` (French "relevé de notes")
+      // catch academic transcripts; routed to the same coarse
+      // credential bucket as the diploma proper.
+      filename_regex: [/diploma|diplom|degree|transcript|releve.*note/i],
+      keyword_phrases: ['Diploma', 'Bachelor', 'Master', 'Doctor', 'Diplom', 'Transcript', 'Relevé de Notes'],
     },
     foreign_language_equivalents: {
       tr: { native_name: 'Diploma' },
@@ -1867,7 +1912,9 @@ const CRYPTO_AND_SOF_ORIGIN: DocType[] = [
     category: 'sof_origin_evidence',
     definition: 'Personal loan agreement with collateral schedule.',
     identifying_signals: {
-      filename_regex: [/loan.*agreement|kredi.*sözleşme|promissory/i],
+      // `\bloan\b` lets bare "Loan" filenames match — letter-only
+      // lookarounds so "Caisse d'Epargne_loan.pdf" still hits.
+      filename_regex: [/loan.*agreement|kredi.*sozlesme|promissory|(?<![a-z])loan(?![a-z])/i],
       keyword_phrases: ['Loan Agreement', 'Lender', 'Borrower', 'Promissory Note'],
     },
     fills_proof_slots: ['E2.SOF.loan_collateral', 'E2.SOF.origin_evidence'],
