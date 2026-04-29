@@ -1,6 +1,6 @@
 import { ingestPdf, type IngestResult } from '@/ingest';
 import { draftCoverLetter } from '@/draft';
-import { checkDraft } from '@/reason';
+import { runFullReview } from '@/reason';
 import { postDraft } from '@/lib/verify';
 
 export const runtime = 'nodejs';
@@ -84,8 +84,12 @@ export async function POST(request: Request): Promise<Response> {
       result = { ...result, verify_report: verifyReport };
 
       try {
-        const reviewed = await checkDraft(result.caseFacts, letter, verifyReport);
-        return { ...result, review: reviewed.report };
+        const reviewed = await runFullReview(result.caseFacts, letter, verifyReport);
+        return {
+          ...result,
+          review: reviewed.llm.report,
+          deterministic_gates: reviewed.deterministic,
+        };
       } catch (e: unknown) {
         return {
           ...result,

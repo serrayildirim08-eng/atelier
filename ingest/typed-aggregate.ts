@@ -15,6 +15,7 @@
 import { getAnthropic } from '@/lib/anthropic';
 import { logAnthropicUsage } from '@/lib/usage-log';
 import { countMessageTokens } from '@/lib/token-count';
+import { resolveSubApplicationAlias } from '@/lib/case-folder-aliases';
 import { E2FactsSchema, type E2Facts } from './schema';
 import {
   DOC_TYPE_LABELS,
@@ -2501,9 +2502,1428 @@ export function runIncentiveRecipientMismatchGate(
   return rows;
 }
 
+/* ---------------------------------------------------------------------- */
+/* Phase-3 deterministic enrichment — populate the optional gate inputs   */
+/* (matter.co_petitioners, ownership_history, filed_date_i129, rfes,      */
+/* investment.claimed_amount_usd, source_of_funds.documented_amount_usd / */
+/* source_person, investor.current_status / prior_status_expiration_date) */
+/* directly from the typed memory. The LLM aggregator is permitted but    */
+/* not required to fill these — Phase-3 fills the gaps so the Phase-1/2   */
+/* gates stop returning data_incomplete on every matter.                  */
+/*                                                                        */
+/* Each enrichment is null-safe: if the typed memory has no signal, the   */
+/* field stays whatever the LLM emitted (often absent, which the schema   */
+/* treats as `undefined`). NEVER fabricates.                              */
+/* ---------------------------------------------------------------------- */
+
+type FieldT<T> = {
+  value: T | null;
+  source_page: number | null;
+  source_quote: string | null;
+  confidence: number | null;
+};
+
+function makeField<T>(
+  value: T | null,
+  source_page: number | null,
+  source_quote: string | null,
+  confidence: number | null,
+): FieldT<T> {
+  return { value, source_page, source_quote, confidence };
+}
+
+const NULL_FIELD: FieldT<never> = {
+  value: null,
+  source_page: null,
+  source_quote: null,
+  confidence: null,
+};
+
+/**
+ * Phase-3 §1 — co-petitioners.
+ *
+ * Walks every corporate-formation members list and every MITA
+ * transferor/transferee, normalizes against the principal investor's
+ * name, and emits a CoPetitioner entry per non-investor person.
+ * Deduplicated on normalized full_name. Returns [] when no candidate
+ * persons are found.
+ */
+export function deriveCoPetitioners(
+  memory: TypedMemory,
+): { full_name: FieldT<string>; role: FieldT<string> }[] {
+  const investorName = findInvestorName(memory);
+  const seen = new Map<string, { full_name: FieldT<string>; role: FieldT<string> }>();
+
+  const add = (
+    name: string,
+    role: string | null,
+    page: number | null,
+    quote: string | null,
+  ) => {
+    const norm = normalizeName(name);
+    if (!norm) return;
+    if (investorName && nameMatches(name, investorName)) return;
+    if (seen.has(norm)) return;
+    seen.set(norm, {
+      full_name: makeField(name, page, quote, 0.9),
+      role: role ? makeField(role, page, quote, 0.7) : NULL_FIELD,
+    });
+  };
+
+  for (const entry of iterMemoryEntries(memory)) {
+    const cf = entry.corporateFormation;
+    if (cf) {
+      const sub = cf.formation_doc_subtype;
+      if (sub === 'articles_of_organization' || sub === 'articles_of_incorporation') {
+        for (const m of cf.members_or_shareholders) {
+          const n = m.name?.value;
+          if (n) add(n, m.role?.value ?? null, m.name.source_page, m.name.source_quote);
+        }
+      } else if (sub === 'operating_agreement_amendment') {
+        for (const m of cf.new_member_list) {
+          const n = m.name?.value;
+          if (n) add(n, null, m.name.source_page, m.name.source_quote);
+        }
+      }
+    }
+    const c = entry.contract;
+    if (c?.contract_subtype === 'membership_interest_transfer_agreement') {
+      const tr = c.transferor.name?.value;
+      const te = c.transferee.name?.value;
+      if (tr) add(tr, 'transferor', c.transferor.name.source_page, c.transferor.name.source_quote);
+      if (te) add(te, 'transferee', c.transferee.name.source_page, c.transferee.name.source_quote);
+    }
+  }
+
+  return [...seen.values()];
+}
+
+/**
+ * Phase-3 §2 — ownership_history.
+ *
+ * Articles of org/inc → one entry at filing_date_or_effective_date with
+ * the members_or_shareholders list. Operating-agreement amendments → one
+ * entry at effective_date with new_member_list. Sorted ascending by date.
+ * Owner names without a date are dropped (cannot anchor a transition).
+ */
+export function deriveOwnershipHistory(
+  memory: TypedMemory,
+): {
+  effective_date: FieldT<string>;
+  owner_names: FieldT<string>[];
+  source_doc: FieldT<string>;
+}[] {
+  type Entry = {
+    effective_date: FieldT<string>;
+    owner_names: FieldT<string>[];
+    source_doc: FieldT<string>;
+    sortKey: number;
+  };
+  const out: Entry[] = [];
+
+  for (const entry of iterMemoryEntries(memory)) {
+    const cf = entry.corporateFormation;
+    if (!cf) continue;
+    const sub = cf.formation_doc_subtype;
+    let dateField: FieldT<string> | null = null;
+    let names: { value: string; page: number | null; quote: string | null }[] = [];
+
+    if (sub === 'articles_of_organization' || sub === 'articles_of_incorporation') {
+      const d = cf.filing_date_or_effective_date;
+      if (d?.value) dateField = makeField(d.value, d.source_page, d.source_quote, d.confidence);
+      names = cf.members_or_shareholders
+        .map((m) => ({
+          value: m.name?.value ?? '',
+          page: m.name?.source_page ?? null,
+          quote: m.name?.source_quote ?? null,
+        }))
+        .filter((n) => !!n.value);
+    } else if (sub === 'operating_agreement_amendment') {
+      const d = cf.effective_date ?? cf.filing_date_or_effective_date;
+      if (d?.value) dateField = makeField(d.value, d.source_page, d.source_quote, d.confidence);
+      names = cf.new_member_list
+        .map((m) => ({
+          value: m.name?.value ?? '',
+          page: m.name?.source_page ?? null,
+          quote: m.name?.source_quote ?? null,
+        }))
+        .filter((n) => !!n.value);
+    } else {
+      continue;
+    }
+
+    if (!dateField || names.length === 0) continue;
+    const parsed = parseIsoDate(dateField.value);
+    out.push({
+      effective_date: dateField,
+      owner_names: names.map((n) => makeField(n.value, n.page, n.quote, 0.9)),
+      source_doc: makeField(entry.filename, null, null, 1),
+      sortKey: parsed ? parsed.getTime() : 0,
+    });
+  }
+
+  out.sort((a, b) => a.sortKey - b.sortKey);
+  return out.map((e) => ({
+    effective_date: e.effective_date,
+    owner_names: e.owner_names,
+    source_doc: e.source_doc,
+  }));
+}
+
+/**
+ * Phase-3 §3 — filed_date_i129.
+ *
+ * Pull from the I-129 USCIS form's signature_date. Falls back to null when
+ * no I-129 form is present or signature_date is missing. Treats both
+ * "I-129" and "I-129E" (Supplement) as valid sources, preferring the base
+ * I-129 when both exist.
+ */
+export function deriveFiledDateI129(memory: TypedMemory): FieldT<string> | null {
+  let i129: FieldT<string> | null = null;
+  let i129e: FieldT<string> | null = null;
+  for (const entry of iterMemoryEntries(memory)) {
+    const f = entry.facts;
+    if (!f || f.doc_type !== 'uscis_or_dos_form') continue;
+    const formId = f.form_id?.value ?? '';
+    const sig = f.signature_date;
+    if (!sig?.value) continue;
+    if (/i[-\s]?129\s*e/i.test(formId) && !i129e) {
+      i129e = makeField(sig.value, sig.source_page, sig.source_quote, sig.confidence);
+    } else if (/i[-\s]?129\b/i.test(formId) && !i129) {
+      i129 = makeField(sig.value, sig.source_page, sig.source_quote, sig.confidence);
+    }
+  }
+  return i129 ?? i129e;
+}
+
+/**
+ * Phase-3 §4 — RFE / NOID list.
+ *
+ * Heuristic scan: status_doc with status_class containing "RFE"/"NOID",
+ * cover_letter with letter_kind hinting at RFE response, or any 'other'
+ * doc whose one_line_summary references RFE/NOID. We cannot semantically
+ * classify subject_category from filename + thin extraction alone, so
+ * default to 'other'. initial_filing_assertion / response_assertion stay
+ * null — they require body-text extraction (Phase-4).
+ */
+export function deriveRfes(
+  memory: TypedMemory,
+): {
+  rfe_date: FieldT<string>;
+  subject_category: FieldT<
+    | 'bona_fide_enterprise'
+    | 'marginality'
+    | 'substantial_investment'
+    | 'source_of_funds'
+    | 'classification'
+    | 'maintenance_of_status'
+    | 'other'
+    | 'nationality_or_ownership'
+    | 'develop_and_direct'
+    | 'procedural_status'
+    | 'classification_ambiguity'
+    | 'multiple'
+  >;
+  notes: FieldT<string>;
+  initial_filing_assertion?: FieldT<string>;
+  response_assertion?: FieldT<string>;
+}[] {
+  const out: ReturnType<typeof deriveRfes> = [];
+
+  const rfePattern = /\b(rfe|noid|notice of intent to deny|request for evidence)\b/i;
+
+  for (const entry of iterMemoryEntries(memory)) {
+    const f = entry.facts;
+    if (!f) continue;
+
+    let dateValue: string | null = null;
+    let datePage: number | null = null;
+    let dateQuote: string | null = null;
+    let noteText: string | null = null;
+    let matched = false;
+
+    if (f.doc_type === 'status_doc') {
+      const cls = f.status_class?.value ?? '';
+      if (rfePattern.test(cls) || rfePattern.test(entry.filename)) {
+        matched = true;
+        dateValue = f.admission_date?.value ?? f.authorized_until?.value ?? null;
+        datePage = f.admission_date?.source_page ?? null;
+        dateQuote = f.admission_date?.source_quote ?? null;
+        noteText = cls || null;
+      }
+    } else if (f.doc_type === 'cover_letter') {
+      if (rfePattern.test(entry.filename)) {
+        matched = true;
+        dateValue = f.letter_date?.value ?? null;
+        datePage = f.letter_date?.source_page ?? null;
+        dateQuote = f.letter_date?.source_quote ?? null;
+        noteText = `RFE-flagged cover letter (${entry.filename})`;
+      }
+    } else if (f.doc_type === 'other') {
+      const summary = f.one_line_summary?.value ?? '';
+      if (rfePattern.test(summary) || rfePattern.test(entry.filename)) {
+        matched = true;
+        noteText = summary || null;
+      }
+    }
+
+    if (!matched) continue;
+    out.push({
+      rfe_date: dateValue
+        ? makeField(dateValue, datePage, dateQuote, 0.7)
+        : NULL_FIELD,
+      subject_category: makeField('other' as const, null, null, 0.5),
+      notes: noteText ? makeField(noteText, null, null, 0.7) : NULL_FIELD,
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Phase-3 §5 — investment.claimed_amount_usd.
+ *
+ * Pull the I-129 E Supplement's investment_amount_usd. Same pattern as
+ * findConsiderationGateInputs, but exposed as a Field<number> for
+ * unaccountedSofShareGate consumption.
+ */
+export function deriveClaimedAmountUsd(memory: TypedMemory): FieldT<number> | null {
+  for (const entry of iterMemoryEntries(memory)) {
+    const f = entry.facts;
+    if (!f || f.doc_type !== 'uscis_or_dos_form') continue;
+    const formId = f.form_id?.value ?? '';
+    if (!/i[-\s]?129\s*e/i.test(formId)) continue;
+    const amt = f.investment_amount_usd;
+    if (typeof amt?.value !== 'number') continue;
+    return makeField(amt.value, amt.source_page, amt.source_quote, amt.confidence);
+  }
+  return null;
+}
+
+/**
+ * Phase-3 §6 — investor.current_status.
+ *
+ * Prefer rich i94 class_of_admission; fall back to thin status_doc
+ * status_class. Both are short tokens like "B-2", "F-1", "ESTA".
+ */
+export function deriveCurrentStatus(memory: TypedMemory): FieldT<string> | null {
+  for (const entry of iterMemoryEntries(memory)) {
+    if (entry.i94?.class_of_admission?.value) {
+      const f = entry.i94.class_of_admission;
+      return makeField(f.value!, f.source_page, f.source_quote, f.confidence);
+    }
+  }
+  for (const entry of iterMemoryEntries(memory)) {
+    const f = entry.facts;
+    if (f?.doc_type === 'status_doc' && f.status_class?.value) {
+      const sc = f.status_class;
+      return makeField(sc.value!, sc.source_page, sc.source_quote, sc.confidence);
+    }
+  }
+  return null;
+}
+
+/**
+ * Phase-3 §7 — investor.prior_status_expiration_date.
+ *
+ * Prefer rich i94 admit_until_date (skip when D/S marker is set — a
+ * D/S admission has no calendar expiration). Fall back to status_doc
+ * authorized_until.
+ */
+export function derivePriorStatusExpirationDate(
+  memory: TypedMemory,
+): FieldT<string> | null {
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.i94) continue;
+    if (entry.i94.duration_of_status_marker?.value === true) continue;
+    const f = entry.i94.admit_until_date;
+    if (f?.value) return makeField(f.value, f.source_page, f.source_quote, f.confidence);
+  }
+  for (const entry of iterMemoryEntries(memory)) {
+    const f = entry.facts;
+    if (f?.doc_type === 'status_doc' && f.authorized_until?.value) {
+      const au = f.authorized_until;
+      return makeField(au.value!, au.source_page, au.source_quote, au.confidence);
+    }
+  }
+  return null;
+}
+
+/**
+ * Phase-5 §1 — investor.work_authorization_date.
+ *
+ * Pull the EARLIEST plausible US work-authorization start date for the
+ * Beneficiary from the typed memory. Sources, in order of authority:
+ *   1. visaStamp rich extracts where the classification is a
+ *      work-authorizing class (E, H, L, O, P, EAD/Employment Authorization)
+ *      and validity_start_date is populated.
+ *   2. status_doc (thin) entries whose status_class names a work-authorizing
+ *      class, using admission_date as the auth start.
+ *
+ * The B-2 status violation gate compares this against
+ * enterprise.fully_operational_since_date — operations BEFORE the
+ * earliest known work-auth = 9 FAM 402.9-7 violation. We deliberately
+ * pick the EARLIEST work-authorizing date across all surfaced classes
+ * (an H-1B before the E-2 still authorized employment) so the gate
+ * doesn't false-positive on a renewal-flow case where the prior class
+ * was already work-authorized.
+ *
+ * Returns null when no work-authorizing document is on file (the gate
+ * handles null gracefully — falls back to filed_date_i129 comparison).
+ */
+const WORK_AUTHORIZING_CLASSIFICATIONS = /\b(e[-\s]?[12]|h[-\s]?[1-3][a-c]?|l[-\s]?[12][ab]?|o[-\s]?[12]|p[-\s]?[1-4]|tn|opt|ead|employment\s+authorization|work\s+permit)\b/i;
+
+export function deriveWorkAuthorizationDate(memory: TypedMemory): FieldT<string> | null {
+  const candidates: { date: Date; field: FieldT<string> }[] = [];
+
+  for (const entry of iterMemoryEntries(memory)) {
+    // Source 1: rich visa-stamp / I-797 extracts.
+    const vs = entry.visaStamp;
+    if (vs) {
+      const cls = vs.classification?.value ?? '';
+      if (WORK_AUTHORIZING_CLASSIFICATIONS.test(cls)) {
+        const start = vs.validity_start_date;
+        if (start?.value) {
+          const d = new Date(start.value);
+          if (!Number.isNaN(d.getTime())) {
+            candidates.push({
+              date: d,
+              field: makeField(start.value, start.source_page, start.source_quote, start.confidence),
+            });
+          }
+        }
+      }
+    }
+    // Source 2: thin status_doc entries.
+    const f = entry.facts;
+    if (f?.doc_type === 'status_doc') {
+      const cls = f.status_class?.value ?? '';
+      if (WORK_AUTHORIZING_CLASSIFICATIONS.test(cls)) {
+        const adm = f.admission_date;
+        if (adm?.value) {
+          const d = new Date(adm.value);
+          if (!Number.isNaN(d.getTime())) {
+            candidates.push({
+              date: d,
+              field: makeField(adm.value, adm.source_page, adm.source_quote, adm.confidence),
+            });
+          }
+        }
+      }
+    }
+  }
+
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => a.date.getTime() - b.date.getTime());
+  return candidates[0].field;
+}
+
+/**
+ * Phase-3 §8 — source_of_funds enrichment in place.
+ *
+ * For each chain entry already on parsed.data.source_of_funds, if
+ * documented_amount_usd is missing, fall back to origin_amount_usd
+ * (lossy but better than null for the unaccounted_sof_share gate). If
+ * source_person is missing, attempt to bind from a same-named entry in
+ * the source_of_funds doc_type memory (donor_or_seller field).
+ *
+ * Returns the chains with the new optional fields populated only where
+ * a confident source exists. Never overwrites a populated field.
+ */
+export function enrichSourceOfFundsChains(
+  memory: TypedMemory,
+  chains: E2Facts['source_of_funds'],
+): E2Facts['source_of_funds'] {
+  // Build a lookup: donor_or_seller name → SOF doc_type entry
+  type SofDocEntry = {
+    donor: string | null;
+    amount: number | null;
+    page: number | null;
+    quote: string | null;
+  };
+  const sofDocs: SofDocEntry[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    const f = entry.facts;
+    if (f?.doc_type !== 'source_of_funds') continue;
+    sofDocs.push({
+      donor: f.donor_or_seller?.value ?? null,
+      amount: f.amount_usd?.value ?? null,
+      page: f.amount_usd?.source_page ?? null,
+      quote: f.amount_usd?.source_quote ?? null,
+    });
+  }
+
+  return chains.map((chain) => {
+    const documented = chain.documented_amount_usd?.value;
+    const origin = chain.origin_amount_usd?.value;
+    let updatedDocumented = chain.documented_amount_usd;
+    if ((updatedDocumented === undefined || documented == null) && typeof origin === 'number') {
+      updatedDocumented = makeField(
+        origin,
+        chain.origin_amount_usd.source_page,
+        chain.origin_amount_usd.source_quote,
+        0.6,
+      );
+    }
+
+    let updatedSourcePerson = chain.source_person;
+    const sourcePersonName = chain.source_person?.full_name?.value;
+    if (!updatedSourcePerson || !sourcePersonName) {
+      // Match SOF doc_type donor_or_seller against this chain's notes /
+      // origin_evidence (best signal we have without semantic linking).
+      const notes = chain.notes?.value ?? '';
+      const origin_ev = chain.origin_evidence?.value ?? '';
+      const haystack = `${notes} ${origin_ev}`;
+      for (const d of sofDocs) {
+        if (!d.donor) continue;
+        if (nameMatches(haystack, d.donor)) {
+          updatedSourcePerson = {
+            full_name: makeField(d.donor, d.page, d.quote, 0.6),
+          };
+          break;
+        }
+      }
+    }
+
+    return {
+      ...chain,
+      documented_amount_usd: updatedDocumented,
+      source_person: updatedSourcePerson,
+    };
+  });
+}
+
+/* ---------------------------------------------------------------------- */
+/* Phase-4 derivation helpers — cover-letter rich + RFE/NOID rich          */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Phase-4 §1 — enterprise.fully_operational_since_date /
+ * claimed_business_model / claimed_industry_naics from the rich
+ * cover-letter extraction. The thin cover_letter doc_type carries only
+ * letter_date / addressee / attorney_name / word_count_estimate; the
+ * narrative claims live on entry.coverLetter (Phase-4 second pass).
+ *
+ * When multiple cover_letter entries are present (initial + RFE response),
+ * prefer the EARLIEST by letter_date — the operational-since claim from
+ * the initial filing is what the b2_status_violation_signal gate compares
+ * against. Falls back to whichever has a populated value when dates tie.
+ */
+export function deriveCoverLetterFields(memory: TypedMemory): {
+  fully_operational_since_date: FieldT<string> | null;
+  claimed_business_model: FieldT<string> | null;
+  claimed_industry_naics: FieldT<string> | null;
+  principal_treaty_investor_identity: FieldT<string> | null;
+} {
+  type Candidate = {
+    filename: string;
+    letter_date: string | null;
+    rich: PerPdfResult['coverLetter'];
+  };
+  const candidates: Candidate[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.coverLetter) continue;
+    const f = entry.facts;
+    const letterDate =
+      f && f.doc_type === 'cover_letter' ? f.letter_date?.value ?? null : null;
+    candidates.push({ filename: entry.filename, letter_date: letterDate, rich: entry.coverLetter });
+  }
+  if (candidates.length === 0) {
+    return {
+      fully_operational_since_date: null,
+      claimed_business_model: null,
+      claimed_industry_naics: null,
+      principal_treaty_investor_identity: null,
+    };
+  }
+  candidates.sort((a, b) => {
+    if (a.letter_date && b.letter_date) return a.letter_date.localeCompare(b.letter_date);
+    if (a.letter_date) return -1;
+    if (b.letter_date) return 1;
+    return a.filename.localeCompare(b.filename);
+  });
+
+  function pick<K extends keyof NonNullable<PerPdfResult['coverLetter']>>(
+    key: K,
+  ): FieldT<string> | null {
+    for (const c of candidates) {
+      const f = c.rich?.[key];
+      if (f && (f as FieldT<string>).value != null) {
+        const v = f as FieldT<string>;
+        return makeField(v.value!, v.source_page, v.source_quote, v.confidence);
+      }
+    }
+    return null;
+  }
+
+  return {
+    fully_operational_since_date: pick('fully_operational_since_date'),
+    claimed_business_model: pick('claimed_business_model'),
+    claimed_industry_naics: pick('claimed_industry_naics'),
+    principal_treaty_investor_identity: pick('principal_treaty_investor_identity'),
+  };
+}
+
+/**
+ * Phase-7 — narrative cover-letter fields beyond the Phase-4 four. These
+ * are LLM-only captures (no E2FactsSchema slot) surfaced to the drafter +
+ * reviewer via the cover_letter rich payload that lands in memoryToPromptText.
+ * Returns the FIRST populated entry per field across all cover_letter
+ * extracts (cover letters of differing dates almost always agree on these
+ * — they're invariant across initial filing / RFE response).
+ *
+ *   - prior_passport_renewal_footnote: B&B + Splash Sub1 signature pattern;
+ *     drafter cites for consistency when on file.
+ *   - five_year_business_horizon: cover-letter narrative claim (NOT business
+ *     plan); the Substantiality/Marginality reviewer compares against
+ *     the business plan's projections to detect drift.
+ *   - develop_and_direct_role_grant: verbatim authority-grant scope; an
+ *     empty authority_scope[] is the Berkant-style E5 vulnerability marker.
+ */
+export function deriveCoverLetterPhase7Fields(memory: TypedMemory): {
+  prior_passport_renewal_footnote: NonNullable<
+    NonNullable<PerPdfResult['coverLetter']>['prior_passport_renewal_footnote']
+  > | null;
+  five_year_business_horizon: NonNullable<
+    NonNullable<PerPdfResult['coverLetter']>['five_year_business_horizon']
+  > | null;
+  develop_and_direct_role_grant: NonNullable<
+    NonNullable<PerPdfResult['coverLetter']>['develop_and_direct_role_grant']
+  > | null;
+} {
+  let footnote: ReturnType<typeof deriveCoverLetterPhase7Fields>['prior_passport_renewal_footnote'] = null;
+  let horizon: ReturnType<typeof deriveCoverLetterPhase7Fields>['five_year_business_horizon'] = null;
+  let grant: ReturnType<typeof deriveCoverLetterPhase7Fields>['develop_and_direct_role_grant'] = null;
+  for (const entry of iterMemoryEntries(memory)) {
+    const cl = entry.coverLetter;
+    if (!cl) continue;
+    if (!footnote && cl.prior_passport_renewal_footnote)
+      footnote = cl.prior_passport_renewal_footnote;
+    if (!horizon && cl.five_year_business_horizon)
+      horizon = cl.five_year_business_horizon;
+    if (!grant && cl.develop_and_direct_role_grant)
+      grant = cl.develop_and_direct_role_grant;
+  }
+  return {
+    prior_passport_renewal_footnote: footnote,
+    five_year_business_horizon: horizon,
+    develop_and_direct_role_grant: grant,
+  };
+}
+
+const RFE_NOTICE_FILENAME_RE = /(\brfe\b|\bnoid\b|notice[-_\s]?of[-_\s]?intent[-_\s]?to[-_\s]?deny|request[-_\s]?for[-_\s]?evidence)/i;
+
+/**
+ * Phase-4 §2 — rfes[] enriched with subject_category + assertion text.
+ *
+ * Walks every entry whose rich rfeNotice was populated; emits one rfes[]
+ * entry per RFE / NOID notice (document_role='rfe_notice' / 'noid_notice').
+ * For each notice, scans the same memory for a paired response document
+ * (document_role='rfe_response' / 'noid_response') matching on
+ * subject_category — the response's response_assertion lands on the
+ * notice's rfes[] entry. When subject_category='multiple' or matching is
+ * ambiguous, falls back to the first response entry detected.
+ *
+ * Returns [] when no rich rfeNotice extractions are present (the caller
+ * keeps the Phase-3 deriveRfes output instead).
+ */
+export function deriveRfesRich(
+  memory: TypedMemory,
+): ReturnType<typeof deriveRfes> {
+  type RfeEntry = ReturnType<typeof deriveRfes>[number];
+  const out: RfeEntry[] = [];
+
+  type Bound = {
+    filename: string;
+    rich: NonNullable<PerPdfResult['rfeNotice']>;
+  };
+  const all: Bound[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    if (!entry.rfeNotice) continue;
+    all.push({ filename: entry.filename, rich: entry.rfeNotice });
+  }
+  if (all.length === 0) return out;
+
+  const notices = all.filter(
+    (b) =>
+      b.rich.document_role.value === 'rfe_notice' ||
+      b.rich.document_role.value === 'noid_notice',
+  );
+  const responses = all.filter(
+    (b) =>
+      b.rich.document_role.value === 'rfe_response' ||
+      b.rich.document_role.value === 'noid_response',
+  );
+
+  for (const n of notices) {
+    const cat = n.rich.subject_category;
+    const subjVal = (cat.value ?? 'other') as RfeEntry['subject_category']['value'];
+    const noteText = `${n.filename}: ${cat.value ?? 'other'}${
+      n.rich.evidence_requested.length > 0
+        ? ` — ${n.rich.evidence_requested.length} evidence items`
+        : ''
+    }`;
+
+    let initial: FieldT<string> | undefined;
+    const initF = n.rich.initial_filing_assertion;
+    if (initF.value != null) {
+      initial = makeField(initF.value, initF.source_page, initF.source_quote, initF.confidence);
+    }
+
+    let response: FieldT<string> | undefined;
+    const match = responses.find(
+      (r) =>
+        r.rich.subject_category.value === cat.value ||
+        r.rich.subject_category.value === 'multiple' ||
+        cat.value === 'multiple',
+    );
+    if (match) {
+      const respF = match.rich.response_assertion;
+      if (respF.value != null) {
+        response = makeField(
+          respF.value,
+          respF.source_page,
+          respF.source_quote,
+          respF.confidence,
+        );
+      }
+    }
+
+    const dateF = n.rich.rfe_date;
+    out.push({
+      rfe_date:
+        dateF.value != null
+          ? makeField(dateF.value, dateF.source_page, dateF.source_quote, dateF.confidence)
+          : NULL_FIELD,
+      subject_category: makeField(
+        subjVal,
+        cat.source_page,
+        cat.source_quote,
+        cat.confidence,
+      ),
+      notes: makeField(noteText, null, null, 0.7),
+      ...(initial ? { initial_filing_assertion: initial } : {}),
+      ...(response ? { response_assertion: response } : {}),
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Phase-4 orchestrator. Mutates `facts` in place to populate the cover-
+ * letter narrative claims and the rich RFE assertions Phase-3 left
+ * `data_incomplete`. Idempotent: never overwrites a populated field.
+ * Returns the mutated facts.
+ *
+ * Runs AFTER enrichPhase3Fields so it can upgrade Phase-3's stub rfes[]
+ * (where subject_category='other' and assertions are null) when richer
+ * RFE extractions exist.
+ */
+export function enrichPhase4Fields(facts: E2Facts, memory: TypedMemory): E2Facts {
+  const cl = deriveCoverLetterFields(memory);
+
+  // enterprise.fully_operational_since_date.
+  if (
+    !facts.enterprise.fully_operational_since_date ||
+    facts.enterprise.fully_operational_since_date.value == null
+  ) {
+    if (cl.fully_operational_since_date) {
+      facts.enterprise.fully_operational_since_date = cl.fully_operational_since_date;
+    }
+  }
+
+  // enterprise.claimed_business_model.
+  if (
+    !facts.enterprise.claimed_business_model ||
+    facts.enterprise.claimed_business_model.value == null
+  ) {
+    if (cl.claimed_business_model) {
+      facts.enterprise.claimed_business_model = cl.claimed_business_model;
+    }
+  }
+
+  // enterprise.naics_code — only fill when LLM left it absent and the
+  // cover letter explicitly cites one. Phase-3 / aggregator extracts
+  // NAICS from the I-129E + business_plan; cover-letter cite is a last
+  // resort that should not overwrite either.
+  if (!facts.enterprise.naics_code || facts.enterprise.naics_code.value == null) {
+    if (cl.claimed_industry_naics) {
+      facts.enterprise.naics_code = cl.claimed_industry_naics;
+    }
+  }
+
+  // rfes[] — Phase-3 emits stub entries with subject_category='other' and
+  // null assertions. If a richer Phase-4 extraction is available, replace
+  // the stub set with the rich set. Idempotence is preserved by checking
+  // whether existing entries already carry a non-'other' subject_category
+  // OR a populated initial_filing_assertion: if so, leave alone.
+  const rich = deriveRfesRich(memory);
+  if (rich.length > 0) {
+    const existing = facts.rfes ?? [];
+    const hasRichExisting = existing.some(
+      (r) =>
+        r.subject_category?.value != null && r.subject_category.value !== 'other',
+    );
+    const hasAssertions = existing.some(
+      (r) => r.initial_filing_assertion?.value != null || r.response_assertion?.value != null,
+    );
+    if (!hasRichExisting && !hasAssertions) {
+      facts.rfes = rich;
+    }
+  }
+
+  return facts;
+}
+
+/* ---------------------------------------------------------------------- */
+/* Phase-6 derivation helpers                                              */
+/* ---------------------------------------------------------------------- */
+
+const SUB_APP_FILENAME_RE = /\bsub\s*([1-6])\b/i;
+
+/**
+ * Phase-6 §B — co-petitioner role enrichment.
+ *
+ * Layered on top of deriveCoPetitioners. For each co-petitioner already
+ * derived, attach (where derivable from the typed memory):
+ *   - relationship_to_principal  ← cover-letter rich extraction's
+ *                                  co_petitioner_relationships[] match
+ *                                  by normalized name.
+ *   - sub_application_status     ← per-doc filename pattern (`Sub2`, etc.)
+ *                                  on any document that names the
+ *                                  co-petitioner. First match wins.
+ *   - role_in_petitioner_entity  ← member resolutions / amendments role +
+ *                                  ownership_percent ("50% Member",
+ *                                  "President").
+ *
+ * Idempotent: leaves a field null when no signal is found. Never
+ * overwrites a populated field.
+ */
+export function deriveCoPetitionersEnriched(
+  memory: TypedMemory,
+  options?: { subApplicationAliases?: Record<string, string> | null },
+): {
+  full_name: FieldT<string>;
+  role: FieldT<string>;
+  relationship_to_principal?: FieldT<string>;
+  sub_application_status?: FieldT<string>;
+  role_in_petitioner_entity?: FieldT<string>;
+}[] {
+  const base = deriveCoPetitioners(memory);
+  if (base.length === 0) return [];
+
+  type RelHit = { name: string; relationship: string; page: number | null; quote: string | null; confidence: number | null };
+  const relHits: RelHit[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    const cl = entry.coverLetter;
+    if (!cl) continue;
+    const list = (cl as unknown as { co_petitioner_relationships?: unknown }).co_petitioner_relationships;
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (!item || typeof item !== 'object') continue;
+      const it = item as { full_name?: FieldT<string>; relationship?: FieldT<string> };
+      const n = it.full_name?.value;
+      const r = it.relationship?.value;
+      if (!n || !r) continue;
+      relHits.push({
+        name: n,
+        relationship: r,
+        page: it.relationship?.source_page ?? null,
+        quote: it.relationship?.source_quote ?? null,
+        confidence: it.relationship?.confidence ?? 0.7,
+      });
+    }
+  }
+
+  type RoleEntityHit = { name: string; role: string | null; pct: number | null; page: number | null; quote: string | null };
+  const roleEntityHits: RoleEntityHit[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    const cf = entry.corporateFormation;
+    if (!cf) continue;
+    const sub = cf.formation_doc_subtype;
+    if (sub === 'articles_of_organization' || sub === 'articles_of_incorporation') {
+      for (const m of cf.members_or_shareholders) {
+        const n = m.name?.value;
+        if (!n) continue;
+        roleEntityHits.push({
+          name: n,
+          role: m.role?.value ?? null,
+          pct: m.ownership_percent?.value ?? null,
+          page: m.role?.source_page ?? m.name.source_page,
+          quote: m.role?.source_quote ?? m.name.source_quote,
+        });
+      }
+    }
+  }
+
+  type SubAppHit = { sub: string; page: number | null; quote: string | null };
+  const subAppByName = new Map<string, SubAppHit>();
+  for (const entry of iterMemoryEntries(memory)) {
+    // Phase-6 primary: \bSub([1-6])\b filename regex.
+    // Phase-7 fallback: alias map (lib/case-folder-aliases.ts) consulted
+    // when the regex misses, with attorney-supplied per-matter overrides
+    // taking precedence over the static map.
+    let sub: string | null = null;
+    const m = SUB_APP_FILENAME_RE.exec(entry.filename);
+    if (m) {
+      sub = `sub${m[1]}`;
+    } else {
+      const resolved = resolveSubApplicationAlias(
+        entry.filename,
+        options?.subApplicationAliases ?? null,
+      );
+      if (resolved) sub = resolved;
+    }
+    if (!sub) continue;
+    const f = entry.facts;
+    if (!f) continue;
+    const candidates: string[] = [];
+    const anyF = f as unknown as Record<string, FieldT<string> | undefined>;
+    for (const k of ['full_name', 'beneficiary_name', 'petitioner_name', 'transferor_name', 'transferee_name']) {
+      const v = anyF[k]?.value;
+      if (typeof v === 'string') candidates.push(v);
+    }
+    const cf = entry.corporateFormation;
+    if (cf) {
+      const formSub = cf.formation_doc_subtype;
+      if (formSub === 'articles_of_organization' || formSub === 'articles_of_incorporation') {
+        for (const mem of cf.members_or_shareholders) {
+          const n = mem.name?.value;
+          if (n) candidates.push(n);
+        }
+      } else if (formSub === 'operating_agreement_amendment') {
+        for (const mem of cf.new_member_list) {
+          const n = mem.name?.value;
+          if (n) candidates.push(n);
+        }
+      }
+    }
+    const c = entry.contract;
+    if (c?.contract_subtype === 'membership_interest_transfer_agreement') {
+      const tr = c.transferor.name?.value;
+      const te = c.transferee.name?.value;
+      if (tr) candidates.push(tr);
+      if (te) candidates.push(te);
+    }
+    for (const cand of candidates) {
+      const norm = normalizeName(cand);
+      if (!norm) continue;
+      if (!subAppByName.has(norm)) {
+        subAppByName.set(norm, { sub, page: null, quote: entry.filename });
+      }
+    }
+  }
+
+  return base.map((co) => {
+    const norm = normalizeName(co.full_name.value);
+    const enriched: ReturnType<typeof deriveCoPetitionersEnriched>[number] = { ...co };
+
+    const rel = relHits.find((h) => nameMatches(h.name, co.full_name.value));
+    if (rel) {
+      enriched.relationship_to_principal = makeField(
+        rel.relationship,
+        rel.page,
+        rel.quote,
+        rel.confidence,
+      );
+    }
+
+    const subHit = subAppByName.get(norm);
+    if (subHit) {
+      enriched.sub_application_status = makeField(
+        subHit.sub,
+        subHit.page,
+        subHit.quote,
+        0.9,
+      );
+    }
+
+    const roleHit = roleEntityHits.find((h) => nameMatches(h.name, co.full_name.value));
+    if (roleHit) {
+      const parts: string[] = [];
+      if (roleHit.pct != null) parts.push(`${roleHit.pct}% Member`);
+      if (roleHit.role) parts.push(roleHit.role);
+      const phrase = parts.join(' / ').trim() || roleHit.role || null;
+      if (phrase) {
+        enriched.role_in_petitioner_entity = makeField(
+          phrase,
+          roleHit.page,
+          roleHit.quote,
+          0.8,
+        );
+      }
+    }
+
+    return enriched;
+  });
+}
+
+/**
+ * Phase-6 §C — observed_business_model from manual-input stub.
+ *
+ * No automated puller (Yelp / Google / BBB are out-of-scope this phase).
+ * Returns the attorney-typed manualInput as a Field<string> when present,
+ * else null. The aggregator's enrichPhase6Fields prefers an existing
+ * facts.enterprise.observed_business_model when populated; manualInput
+ * only fills the manual_input slot. The external_evidence_contradiction_risk
+ * gate reads observed_business_model_manual_input as a fallback when
+ * observed_business_model is null.
+ */
+export function deriveObservedBusinessModel(
+  _memory: TypedMemory,
+  manualInput?: string | null,
+): FieldT<string> | null {
+  if (!manualInput || manualInput.trim().length === 0) return null;
+  return makeField(manualInput.trim(), null, '[manual attorney input]', 1);
+}
+
+/**
+ * Phase-6 §A — NAICS / industry drift across cover_letter ↔ business_plan.
+ *
+ * Returns 0 or 1 conflict-register entries (one per matter). Compares:
+ *   - coverLetter.claimed_industry_naics  (6-digit NAICS code, optional)
+ *   - coverLetter.claimed_business_model  (industry phrase)
+ *   - business_plan.naics_code            (6-digit NAICS code)
+ *   - business_plan.industry              (industry phrase)
+ *
+ * Phase-7 — I-129 E Supplement (rich) is the third source. When all three
+ * are populated and pairwise diverge, emit a 3-source conflict
+ * (`NAICS_DRIFT_3SRC`) carrying fact_c.
+ *
+ * Drift detected when EITHER (a) two non-null NAICS codes differ at the
+ * 2-digit sector OR (b) two non-null industry phrases share Jaccard token
+ * overlap ≤ 0.2 (e.g., "e-commerce beauty retail" vs "automotive repair").
+ * One entry only; severity 4 (factual_material).
+ */
+const NAICS_PHRASE_JACCARD_THRESHOLD = 0.2;
+
+function tokenizeIndustryPhrase(s: string | null | undefined): Set<string> {
+  if (!s) return new Set();
+  return new Set(
+    normalizeName(s)
+      .split(' ')
+      .filter((t) => t.length >= 3 && !/^(and|the|for|with|llc|inc|company|services|enterprise|business)$/.test(t)),
+  );
+}
+
+export interface NaicsDriftConflict {
+  conflict_id: 'NAICS_DRIFT' | 'NAICS_DRIFT_3SRC';
+  fact_a: { source_doc: string; value: string };
+  fact_b: { source_doc: string; value: string };
+  fact_c?: { source_doc: string; value: string };
+  conflict_type: 'naics_industry_drift';
+  severity: 4;
+}
+
+export function deriveNaicsDriftConflicts(memory: TypedMemory): NaicsDriftConflict[] {
+  type Source = { doc: string; code: string | null; phrase: string | null };
+  const sources: Source[] = [];
+
+  for (const entry of iterMemoryEntries(memory)) {
+    if (entry.coverLetter) {
+      const code = entry.coverLetter.claimed_industry_naics?.value ?? null;
+      const phrase = entry.coverLetter.claimed_business_model?.value ?? null;
+      if (code || phrase) sources.push({ doc: entry.filename, code, phrase });
+    }
+    const f = entry.facts;
+    if (f?.doc_type === 'business_plan') {
+      const code = f.naics_code?.value ?? null;
+      const phrase = f.industry?.value ?? null;
+      if (code || phrase) sources.push({ doc: entry.filename, code, phrase });
+    }
+    // Phase-7 — I-129 E Supplement is the third source.
+    if (entry.i129eSupplement) {
+      const code = entry.i129eSupplement.naics_code?.value ?? null;
+      const phrase = entry.i129eSupplement.industry_classification?.value ?? null;
+      if (code || phrase) sources.push({ doc: entry.filename, code, phrase });
+    }
+  }
+  if (sources.length < 2) return [];
+
+  // Look for 3-source mutual divergence first (richer signal).
+  if (sources.length >= 3) {
+    for (let i = 0; i < sources.length; i++) {
+      for (let j = i + 1; j < sources.length; j++) {
+        for (let k = j + 1; k < sources.length; k++) {
+          const a = sources[i];
+          const b = sources[j];
+          const c = sources[k];
+          if (a.code && b.code && c.code) {
+            const codes = new Set([a.code, b.code, c.code]);
+            if (codes.size === 3) {
+              return [
+                {
+                  conflict_id: 'NAICS_DRIFT_3SRC',
+                  fact_a: { source_doc: a.doc, value: a.code },
+                  fact_b: { source_doc: b.doc, value: b.code },
+                  fact_c: { source_doc: c.doc, value: c.code },
+                  conflict_type: 'naics_industry_drift',
+                  severity: 4,
+                },
+              ];
+            }
+          }
+          if (a.phrase && b.phrase && c.phrase) {
+            const ab = jaccard(tokenizeIndustryPhrase(a.phrase), tokenizeIndustryPhrase(b.phrase));
+            const ac = jaccard(tokenizeIndustryPhrase(a.phrase), tokenizeIndustryPhrase(c.phrase));
+            const bc = jaccard(tokenizeIndustryPhrase(b.phrase), tokenizeIndustryPhrase(c.phrase));
+            if (ab <= NAICS_PHRASE_JACCARD_THRESHOLD && ac <= NAICS_PHRASE_JACCARD_THRESHOLD && bc <= NAICS_PHRASE_JACCARD_THRESHOLD) {
+              return [
+                {
+                  conflict_id: 'NAICS_DRIFT_3SRC',
+                  fact_a: { source_doc: a.doc, value: a.phrase },
+                  fact_b: { source_doc: b.doc, value: b.phrase },
+                  fact_c: { source_doc: c.doc, value: c.phrase },
+                  conflict_type: 'naics_industry_drift',
+                  severity: 4,
+                },
+              ];
+            }
+          }
+        }
+      }
+    }
+  }
+
+  for (let i = 0; i < sources.length; i++) {
+    for (let j = i + 1; j < sources.length; j++) {
+      const a = sources[i];
+      const b = sources[j];
+
+      if (a.code && b.code) {
+        const aSec = a.code.slice(0, 2);
+        const bSec = b.code.slice(0, 2);
+        if (a.code !== b.code || aSec !== bSec) {
+          return [
+            {
+              conflict_id: 'NAICS_DRIFT',
+              fact_a: { source_doc: a.doc, value: a.code },
+              fact_b: { source_doc: b.doc, value: b.code },
+              conflict_type: 'naics_industry_drift',
+              severity: 4,
+            },
+          ];
+        }
+      }
+
+      if (a.phrase && b.phrase) {
+        const overlap = jaccard(tokenizeIndustryPhrase(a.phrase), tokenizeIndustryPhrase(b.phrase));
+        if (overlap <= NAICS_PHRASE_JACCARD_THRESHOLD) {
+          return [
+            {
+              conflict_id: 'NAICS_DRIFT',
+              fact_a: { source_doc: a.doc, value: a.phrase },
+              fact_b: { source_doc: b.doc, value: b.phrase },
+              conflict_type: 'naics_industry_drift',
+              severity: 4,
+            },
+          ];
+        }
+      }
+    }
+  }
+  return [];
+}
+
+/**
+ * Phase-6 orchestrator. Runs after enrichPhase4Fields. Mutates facts in
+ * place. Idempotent — never overwrites populated fields. Append-only on
+ * conflict_register (de-duped by conflict_type per-matter).
+ */
+export function enrichPhase6Fields(
+  facts: E2Facts,
+  memory: TypedMemory,
+  options?: { observedBusinessModelManualInput?: string | null },
+): E2Facts {
+  // Co-petitioner enrichment — upgrade existing entries with the 3 new
+  // optional fields when derivable. Only attaches; never replaces names.
+  if (facts.matter?.co_petitioners && facts.matter.co_petitioners.length > 0) {
+    const enriched = deriveCoPetitionersEnriched(memory, {
+      subApplicationAliases: facts.matter.sub_application_aliases ?? null,
+    });
+    const byName = new Map<string, ReturnType<typeof deriveCoPetitionersEnriched>[number]>();
+    for (const e of enriched) {
+      const k = normalizeName(e.full_name.value);
+      if (k) byName.set(k, e);
+    }
+    facts.matter.co_petitioners = facts.matter.co_petitioners.map((co) => {
+      const k = normalizeName(co.full_name.value);
+      const hit = byName.get(k);
+      if (!hit) return co;
+      const merged: typeof co = { ...co };
+      if (
+        (!merged.relationship_to_principal || merged.relationship_to_principal.value == null) &&
+        hit.relationship_to_principal
+      ) {
+        merged.relationship_to_principal = hit.relationship_to_principal as typeof merged.relationship_to_principal;
+      }
+      if (
+        (!merged.sub_application_status || merged.sub_application_status.value == null) &&
+        hit.sub_application_status
+      ) {
+        merged.sub_application_status = hit.sub_application_status as typeof merged.sub_application_status;
+      }
+      if (
+        (!merged.role_in_petitioner_entity || merged.role_in_petitioner_entity.value == null) &&
+        hit.role_in_petitioner_entity
+      ) {
+        merged.role_in_petitioner_entity = hit.role_in_petitioner_entity;
+      }
+      return merged;
+    });
+  }
+
+  // observed_business_model_manual_input — attorney-typed Yelp/Google/BBB
+  // check. Manual stub only; no API.
+  if (
+    !facts.enterprise.observed_business_model_manual_input ||
+    facts.enterprise.observed_business_model_manual_input.value == null
+  ) {
+    const obs = deriveObservedBusinessModel(memory, options?.observedBusinessModelManualInput ?? null);
+    if (obs) facts.enterprise.observed_business_model_manual_input = obs;
+  }
+
+  // NAICS drift conflict_register entry (one per matter, idempotent on
+  // conflict_type + fact_a_doc + fact_b_doc).
+  const drifts = deriveNaicsDriftConflicts(memory);
+  for (const d of drifts) {
+    const alreadyLogged = facts.conflict_register.some(
+      (c) =>
+        c.conflict_type.value === 'naics_industry_drift' &&
+        c.fact_a_doc.value === d.fact_a.source_doc &&
+        c.fact_b_doc.value === d.fact_b.source_doc,
+    );
+    if (alreadyLogged) continue;
+    const triadSuffix = d.fact_c
+      ? ` vs ${d.fact_c.source_doc} ("${d.fact_c.value}")`
+      : '';
+    const gateLabel =
+      d.conflict_id === 'NAICS_DRIFT_3SRC'
+        ? '[deterministic Phase-7 NAICS drift gate (3-source)]'
+        : '[deterministic Phase-6 NAICS drift gate]';
+    facts.conflict_register.push({
+      description: {
+        value: `NAICS / industry drift across ${d.fact_a.source_doc} ("${d.fact_a.value}") vs ${d.fact_b.source_doc} ("${d.fact_b.value}")${triadSuffix}. Reconcile the industry classification before filing — divergent NAICS / industry framing is an RFE risk under USCIS Policy Manual Vol. 2 Part L.`,
+        source_page: null,
+        source_quote: gateLabel,
+        confidence: 1,
+      },
+      conflict_type: {
+        value: 'naics_industry_drift',
+        source_page: null,
+        source_quote: '[deterministic Phase-6 NAICS drift gate]',
+        confidence: 1,
+      },
+      severity: {
+        value: d.severity,
+        source_page: null,
+        source_quote: '[deterministic Phase-6 NAICS drift gate]',
+        confidence: 1,
+      },
+      fact_a_doc: {
+        value: d.fact_a.source_doc,
+        source_page: null,
+        source_quote: d.fact_a.value,
+        confidence: 1,
+      },
+      fact_a_page: { value: null, source_page: null, source_quote: null, confidence: 1 },
+      fact_b_doc: {
+        value: d.fact_b.source_doc,
+        source_page: null,
+        source_quote: d.fact_b.value,
+        confidence: 1,
+      },
+      fact_b_page: { value: null, source_page: null, source_quote: null, confidence: 1 },
+    });
+  }
+
+  return facts;
+}
+
+/**
+ * Phase-8 orchestrator. Routes the Phase-7 cover-letter narrative-claim
+ * fields (passport-renewal footnote, five-year horizon, develop-and-direct
+ * role grant) onto facts.cover_letter_phase7 so the drafter and the two
+ * Phase-8 gates (develop_and_direct_role_authority_thin,
+ * five_year_horizon_marginal_failure) can consume them without round-
+ * tripping through entry.coverLetter JSON. Runs after enrichPhase6Fields.
+ * Idempotent — never overwrites a populated field.
+ *
+ * The cover-letter rich extractor's enum values for authority_scope
+ * (closed enum: contract_signing | banking_authority | hire_fire |
+ * day_to_day_operations | strategic_planning) are also the canonical
+ * E2FactsSchema enum, so the values pass through verbatim. Unknown
+ * authority_scope strings (legacy fixtures) are dropped silently.
+ */
+const KNOWN_AUTHORITY_SCOPES: ReadonlySet<string> = new Set([
+  'contract_signing',
+  'banking_authority',
+  'hire_fire',
+  'day_to_day_operations',
+  'strategic_planning',
+]);
+
+export function enrichPhase8Fields(facts: E2Facts, memory: TypedMemory): E2Facts {
+  const phase7 = deriveCoverLetterPhase7Fields(memory);
+  const target = facts.cover_letter_phase7 ?? {};
+
+  if (
+    target.passport_renewal_footnote == null &&
+    phase7.prior_passport_renewal_footnote
+  ) {
+    const f = phase7.prior_passport_renewal_footnote;
+    target.passport_renewal_footnote = {
+      paragraph_text: f.paragraph_text,
+      prior_passport_number: f.prior_passport_number,
+      current_passport_number: f.current_passport_number,
+    };
+  }
+
+  if (target.five_year_horizon == null && phase7.five_year_business_horizon) {
+    const h = phase7.five_year_business_horizon;
+    target.five_year_horizon = {
+      year_1_revenue_usd: h.year_1_revenue_usd,
+      year_3_revenue_usd: h.year_3_revenue_usd,
+      year_5_revenue_usd: h.year_5_revenue_usd,
+      year_5_employee_count: h.year_5_employee_count,
+    };
+  }
+
+  if (
+    target.develop_and_direct_role_grant == null &&
+    phase7.develop_and_direct_role_grant
+  ) {
+    const g = phase7.develop_and_direct_role_grant;
+    target.develop_and_direct_role_grant = {
+      role_title: g.role_title,
+      granting_document_ref: g.granting_document_ref,
+      authority_scope: g.authority_scope.filter((s) => KNOWN_AUTHORITY_SCOPES.has(s)) as (
+        | 'contract_signing'
+        | 'banking_authority'
+        | 'hire_fire'
+        | 'day_to_day_operations'
+        | 'strategic_planning'
+      )[],
+    };
+  }
+
+  if (
+    target.passport_renewal_footnote ||
+    target.five_year_horizon ||
+    target.develop_and_direct_role_grant
+  ) {
+    facts.cover_letter_phase7 = target;
+  }
+  return facts;
+}
+
+/**
+ * Phase-3 orchestrator. Mutates `facts` in place to populate any of the
+ * Phase-1 / Phase-2 optional gate inputs that the LLM aggregator left
+ * absent. Idempotent: never overwrites a populated field. Returns the
+ * mutated facts for chaining convenience.
+ */
+export function enrichPhase3Fields(facts: E2Facts, memory: TypedMemory): E2Facts {
+  // matter.co_petitioners — only fill when LLM produced none.
+  if (!facts.matter || !facts.matter.co_petitioners || facts.matter.co_petitioners.length === 0) {
+    const coPet = deriveCoPetitioners(memory);
+    if (coPet.length > 0) {
+      facts.matter = { co_petitioners: coPet };
+    }
+  }
+
+  // ownership_history — only fill when LLM produced none.
+  if (!facts.ownership_history || facts.ownership_history.length === 0) {
+    const hist = deriveOwnershipHistory(memory);
+    if (hist.length > 0) {
+      facts.ownership_history = hist;
+    }
+  }
+
+  // filed_date_i129 — fill when missing or value is null.
+  if (!facts.filed_date_i129 || facts.filed_date_i129.value == null) {
+    const filed = deriveFiledDateI129(memory);
+    if (filed) facts.filed_date_i129 = filed;
+  }
+
+  // rfes[] — fill when missing or empty.
+  if (!facts.rfes || facts.rfes.length === 0) {
+    const rfes = deriveRfes(memory);
+    if (rfes.length > 0) facts.rfes = rfes;
+  }
+
+  // investment.claimed_amount_usd — fill when absent or null.
+  const inv = facts.investment;
+  if (!inv.claimed_amount_usd || inv.claimed_amount_usd.value == null) {
+    const claimed = deriveClaimedAmountUsd(memory);
+    if (claimed) inv.claimed_amount_usd = claimed;
+  }
+
+  // source_of_funds enrichment.
+  if (Array.isArray(facts.source_of_funds) && facts.source_of_funds.length > 0) {
+    facts.source_of_funds = enrichSourceOfFundsChains(memory, facts.source_of_funds);
+  }
+
+  // investor.current_status.
+  if (!facts.investor.current_status || facts.investor.current_status.value == null) {
+    const cs = deriveCurrentStatus(memory);
+    if (cs) facts.investor.current_status = cs;
+  }
+
+  // investor.prior_status_expiration_date.
+  if (
+    !facts.investor.prior_status_expiration_date ||
+    facts.investor.prior_status_expiration_date.value == null
+  ) {
+    const ex = derivePriorStatusExpirationDate(memory);
+    if (ex) facts.investor.prior_status_expiration_date = ex;
+  }
+
+  // investor.work_authorization_date — Phase-5: pull the earliest
+  // plausible work-auth start from any visaStamp / status_doc whose
+  // classification names a work-authorizing class (E/H/L/O/P/EAD).
+  // Phase-3 noted we can't be certain the prior approval is for THIS
+  // case theory's enterprise, but for the b2_status_violation_signal
+  // gate that doesn't matter — any prior US work auth foreclosing the
+  // "operating on a B visa" failure mode is enough to short-circuit
+  // the gate. False negatives on first-time E-2 cases (no prior auth
+  // → field stays null → gate falls back to filed_date_i129) are the
+  // intended behavior.
+  if (
+    !facts.investor.work_authorization_date ||
+    facts.investor.work_authorization_date.value == null
+  ) {
+    const wa = deriveWorkAuthorizationDate(memory);
+    if (wa) facts.investor.work_authorization_date = wa;
+  }
+
+  // enterprise.fully_operational_since_date / claimed_business_model —
+  // Phase-3 cannot derive: cover-letter narrative body is not extracted.
+  // Phase-4 (cover-letter rich extractor) will populate. observed
+  // business model needs the external puller — explicitly out of scope.
+
+  // rfes[].initial_filing_assertion / response_assertion — see above
+  // (cover-letter / RFE-response body extraction is Phase-4).
+
+  return facts;
+}
+
 export async function aggregateTypedMemoryToE2(
   memory: TypedMemory,
-  options?: { filingDate?: Date; aliases?: Record<string, FilenameAlias> },
+  options?: {
+    filingDate?: Date;
+    aliases?: Record<string, FilenameAlias>;
+    /**
+     * Phase-6 — optional one-line attorney-typed observation of the
+     * petitioner's externally-visible business activity (Yelp / Google /
+     * BBB / petitioner website). When supplied, lands on
+     * facts.enterprise.observed_business_model_manual_input and feeds the
+     * external_evidence_contradiction_risk gate as a fallback when
+     * observed_business_model is null. No automated puller.
+     */
+    observedBusinessModelManualInput?: string | null;
+  },
 ): Promise<{
   caseFacts: E2Facts;
   usage: AggregateUsage;
@@ -2651,6 +4071,40 @@ export async function aggregateTypedMemoryToE2(
     case_type: 'E2',
     usage: response.usage,
   });
+
+  // Phase-3 deterministic enrichment: fill the Phase-1/Phase-2 gate inputs
+  // (matter.co_petitioners, ownership_history, filed_date_i129, rfes[],
+  // investment.claimed_amount_usd, source_of_funds.documented_amount_usd /
+  // source_person, investor.current_status / prior_status_expiration_date)
+  // directly from the typed memory whenever the LLM aggregator left them
+  // absent. Idempotent — never overwrites a populated field. Runs BEFORE
+  // the conflict-register backstops so the gate authority cascade has
+  // canonical inputs to read.
+  enrichPhase3Fields(parsed.data, memory);
+
+  // Phase-4 enrichment — cover-letter rich + RFE/NOID rich. Runs after
+  // Phase-3 so it can upgrade the stub rfes[] entries (subject_category
+  // ='other', assertions null) when richer extractions are available, and
+  // populates enterprise.fully_operational_since_date /
+  // claimed_business_model from the cover-letter narrative body so
+  // b2_status_violation_signal and external_evidence_contradiction_risk
+  // gates leave 'data_incomplete'.
+  enrichPhase4Fields(parsed.data, memory);
+
+  // Phase-6 enrichment — co-petitioner role detail, observed_business_model
+  // manual-input stub, NAICS drift conflict_register entry. The manual
+  // input field is wired through aggregateTypedMemoryToE2's options
+  // (defaulting to null when callers don't supply it).
+  enrichPhase6Fields(parsed.data, memory, {
+    observedBusinessModelManualInput:
+      options?.observedBusinessModelManualInput ?? null,
+  });
+
+  // Phase-8 enrichment — surface the Phase-7 cover-letter narrative claims
+  // (passport-renewal footnote, five-year horizon, develop-and-direct role
+  // grant) onto facts.cover_letter_phase7 so the drafter and the two
+  // new Phase-8 gates can read them as canonical inputs.
+  enrichPhase8Fields(parsed.data, memory);
 
   // Manual §4.5 quality gate: deterministic backstop for the Sonnet
   // reasoning. If the membership_interest_transfer total_consideration

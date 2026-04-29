@@ -38,6 +38,9 @@ import type { RecommendationLetterFacts } from './extractors/recommendation-lett
 import type { CustomerContractFacts } from './extractors/customer-contract.schema';
 import type { RealEstatePurchaseFacts } from './extractors/real-estate-purchase.schema';
 import type { IncentiveDocumentFacts } from './extractors/incentive-document.schema';
+import type { CoverLetterRichFacts } from './extractors/cover-letter.schema';
+import type { RfeNoticeFacts } from './extractors/rfe-notice.schema';
+import type { I129ESupplementFacts } from './extractors/i129e-supplement.schema';
 
 const Field = <T extends z.ZodTypeAny>(value: T) =>
   z.preprocess(
@@ -755,6 +758,35 @@ export interface PerPdfResult {
    * recipient_legal_name disagrees with the Petitioner's legal_name.
    */
   incentiveDocument?: IncentiveDocumentFacts;
+  /**
+   * Rich cover-letter extraction (Phase-4). Routes when the thin
+   * classifier returns doc_type='cover_letter'. Pulls the narrative
+   * assertions the thin classifier doesn't capture: operational-since
+   * date, claimed business model, NAICS if cited, and (Subtype 3/4)
+   * principal-treaty-investor identity. Drives b2_status_violation_signal
+   * and external_evidence_contradiction_risk gates.
+   */
+  coverLetter?: CoverLetterRichFacts;
+  /**
+   * Rich RFE / NOID extraction (Phase-4). Routes on filename match
+   * /(rfe|noid|notice of intent to deny|request for evidence)/i regardless
+   * of thin doc_type. Classifies subject_category into a closed enum and
+   * extracts header dates / officer / evidence-requested bullets, plus
+   * the verbatim assertion the firm responds to (initial_filing_assertion)
+   * and the response's new assertion (response_assertion). Drives
+   * material_change_in_response_to_uscis and multi_round_rfe_escalation.
+   */
+  rfeNotice?: RfeNoticeFacts;
+  /**
+   * Rich I-129 E Supplement extraction (Phase-7). Routes when the thin
+   * doc_type='uscis_or_dos_form' AND the form_id matches I-129E OR the
+   * filename / first-page text indicates a "Supplement E" / "Treaty
+   * Trader / Treaty Investor" header. Adds industry_classification +
+   * treaty_country + beneficiary_ownership_percent that the thin
+   * UscisOrDosFormFactsSchema lacks. Closes the Phase-6 NAICS drift gate
+   * to a 3-source comparison.
+   */
+  i129eSupplement?: I129ESupplementFacts;
   error?: { code: string; message: string };
 }
 

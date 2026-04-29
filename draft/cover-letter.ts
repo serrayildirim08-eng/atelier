@@ -1,6 +1,13 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { getAnthropic } from '@/lib/anthropic';
 import { logAnthropicUsage } from '@/lib/usage-log';
-import type { CaseFacts, CaseType } from '@/ingest/schema';
+import type {
+  CaseFacts,
+  CaseType,
+  DraftMode,
+  E2PrincipalSubtype,
+} from '@/ingest/schema';
 import { retrieveDoctrine, renderHitsAsMarkdown } from '@/lib/rag/retrieve';
 import { buildDoctrineQuery } from '@/lib/rag/query-builder';
 
@@ -24,51 +31,137 @@ const HEADER_TEMPLATE = `Letter structure:
 - Closing paragraph requesting favorable adjudication.
 - Signature block placeholder for the attorney of record.`;
 
-// E-2 — drafter authority allowlist: INA § 101(a)(15)(E)(ii); 8 CFR § 214.2(e); 9 FAM 402.9;
-// USCIS Policy Manual Vol. 2 Part G; Matter of Walsh and Pollard (BIA 1988); Matter of Ho by analogy.
-const E2_SYSTEM_PROMPT = `You are an immigration attorney drafting a cover letter to USCIS / a U.S. consulate in support of an E-2 Treaty Investor visa application for Akalan Immigration Law.
+// Repo-root-relative manuals dir. Resolved at runtime so the same code path
+// works from a Next dev server, Electron main, and vitest.
+const MANUALS_DIR = path.resolve(process.cwd(), 'manuals');
 
-AUTHORITIES — cite from this list only:
-- INA § 101(a)(15)(E)(ii)
-- 8 CFR § 214.2(e), specifically (e)(12)–(16)
-- 9 FAM 402.9, specifically 402.9-4 (treaty country) and 402.9-6 (substantive standards)
-- USCIS Policy Manual Vol. 2, Part G
-- Matter of Walsh and Pollard, 20 I&N Dec. 60 (BIA 1988) — for "in the process of investing" / irrevocable commitment
-- Matter of Ho, 22 I&N Dec. 206 (Assoc. Comm'r 1998) — by analogy, for the "comprehensive, credible, and verifiable" business plan standard
+type CacheTtl = '1h' | '5m';
+type SystemBlock = {
+  type: 'text';
+  text: string;
+  cache_control: { type: 'ephemeral'; ttl: CacheTtl };
+};
 
-STRUCTURE — use these section headings in order:
-## I. Introduction
-Briefly identify the investor, the enterprise, the treaty country, and the petition's purpose.
+/**
+ * Load a single manual file as a system block. Failure-tolerant: if the
+ * file is absent (skeleton subtype, mid-renamed manual, dev environment
+ * without the manuals dir mounted), warn once and return null instead of
+ * crashing the drafter.
+ */
+async function loadManualBlock(
+  absPath: string,
+  ttl: CacheTtl,
+): Promise<SystemBlock | null> {
+  try {
+    const text = await fs.readFile(absPath, 'utf8');
+    return { type: 'text', text, cache_control: { type: 'ephemeral', ttl } };
+  } catch (e: unknown) {
+    console.warn(
+      `[draft] manual block missing, skipping: ${path.relative(process.cwd(), absPath)} — ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+    return null;
+  }
+}
 
-## II. Element One — Treaty Country Nationality (9 FAM 402.9-4(B); 8 CFR 214.2(e)(3))
-State the investor's nationality and that the country has a qualifying treaty. State that the enterprise is at least 50% owned by nationals of the treaty country and identify those owners. Use ownership_chain entries.
+function selectSubtypeManualPath(subtype: E2PrincipalSubtype): string {
+  switch (subtype) {
+    case 'individual_investor':
+      return path.join(MANUALS_DIR, 'MANUAL-SUBTYPE-1-Individual-Investor.md');
+    case 'corporate_owned_investor':
+      return path.join(MANUALS_DIR, 'MANUAL-SUBTYPE-2-Corporate-Owned-Investor.md');
+    case 'executive_supervisory_employee':
+      return path.join(MANUALS_DIR, 'MANUAL-SUBTYPE-3-Executive-Supervisory.md');
+    case 'essential_skills_employee':
+      return path.join(MANUALS_DIR, 'MANUAL-SUBTYPE-4-Essential-Skills-Employee.md');
+  }
+}
 
-## III. Element Two — Substantial Investment (9 FAM 402.9-6(D); 8 CFR 214.2(e)(14))
-Itemize the investment using investment.items. State the total committed and total cost of enterprise. Compute and state the proportionality ratio. Address the inverted sliding scale: explain why the ratio is "substantial in proportion" given the total enterprise cost. Cite Matter of Walsh and Pollard for the "in the process of investing" / irrevocably committed and at risk standard. Cross-reference the source-of-funds analysis (Section VII).
+/**
+ * Profile selection per `_ATELIER-VOICE-PROFILES.md` matrix. Only the
+ * Subtype 1 + Subtype 4 corpora exist as standalone files today; Subtypes
+ * 2/3 fall back to the closest production corpus per Master OS § 3.
+ *
+ * Premium-upgrade and RFE-response modes layer additional corpora; for
+ * the Phase-0.7 baseline we keep the same paths as `initial` and rely on
+ * the Master OS instructions in Block 1 to apply the mode-specific voice
+ * profile (B for premium, D for RFE) on top.
+ */
+function selectVoiceCorpusPaths(
+  subtype: E2PrincipalSubtype,
+  draftMode: DraftMode,
+): string[] {
+  const kacar = path.join(MANUALS_DIR, '_VOICE-CORPUS-from-Kacar-Salih.md');
+  const bb = path.join(MANUALS_DIR, '_VOICE-CORPUS-from-B-B-International.md');
+  const camural = path.join(MANUALS_DIR, '_CAMURAL-vs-KACAR-COMPARISON.md');
+  // RFE-response mode pulls the B&B corpus (Profile D) regardless of
+  // sub-type; the Master OS instructs the model to apply that profile on
+  // top of the sub-type voice. Other modes route by sub-type alone.
+  if (draftMode === 'rfe_response') return [bb, kacar];
+  switch (subtype) {
+    case 'individual_investor':
+      return [kacar, bb];
+    case 'essential_skills_employee':
+      return [camural];
+    case 'corporate_owned_investor':
+    case 'executive_supervisory_employee':
+      return [kacar];
+  }
+}
 
-## IV. Element Three — Real and Operating Enterprise (9 FAM 402.9-6(B); 8 CFR 214.2(e)(13))
-Cite the bona-fide-enterprise standard. Walk through the evidence of operations: license, EIN, lease/premises, transactions, customers, employees-to-date. Distinguish from speculative/idle/passive investment.
+function profileLabelFor(subtype: E2PrincipalSubtype, mode: DraftMode): string {
+  if (mode === 'rfe_response') return 'D';
+  if (mode === 'premium_upgrade') return 'B';
+  if (mode === 'service_request') return 'E';
+  // initial filing
+  if (subtype === 'individual_investor') return 'A';
+  if (subtype === 'corporate_owned_investor') return 'A';
+  if (subtype === 'executive_supervisory_employee') return 'C';
+  return 'C';
+}
 
-## V. Element Four — More Than Marginal (9 FAM 402.9-6(E); 8 CFR 214.2(e)(15))
-Cite the marginality standard and the five-year horizon. Argue ONE of the two prongs (income or significant economic contribution) using the projected revenues, the W-2 hire timetable, and the job-creation evidence.
+// Phase-8 narrative-binding addendum. Surfaces the three Phase-7
+// cover-letter narrative fields (passport-renewal footnote, five-year
+// horizon, develop-and-direct role grant) to the slim binding frame so
+// the model treats them as authoritative inputs rather than opaque JSON.
+const PHASE8_BINDING_FRAME = `## Phase-8 narrative-claim bindings
 
-## VI. Element Five — Develop and Direct (9 FAM 402.9-6(F); 8 CFR 214.2(e)(16))
-Cite the standard. Establish ownership ≥ 50% OR operational control via governance. Reference the ownership_chain and any role/title evidence.
+Three optional facts on \`facts.cover_letter_phase7\` drive specific section content. Each is null/absent when not extracted; produce nothing for an absent field. When a field is populated, follow its binding exactly:
 
-## VII. Source of Funds — Lawful, Traceable, At Risk (9 FAM 402.9-6(C); 8 CFR 214.2(e)(12))
-Walk through each source_of_funds chain: origin → intermediate steps → final destination. Demonstrate lawful origin, full traceability, possession and control by the investor, and irrevocable commitment / at-risk status. Address each origin_category appropriately. Flag any chains the file cannot fully evidence rather than glossing over.
+1. \`facts.cover_letter_phase7.passport_renewal_footnote\` — when populated, generate the firm's defensive passport-renewal footnote VERBATIM per the loaded \`_VOICE-CORPUS-from-B-B-International.md § Defensive footnote pattern\`. The four-move structure is non-negotiable: (a) identify the apparent anomaly (prior passport vs current), (b) state what was submitted to address it, (c) acknowledge the new state, (d) explain why the anomaly does not impair the legal claim. Do NOT paraphrase the structure. Use the populated \`prior_passport_number\` + \`current_passport_number\` and lift the firm's \`paragraph_text\` shape.
 
-## VIII. Conclusion
-Request favorable adjudication.
+2. \`facts.cover_letter_phase7.five_year_horizon\` — when populated, weave \`year_1_revenue_usd\`, \`year_3_revenue_usd\`, \`year_5_revenue_usd\`, and \`year_5_employee_count\` into the Substantiality / Marginality section (Roman numeral V or VI per the loaded sub-type manual). Use the cover letter's narrative form, not a table. If \`year_5_employee_count <= 1\`, surface the firm's marginality risk inline.
 
-If facts in any section are entirely missing, lead the section with a [MISSING: <field>] line listing what is needed before the section can be substantively argued — do NOT pad the section with abstract statement of the rule alone.
+3. \`facts.cover_letter_phase7.develop_and_direct_role_grant\` — when populated, surface \`role_title\` + \`granting_document_ref\` + \`authority_scope[]\` in the Develop-and-Direct section. If \`authority_scope\` lacks operational authority items (none of \`contract_signing\`, \`banking_authority\`, \`hire_fire\`, \`day_to_day_operations\` present), insert the firm's \`[E5 WEAK: Member resolution grants title without operational authority]\` warning marker inline so the attorney sees the gap before sign-off.`;
+
+// Slim E-2 prompt. The substantive doctrine, structure, and voice all
+// come from the loaded manual blocks (1–5). This block is the binding
+// frame: identity + which loaded layers to apply.
+function buildE2SlimPrompt(
+  subtype: E2PrincipalSubtype | null | undefined,
+  draftMode: DraftMode,
+): string {
+  const subtypeLabel = subtype ?? 'individual_investor (default — sub-type detector did not run)';
+  const profile = profileLabelFor(subtype ?? 'individual_investor', draftMode);
+  return `You are Atelier, the AI paralegal for Akalan Business Immigration, drafting an E-2 ${draftMode === 'rfe_response' ? 'RFE response' : draftMode === 'premium_upgrade' ? 'premium-upgrade supplement' : draftMode === 'service_request' ? 'service request letter' : 'cover letter'} for a sub-type ${subtypeLabel} matter.
+
+Apply the loaded manuals as the source of truth: Master OS, the E-2 practitioner manual, the AI-facing E-2 sibling, the sub-type manual, and the voice corpus. Do not contradict them. When the manuals and your training data disagree, the manuals win.
+
+Apply Voice Profile ${profile} from \`_ATELIER-VOICE-PROFILES.md\` against the loaded voice corpus. Use the section headings and closing pattern dictated by that profile (Roman + ALL CAPS for Profile A; thematic ALL CAPS with 4-beat paragraphs for Profile D; etc.).
+
+Cite only the authorities allowlisted by the loaded sub-type manual + the base E-2 cascade (INA § 101(a)(15)(E)(ii); 8 CFR § 214.2(e); 9 FAM 402.9; USCIS Policy Manual Vol. 2 Part G; Matter of Walsh and Pollard; Matter of Ho by analogy).
+
+${PHASE8_BINDING_FRAME}
 
 ${HEADER_TEMPLATE}
 
 ${SHARED_DRAFTING_RULES}`;
+}
 
 // EB-1A — drafter authority allowlist: INA § 203(b)(1)(A); 8 CFR § 204.5(h); Kazarian v. USCIS,
 // 596 F.3d 1115 (9th Cir. 2010); USCIS Policy Manual Vol. 6 Part F Ch. 2.
+// TODO: migrate to manual-block loader (see E-2)
 const EB1A_SYSTEM_PROMPT = `You are an immigration attorney drafting a cover letter / I-140 petition memorandum for an EB-1A (Alien of Extraordinary Ability) self-petition for Akalan Immigration Law.
 
 AUTHORITIES — cite from this list only:
@@ -128,6 +221,7 @@ ${SHARED_DRAFTING_RULES}`;
 
 // EB-1B — drafter authority allowlist: INA § 203(b)(1)(B); 8 CFR § 204.5(i);
 // USCIS Policy Manual Vol. 6 Part F Ch. 3.
+// TODO: migrate to manual-block loader (see E-2)
 const EB1B_SYSTEM_PROMPT = `You are an immigration attorney drafting a cover letter / I-140 petition memorandum for an EB-1B (Outstanding Professor or Researcher) employer-sponsored petition for Akalan Immigration Law.
 
 AUTHORITIES — cite from this list only:
@@ -178,6 +272,7 @@ ${SHARED_DRAFTING_RULES}`;
 
 // EB-1C — drafter authority allowlist: INA § 203(b)(1)(C); INA § 101(a)(44); 8 CFR § 204.5(j);
 // USCIS Policy Manual Vol. 6 Part F Ch. 5; Matter of Z-A-, Inc. (AAO 2016).
+// TODO: migrate to manual-block loader (see E-2)
 const EB1C_SYSTEM_PROMPT = `You are an immigration attorney drafting a cover letter / I-140 petition memorandum for an EB-1C (Multinational Manager or Executive) employer-sponsored petition for Akalan Immigration Law.
 
 AUTHORITIES — cite from this list only:
@@ -220,13 +315,6 @@ ${HEADER_TEMPLATE}
 
 ${SHARED_DRAFTING_RULES}`;
 
-const SYSTEM_PROMPTS: Record<CaseType, string> = {
-  E2: E2_SYSTEM_PROMPT,
-  EB1A: EB1A_SYSTEM_PROMPT,
-  EB1B: EB1B_SYSTEM_PROMPT,
-  EB1C: EB1C_SYSTEM_PROMPT,
-};
-
 // Drafter model routing. Harvey BigLaw Bench (2026-04) puts Opus 4.7 at
 // 90.9% vs Sonnet 4.6 at 87.6% — the 3.3-point delta concentrates on
 // "complex multi-document analysis" and "ambiguous editing", which is
@@ -255,6 +343,61 @@ export type DraftStreamEvent =
   | { type: 'final'; letter: string; usage: { input_tokens: number; output_tokens: number } };
 
 /**
+ * Build the system-block stack for an E-2 draft per Master OS § 3.
+ * Blocks 1–5 each get their own 1h cache breakpoint; missing manuals
+ * are skipped (failure-tolerant).
+ */
+async function buildE2SystemStack(
+  caseFacts: Extract<CaseFacts, { case_type: 'E2' }>,
+  draftMode: DraftMode,
+): Promise<SystemBlock[]> {
+  const subtype: E2PrincipalSubtype = caseFacts.subtype ?? 'individual_investor';
+  const blocks: SystemBlock[] = [];
+
+  // Block 0 (slim binding frame) — sits before the manuals so the model
+  // reads identity + which loaded layers to apply, then consumes the
+  // manuals as authoritative reference.
+  blocks.push({
+    type: 'text',
+    text: buildE2SlimPrompt(caseFacts.subtype, draftMode),
+    cache_control: { type: 'ephemeral', ttl: '1h' },
+  });
+
+  // Block 1 — Master OS
+  const block1 = await loadManualBlock(
+    path.join(MANUALS_DIR, '_ATELIER-SYSTEM-PROMPT.md'),
+    '1h',
+  );
+  if (block1) blocks.push(block1);
+
+  // Block 2 — practitioner manual
+  const block2 = await loadManualBlock(
+    path.join(MANUALS_DIR, 'E2-PREPARATION-MANUAL.md'),
+    '1h',
+  );
+  if (block2) blocks.push(block2);
+
+  // Block 3 — AI-facing sibling
+  const block3 = await loadManualBlock(
+    path.join(MANUALS_DIR, 'E2-MANUAL-FOR-CLAUDE-CODE.md'),
+    '1h',
+  );
+  if (block3) blocks.push(block3);
+
+  // Block 4 — sub-type manual
+  const block4 = await loadManualBlock(selectSubtypeManualPath(subtype), '1h');
+  if (block4) blocks.push(block4);
+
+  // Block 5 — voice corpus per profile matrix (one or two files)
+  for (const corpusPath of selectVoiceCorpusPaths(subtype, draftMode)) {
+    const block = await loadManualBlock(corpusPath, '1h');
+    if (block) blocks.push(block);
+  }
+
+  return blocks;
+}
+
+/**
  * Streaming variant of `draftCoverLetter`. Yields incremental text deltas
  * as the model writes the cover letter, then a final event with the
  * fully-assembled letter and token usage.
@@ -269,6 +412,7 @@ export async function* draftCoverLetterStream(
   caseFacts: CaseFacts,
 ): AsyncGenerator<DraftStreamEvent, void, unknown> {
   const model = DRAFTER_MODEL[caseFacts.case_type];
+  const draftMode: DraftMode = caseFacts.draft_mode ?? 'initial';
   // Facts JSON lives in the system array (not the user message) so it sits
   // on its own cache breakpoint. The byte-identical JSON.stringify(facts,
   // null, 2) shape is shared with reason/checker.ts so a within-call retry
@@ -295,30 +439,35 @@ export async function* draftCoverLetterStream(
     );
   }
 
-  type SystemBlock = {
-    type: 'text';
-    text: string;
-    cache_control: { type: 'ephemeral'; ttl: '1h' | '5m' };
-  };
-  const systemBlocks: SystemBlock[] = [
-    {
-      type: 'text',
-      text: SYSTEM_PROMPTS[caseFacts.case_type],
-      cache_control: { type: 'ephemeral', ttl: '1h' },
-    },
-  ];
+  let systemBlocks: SystemBlock[];
+  if (caseFacts.case_type === 'E2') {
+    // Blocks 1–5: Master OS + manuals + voice corpus.
+    systemBlocks = await buildE2SystemStack(caseFacts, draftMode);
+  } else {
+    // EB-1A/B/C: legacy single-block prompt until those drafters migrate
+    // to the manual-block loader.
+    const legacy =
+      caseFacts.case_type === 'EB1A'
+        ? EB1A_SYSTEM_PROMPT
+        : caseFacts.case_type === 'EB1B'
+          ? EB1B_SYSTEM_PROMPT
+          : EB1C_SYSTEM_PROMPT;
+    systemBlocks = [
+      { type: 'text', text: legacy, cache_control: { type: 'ephemeral', ttl: '1h' } },
+    ];
+  }
+
+  // Block 6 — doctrine RAG. Stable across drafts of similar cases (same
+  // subtype + industry hits the same top-K), so a 1h TTL warms across
+  // matters. String is identical even when facts JSON differs.
   if (doctrineBlock) {
-    // Doctrine block sits on its own cache breakpoint with a 1h TTL.
-    // The retrieved set is stable across drafts of similar cases (same
-    // subtype + industry hits the same top-K), so a warm cache here
-    // pays off — the doctrine string is identical even when facts JSON
-    // differs across cases.
     systemBlocks.push({
       type: 'text',
       text: doctrineBlock,
       cache_control: { type: 'ephemeral', ttl: '1h' },
     });
   }
+  // Block 7 — facts JSON. Per-case; 5m TTL is enough for retries.
   systemBlocks.push({
     type: 'text',
     text: factsBlock,
@@ -384,3 +533,14 @@ export async function draftCoverLetter(caseFacts: CaseFacts): Promise<DraftResul
   }
   return { letter, usage };
 }
+
+// Exported for tests.
+export {
+  loadManualBlock,
+  selectSubtypeManualPath,
+  selectVoiceCorpusPaths,
+  buildE2SlimPrompt,
+  buildE2SystemStack,
+  PHASE8_BINDING_FRAME,
+  MANUALS_DIR,
+};

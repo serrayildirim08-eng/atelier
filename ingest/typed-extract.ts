@@ -48,6 +48,9 @@ import { extractImagePhoto } from './extractors/image-photo';
 import { extractCustomerContract } from './extractors/customer-contract';
 import { extractRealEstatePurchase } from './extractors/real-estate-purchase';
 import { extractIncentiveDocument } from './extractors/incentive-document';
+import { extractCoverLetter } from './extractors/cover-letter';
+import { extractRfeNotice } from './extractors/rfe-notice';
+import { extractI129ESupplement } from './extractors/i129e-supplement';
 
 /**
  * Doc types that route through the rich contract extractor as a second
@@ -283,6 +286,40 @@ const INCENTIVE_DOCUMENT_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
   new Set<DocType>(['business_contract']);
 const INCENTIVE_DOCUMENT_PATTERN_RE =
   /(production[-_\s]?tax[-_\s]?credit|\bPTC\b|inflation[-_\s]?reduction[-_\s]?act|\bIRA\b|tax[-_\s]?credit|tax[-_\s]?exemption|federal[-_\s]?grant|state[-_\s]?credit|FILOT|fee[-_\s]?in[-_\s]?lieu|abatement|incentive[-_\s]?agreement|economic[-_\s]?development[-_\s]?credit)/i;
+
+/* ---------------------------------------------------------------------- */
+/* Phase-4 — cover-letter rich + RFE/NOID extractors                       */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Cover-letter rich extractor (Phase-4). Routes when the thin classifier
+ * returns doc_type='cover_letter' AND the filename does NOT match the
+ * RFE / NOID / response pattern (RFE responses also carry cover_letter
+ * doc_type but get routed to the RFE extractor instead).
+ */
+const COVER_LETTER_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
+  new Set<DocType>(['cover_letter']);
+
+/**
+ * RFE / NOID rich extractor. Filename + content pattern OR thin status_doc
+ * with status_class containing RFE/NOID. Covers (a) USCIS-issued notices,
+ * (b) firm-authored responses (which carry doc_type='cover_letter').
+ */
+const RFE_NOTICE_PATTERN_RE =
+  /(\brfe\b|\bnoid\b|notice[-_\s]?of[-_\s]?intent[-_\s]?to[-_\s]?deny|request[-_\s]?for[-_\s]?evidence)/i;
+
+/**
+ * I-129 E Supplement rich extractor (Phase-7). Routes on filename hint
+ * (I-129E / Supplement E) OR the substantive header "Section 1: Treaty
+ * Trader / Treaty Investor" / "Classification sought" pattern in the
+ * first ~4K of body text. Independent of the thin doc_type ('uscis_or_dos_form'
+ * is preferred but the routing tolerates 'other' when the supplement
+ * was scanned out from the I-129 packet without a separate form_id).
+ */
+const I129E_SUPPLEMENT_FILENAME_RE =
+  /(i[-_\s]?129[-_\s]?e\b|supplement[-_\s]?e\b|treaty[-_\s]?(trader|investor))/i;
+const I129E_SUPPLEMENT_BODY_RE =
+  /(section\s+1[:.\s]+treaty[-_\s]?(trader|investor)|classification\s+sought\s+under[^\n]{0,80}\b(e[-\s]?[12])\b|amount\s+of\s+investment\s+in\s+u\.?s\.?\s*dollars)/i;
 
 function extractFirstJsonObject(text: string): string {
   const start = text.indexOf('{');
@@ -932,6 +969,19 @@ export async function classifyAndExtractOnePdf(
     INCENTIVE_DOCUMENT_PATTERN_RE.test(input.filename) ||
     INCENTIVE_DOCUMENT_PATTERN_RE.test(text);
 
+  // Phase-4 routers. RFE / NOID match wins over cover-letter when both
+  // hit (RFE responses carry doc_type='cover_letter' but contain "RFE"
+  // in the filename). For the rare RFE-routed status_doc, the doc_type
+  // gate is bypassed via the filename pattern.
+  const rfeNoticeMatch =
+    RFE_NOTICE_PATTERN_RE.test(input.filename) ||
+    RFE_NOTICE_PATTERN_RE.test(text.slice(0, 4000));
+  const coverLetterPlainMatch =
+    COVER_LETTER_FLAVORED_DOC_TYPES.has(facts.doc_type) && !rfeNoticeMatch;
+  const i129eSupplementMatch =
+    I129E_SUPPLEMENT_FILENAME_RE.test(input.filename) ||
+    I129E_SUPPLEMENT_BODY_RE.test(text.slice(0, 4000));
+
   const [
     contractResult,
     bankReceiptResult,
@@ -955,6 +1005,9 @@ export async function classifyAndExtractOnePdf(
     customerContractResult,
     realEstatePurchaseResult,
     incentiveDocumentResult,
+    coverLetterResult,
+    rfeNoticeResult,
+    i129eSupplementResult,
   ] = await Promise.all([
     CONTRACT_FLAVORED_DOC_TYPES.has(facts.doc_type)
       ? extractContract(richInput)
@@ -1032,6 +1085,9 @@ export async function classifyAndExtractOnePdf(
     incentiveDocumentMatch
       ? extractIncentiveDocument(richInput)
       : Promise.resolve(null),
+    coverLetterPlainMatch ? extractCoverLetter(richInput) : Promise.resolve(null),
+    rfeNoticeMatch ? extractRfeNotice(richInput) : Promise.resolve(null),
+    i129eSupplementMatch ? extractI129ESupplement(richInput) : Promise.resolve(null),
   ]);
 
   let contract;
@@ -1232,6 +1288,33 @@ export async function classifyAndExtractOnePdf(
     );
   }
 
+  let coverLetter;
+  if (coverLetterResult?.facts) {
+    coverLetter = coverLetterResult.facts;
+  } else if (coverLetterResult?.error) {
+    console.warn(
+      `[cover-letter-extract] ${input.filename}: ${coverLetterResult.error.code} — ${coverLetterResult.error.message}`,
+    );
+  }
+
+  let rfeNotice;
+  if (rfeNoticeResult?.facts) {
+    rfeNotice = rfeNoticeResult.facts;
+  } else if (rfeNoticeResult?.error) {
+    console.warn(
+      `[rfe-notice-extract] ${input.filename}: ${rfeNoticeResult.error.code} — ${rfeNoticeResult.error.message}`,
+    );
+  }
+
+  let i129eSupplement;
+  if (i129eSupplementResult?.facts) {
+    i129eSupplement = i129eSupplementResult.facts;
+  } else if (i129eSupplementResult?.error) {
+    console.warn(
+      `[i129e-supplement-extract] ${input.filename}: ${i129eSupplementResult.error.code} — ${i129eSupplementResult.error.message}`,
+    );
+  }
+
   const entry = {
     pageCount: parsed.pageCount,
     facts,
@@ -1257,6 +1340,9 @@ export async function classifyAndExtractOnePdf(
     customerContract,
     realEstatePurchase,
     incentiveDocument,
+    coverLetter,
+    rfeNotice,
+    i129eSupplement,
   };
   writePdfCache(hash, entry);
 

@@ -11,7 +11,7 @@ import type {
   EB1BFacts,
   EB1CFacts,
 } from './schema';
-import type { ReviewReport } from '@/reason';
+import type { GateRunResult, ReviewReport } from '@/reason';
 import type { VerifyReport } from '@/lib/verify';
 
 export type {
@@ -41,6 +41,16 @@ export interface IngestSuccess {
   draftError?: { code: string; message: string };
   verify_report?: VerifyReport;
   review?: ReviewReport;
+  /**
+   * Phase-5: deterministic E-2 gate outcomes from `runFullReview`.
+   * Populated only for E-2 matters; absent for EB-1A/B/C until
+   * deterministic gate parity ships. Each entry is `{name, outcome}`
+   * where outcome is the `GateOutcome` discriminated union (fired vs
+   * not_applicable / data_incomplete). UI surfaces severity-5 fires as
+   * blocking findings on the matter dashboard, independent of the LLM
+   * narrative.
+   */
+  deterministic_gates?: GateRunResult[];
   reviewError?: { code: string; message: string };
   source_pdfs?: string[];
   scanned_pdfs?: string[];

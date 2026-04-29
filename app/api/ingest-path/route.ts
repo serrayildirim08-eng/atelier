@@ -18,7 +18,7 @@ import {
 import type { E2CaseSubtype } from '@/ingest/extractors/subtype-detect.schema';
 import { extractPdfText } from '@/ingest/pdf';
 import { draftCoverLetterStream } from '@/draft';
-import { checkDraft } from '@/reason';
+import { runFullReview } from '@/reason';
 
 export const runtime = 'nodejs';
 export const maxDuration = 3600;
@@ -445,8 +445,12 @@ export async function POST(request: Request): Promise<Response> {
           'Praying to immigration gods · auditing draft against the unified facts',
         );
         try {
-          const reviewed = await checkDraft(result.caseFacts, result.draft);
-          result = { ...result, review: reviewed.report };
+          const reviewed = await runFullReview(result.caseFacts, result.draft);
+          result = {
+            ...result,
+            review: reviewed.llm.report,
+            deterministic_gates: reviewed.deterministic,
+          };
         } catch (e: unknown) {
           result = {
             ...result,

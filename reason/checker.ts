@@ -1,10 +1,14 @@
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import { getAnthropic } from '@/lib/anthropic';
 import { logAnthropicUsage } from '@/lib/usage-log';
-import type { CaseFacts, CaseType } from '@/ingest/schema';
+import type { CaseFacts, CaseType, E2Facts } from '@/ingest/schema';
 import { ReviewReportSchema, type ReviewReport } from './schema';
 import type { VerifyReport } from '@/lib/verify';
 import { reportToReviewerPrompt } from '@/lib/verify';
+import {
+  createAssertionComparator,
+  type AssertionComparator,
+} from './material-change-comparator';
 
 const SHARED_REVIEW_FRAMEWORK = `Conduct five checks and produce a structured review report.
 
@@ -274,11 +278,44 @@ export async function checkDraft(
   const factsJson = JSON.stringify(caseFacts.facts, null, 2);
   const factsBlock = `## Extracted facts (each value carries source_page, source_quote, confidence)\n\n\`\`\`json\n${factsJson}\n\`\`\``;
 
+  // Phase-2: deterministic E-2 gates run before the LLM and are folded
+  // into the system context as a dedicated cached block (1h TTL — gate
+  // outcomes are stable for the matter as long as the facts JSON is).
+  // For non-E-2 case types this is a no-op.
+  const gateBlock =
+    caseFacts.case_type === 'E2'
+      ? renderGateBlock(runE2DeterministicGates(caseFacts.facts))
+      : null;
+
   // Verify Phase B (deterministic regex + per-case-type allowlist) runs
   // before this call. If a report is present, append it to the user prompt
   // so the reviewer focuses on flagged spans rather than re-deriving the
   // same checks.
   const verifySection = verifyReport ? `\n\n${reportToReviewerPrompt(verifyReport)}` : '';
+
+  const systemBlocks: Array<{
+    type: 'text';
+    text: string;
+    cache_control?: { type: 'ephemeral'; ttl: '1h' | '5m' };
+  }> = [
+    {
+      type: 'text',
+      text: SYSTEM_PROMPTS[caseFacts.case_type],
+      cache_control: { type: 'ephemeral', ttl: '1h' },
+    },
+  ];
+  if (gateBlock) {
+    systemBlocks.push({
+      type: 'text',
+      text: gateBlock,
+      cache_control: { type: 'ephemeral', ttl: '1h' },
+    });
+  }
+  systemBlocks.push({
+    type: 'text',
+    text: factsBlock,
+    cache_control: { type: 'ephemeral', ttl: '5m' },
+  });
 
   // No `thinking` here: the reviewer is structured-output-shaped
   // (ReviewReportSchema enumerates the failure modes) and Phase B already
@@ -291,18 +328,7 @@ export async function checkDraft(
       effort,
       format: REVIEW_FORMAT,
     },
-    system: [
-      {
-        type: 'text',
-        text: SYSTEM_PROMPTS[caseFacts.case_type],
-        cache_control: { type: 'ephemeral', ttl: '1h' },
-      },
-      {
-        type: 'text',
-        text: factsBlock,
-        cache_control: { type: 'ephemeral', ttl: '5m' },
-      },
-    ],
+    system: systemBlocks,
     messages: [
       {
         role: 'user',
@@ -329,4 +355,622 @@ export async function checkDraft(
       output_tokens: response.usage.output_tokens,
     },
   };
+}
+
+/* ====================================================================== */
+/* Deterministic E-2 gates — Phase-0.7 cross-case-synthesis additions     */
+/* ---------------------------------------------------------------------- */
+/* Pure / deterministic over CaseFacts.facts. Each gate is null-safe:     */
+/* missing inputs return either `data_incomplete` (warning, no fire) or   */
+/* `not_applicable` rather than crashing. Authority + severity per the    */
+/* _CROSS-CASE-SYNTHESIS-2026-04-29.md § 6 table. Empirical reference     */
+/* cases: Flatturbo (denial — ownership_volatility, fund circularity,     */
+/* unaccounted SOF), Cemre (multi-round RFE escalation, classification).  */
+/* ====================================================================== */
+
+export type GateOutcome =
+  | { fired: true; severity: 4 | 5; finding: string; authority: string }
+  | { fired: false; reason: 'not_applicable' | 'data_incomplete'; note?: string };
+
+export type GateName =
+  | 'ownership_volatility'
+  | 'co_petitioner_fund_circularity'
+  | 'unaccounted_sof_share'
+  | 'multi_round_rfe_escalation'
+  | 'b2_status_violation_signal'
+  | 'status_gap_pre_filing'
+  | 'material_change_in_response_to_uscis'
+  | 'external_evidence_contradiction_risk'
+  | 'develop_and_direct_role_authority_thin'
+  | 'five_year_horizon_marginal_failure';
+
+export type GateFn = (facts: E2Facts) => GateOutcome;
+
+function normName(s: string | null | undefined): string {
+  return (s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function parseDate(s: string | null | undefined): Date | null {
+  if (!s) return null;
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * `ownership_volatility` — severity 4. Fires when ownership_history shows
+ * ≥2 distinct owner-set transitions within 365 days before
+ * filed_date_i129. Null inputs → don't fire.
+ *
+ * Authority: 9 FAM 402.9-7(1) (develop-and-direct).
+ * Empirical anchor: Flatturbo (denied) — petitioner ownership flipped 3×
+ * in the 12 months pre-filing, undermining the develop-and-direct claim.
+ */
+export const ownershipVolatilityGate: GateFn = (facts) => {
+  const history = facts.ownership_history;
+  const filedRaw = facts.filed_date_i129?.value ?? null;
+  const filed = parseDate(filedRaw);
+  if (!history || history.length === 0 || !filed) {
+    return { fired: false, reason: 'data_incomplete' };
+  }
+  const windowStart = new Date(filed.getTime() - 365 * 86_400_000);
+
+  // Sort by effective_date ascending; collect distinct owner-set transitions
+  // that fall within (windowStart, filed].
+  const sorted = [...history]
+    .map((h) => {
+      const date = parseDate(h.effective_date?.value ?? null);
+      const owners = (h.owner_names ?? [])
+        .map((o) => normName(o?.value ?? null))
+        .filter(Boolean)
+        .sort()
+        .join('|');
+      return { date, owners };
+    })
+    .filter((h) => h.date && h.owners)
+    .sort((a, b) => (a.date!.getTime() - b.date!.getTime()));
+
+  let transitions = 0;
+  let prevOwners: string | null = null;
+  for (const h of sorted) {
+    if (prevOwners !== null && h.owners !== prevOwners) {
+      const t = h.date!.getTime();
+      if (t > windowStart.getTime() && t <= filed.getTime()) {
+        transitions += 1;
+      }
+    }
+    prevOwners = h.owners;
+  }
+
+  if (transitions >= 2) {
+    return {
+      fired: true,
+      severity: 4,
+      finding: `Ownership changed ${transitions} times within 365 days before filing — the develop-and-direct narrative is at risk.`,
+      authority: '9 FAM 402.9-7(1)',
+    };
+  }
+  return { fired: false, reason: 'not_applicable' };
+};
+
+/**
+ * `co_petitioner_fund_circularity` — severity 5. Fires when any
+ * source_of_funds entry references a person whose full_name exactly
+ * matches a matter.co_petitioners[].full_name.
+ *
+ * Authority: 9 FAM 402.9-6(B) (at-risk).
+ * Empirical anchor: Flatturbo — Tarlaci loan with Tarlaci as co-petitioner.
+ */
+export const coPetitionerFundCircularityGate: GateFn = (facts) => {
+  const coPet = facts.matter?.co_petitioners;
+  const sof = facts.source_of_funds;
+  if (!coPet || coPet.length === 0 || !sof || sof.length === 0) {
+    return { fired: false, reason: 'data_incomplete' };
+  }
+  const coNames = new Set(
+    coPet
+      .map((c) => normName(c.full_name?.value ?? null))
+      .filter(Boolean),
+  );
+  if (coNames.size === 0) {
+    return { fired: false, reason: 'data_incomplete' };
+  }
+  const hits: string[] = [];
+  for (const chain of sof) {
+    const sourceName = normName(chain.source_person?.full_name?.value ?? null);
+    if (sourceName && coNames.has(sourceName)) hits.push(sourceName);
+  }
+  if (hits.length > 0) {
+    return {
+      fired: true,
+      severity: 5,
+      finding: `Source-of-funds chain references co-petitioner(s): ${hits.join(', ')}. Funds are not at-risk if recycled within the petition.`,
+      authority: '9 FAM 402.9-6(B)',
+    };
+  }
+  return { fired: false, reason: 'not_applicable' };
+};
+
+/**
+ * `unaccounted_sof_share` — severity 5. Fires when the claimed
+ * investment is more than 1.5× the documented SOF total. Null sides →
+ * `data_incomplete` warning, not a fire.
+ *
+ * Authority: 9 FAM 402.9-6(C) (substantiality / lawful source).
+ * Empirical anchor: Flatturbo — claimed ≈ 10× documented.
+ */
+export const unaccountedSofShareGate: GateFn = (facts) => {
+  const claimed = facts.investment.claimed_amount_usd?.value ?? null;
+  const sof = facts.source_of_funds;
+  if (typeof claimed !== 'number' || !sof || sof.length === 0) {
+    return { fired: false, reason: 'data_incomplete', note: 'claimed_amount_usd or source_of_funds missing' };
+  }
+  let documented = 0;
+  let anyDocumented = false;
+  for (const chain of sof) {
+    const v = chain.documented_amount_usd?.value;
+    if (typeof v === 'number') {
+      documented += v;
+      anyDocumented = true;
+    }
+  }
+  if (!anyDocumented) {
+    return { fired: false, reason: 'data_incomplete', note: 'no documented_amount_usd populated on any SOF chain' };
+  }
+  if (claimed > 1.5 * documented) {
+    return {
+      fired: true,
+      severity: 5,
+      finding: `Claimed investment USD ${claimed.toFixed(2)} exceeds 1.5× documented SOF total USD ${documented.toFixed(2)}.`,
+      authority: '9 FAM 402.9-6(C)',
+    };
+  }
+  return { fired: false, reason: 'not_applicable' };
+};
+
+/**
+ * `multi_round_rfe_escalation` — severity 5. Fires when rfes.length ≥ 2
+ * AND the last RFE is on a substantive E-2 element (bona-fide
+ * enterprise / marginality / substantial investment). Procedural
+ * follow-ups don't trip the gate.
+ *
+ * Authority: E-2 manual § 12.5 (multi-round RFE escalation).
+ * Empirical anchor: B&B International (RFE-1 procedural, RFE-2 E3+E4
+ * substantive).
+ */
+const SUBSTANTIVE_RFE_SUBJECTS: ReadonlySet<string> = new Set([
+  'bona_fide_enterprise',
+  'marginality',
+  'substantial_investment',
+]);
+
+export const multiRoundRfeEscalationGate: GateFn = (facts) => {
+  const rfes = facts.rfes;
+  if (!rfes || rfes.length < 2) {
+    return { fired: false, reason: 'not_applicable' };
+  }
+  const last = rfes[rfes.length - 1];
+  const subj = last.subject_category?.value ?? null;
+  if (!subj) return { fired: false, reason: 'data_incomplete' };
+  if (SUBSTANTIVE_RFE_SUBJECTS.has(subj)) {
+    return {
+      fired: true,
+      severity: 5,
+      finding: `Multi-round RFE escalation: ${rfes.length} RFEs, latest on substantive subject "${subj}". Escalate to senior attorney before drafting response.`,
+      authority: 'manual § 12.5',
+    };
+  }
+  return { fired: false, reason: 'not_applicable' };
+};
+
+/* ---------------------------------------------------------------------- */
+/* Phase-2 gates — derived from Flatturbo NOID + Final Denial OCR        */
+/* (per _CROSS-CASE-SYNTHESIS-2026-04-29.md § 9.1 ADDENDUM).             */
+/* ---------------------------------------------------------------------- */
+
+const B2_LIKE_STATUSES: ReadonlySet<string> = new Set([
+  'b-2',
+  'b2',
+  'b-1',
+  'b1',
+  'b-1/b-2',
+  'b1/b2',
+  'esta',
+  'vwp',
+  'visa waiver',
+]);
+
+function normStatus(s: string | null | undefined): string {
+  return (s ?? '').trim().toLowerCase();
+}
+
+/**
+ * `b2_status_violation_signal` — severity 5. Fires when the principal
+ * is on B-2 / B-1 / ESTA AND the case theory claims the enterprise was
+ * fully operational either before E-2 work authorization issued OR
+ * before the I-129 filing. Pre-authorization day-to-day operations on
+ * a B visitor visa = unauthorized employment per 9 FAM 402.9-7.
+ *
+ * Authority: INA § 101(a)(15)(B); 9 FAM 402.9-7.
+ * Empirical anchor: Flatturbo (Beksac) — B-2 from 2022-09 to 2023-03,
+ * theory required ops since 2022-08-19, USCIS framed as unauthorized
+ * employment in the Final Denial.
+ */
+export const b2StatusViolationSignalGate: GateFn = (facts) => {
+  const status = normStatus(facts.investor.current_status?.value ?? null);
+  if (!status) return { fired: false, reason: 'data_incomplete' };
+  if (!B2_LIKE_STATUSES.has(status)) return { fired: false, reason: 'not_applicable' };
+
+  const opsSince = parseDate(facts.enterprise.fully_operational_since_date?.value ?? null);
+  if (!opsSince) return { fired: false, reason: 'data_incomplete' };
+
+  const workAuth = parseDate(facts.investor.work_authorization_date?.value ?? null);
+  const filed = parseDate(facts.filed_date_i129?.value ?? null);
+  if (!workAuth && !filed) return { fired: false, reason: 'data_incomplete' };
+
+  if (workAuth && opsSince.getTime() < workAuth.getTime()) {
+    return {
+      fired: true,
+      severity: 5,
+      finding: `Principal on ${status.toUpperCase()} but case theory asserts operations since ${facts.enterprise.fully_operational_since_date?.value} — predates E-2 work authorization ${facts.investor.work_authorization_date?.value}. USCIS reads pre-authorization day-to-day operations as unauthorized employment.`,
+      authority: 'INA § 101(a)(15)(B); 9 FAM 402.9-7',
+    };
+  }
+  if (filed && opsSince.getTime() < filed.getTime()) {
+    return {
+      fired: true,
+      severity: 5,
+      finding: `Principal on ${status.toUpperCase()} but case theory asserts operations since ${facts.enterprise.fully_operational_since_date?.value} — predates I-129 filing ${facts.filed_date_i129?.value}. Pre-filing day-to-day operations on a B visa = unauthorized employment.`,
+      authority: 'INA § 101(a)(15)(B); 9 FAM 402.9-7',
+    };
+  }
+  return { fired: false, reason: 'not_applicable' };
+};
+
+/**
+ * `status_gap_pre_filing` — severity 5. Fires when the principal's
+ * prior status expired before the I-129 was filed (out of status at
+ * filing, no extraordinary-circumstances showing).
+ *
+ * Authority: 8 CFR § 248.1(b).
+ * Empirical anchor: Flatturbo — B-2 expired 2023-03-22, I-129 filed
+ * 2023-09-22 (≈6-month gap).
+ */
+export const statusGapPreFilingGate: GateFn = (facts) => {
+  const priorExp = parseDate(facts.investor.prior_status_expiration_date?.value ?? null);
+  const filed = parseDate(facts.filed_date_i129?.value ?? null);
+  if (!priorExp || !filed) return { fired: false, reason: 'data_incomplete' };
+  const gapMs = filed.getTime() - priorExp.getTime();
+  if (gapMs <= 0) return { fired: false, reason: 'not_applicable' };
+  const days = Math.round(gapMs / 86_400_000);
+  return {
+    fired: true,
+    severity: 5,
+    finding: `Principal out of status at filing: prior status expired ${facts.investor.prior_status_expiration_date?.value}, I-129 filed ${facts.filed_date_i129?.value} (${days}-day gap). Requires consular pivot or 8 CFR § 248.1(b) extraordinary-circumstances showing.`,
+    authority: '8 CFR § 248.1(b)',
+  };
+};
+
+/**
+ * `material_change_in_response_to_uscis` — severity 5. Fires when any
+ * RFE/NOID entry has both initial_filing_assertion and response_assertion
+ * populated and they differ on a material point (date / ownership /
+ * activity timeline / operational status). Matter of Izummi: the case
+ * is fatal once a material change appears in response to USCIS pressure.
+ *
+ * Authority: Matter of Izummi, 22 I&N Dec. 169 (Assoc. Comm'r 1998).
+ * Empirical anchor: Flatturbo — RFE response said "operational since
+ * 2022-08-19", ITD response said "did not engage in business activities
+ * until 2023".
+ */
+export const materialChangeInResponseToUscisGate: GateFn = (facts) => {
+  const rfes = facts.rfes;
+  if (!rfes || rfes.length === 0) return { fired: false, reason: 'data_incomplete' };
+  const mismatches: string[] = [];
+  for (const r of rfes) {
+    const init = (r.initial_filing_assertion?.value ?? '').trim();
+    const resp = (r.response_assertion?.value ?? '').trim();
+    if (init && resp && init !== resp) {
+      mismatches.push(`"${init}" → "${resp}" (RFE ${r.rfe_date?.value ?? '?'})`);
+    }
+  }
+  if (mismatches.length === 0) {
+    const anyPopulated = rfes.some(
+      (r) => r.initial_filing_assertion?.value || r.response_assertion?.value,
+    );
+    return anyPopulated
+      ? { fired: false, reason: 'not_applicable' }
+      : { fired: false, reason: 'data_incomplete' };
+  }
+  return {
+    fired: true,
+    severity: 5,
+    finding: `Material change in response to USCIS detected: ${mismatches.join('; ')}. Matter of Izummi forecloses curing a deficient initial filing via post-hoc revision.`,
+    authority: 'Matter of Izummi, 22 I&N Dec. 169',
+  };
+};
+
+/**
+ * Async variant of `materialChangeInResponseToUscisGate`. Same fast-path
+ * (string equality first), but on differing strings calls the LLM
+ * comparator. Gate fires only when comparator returns `same: false` with
+ * `confidence >= 0.7`. A confidence below the threshold is treated as
+ * "ambiguous" and the gate stays silent (better to under-fire than to
+ * raise a severity-5 finding on a paraphrase the LLM was unsure about —
+ * the LLM reviewer will catch genuine contradictions in qualitative
+ * analysis anyway).
+ *
+ * Authority + empirical anchor: see the sync variant above.
+ */
+export const MATERIAL_CHANGE_COMPARATOR_THRESHOLD = 0.7;
+
+export async function materialChangeInResponseToUscisGateAsync(
+  facts: E2Facts,
+  comparator: AssertionComparator,
+): Promise<GateOutcome> {
+  const rfes = facts.rfes;
+  if (!rfes || rfes.length === 0) return { fired: false, reason: 'data_incomplete' };
+  const mismatches: string[] = [];
+  let anyPopulated = false;
+  for (const r of rfes) {
+    const init = (r.initial_filing_assertion?.value ?? '').trim();
+    const resp = (r.response_assertion?.value ?? '').trim();
+    if (init || resp) anyPopulated = true;
+    if (!init || !resp) continue;
+    if (init === resp) continue;
+    // String differs — ask the LLM whether the underlying fact differs.
+    const judgment = await comparator(init, resp);
+    if (!judgment.same && judgment.confidence >= MATERIAL_CHANGE_COMPARATOR_THRESHOLD) {
+      mismatches.push(
+        `"${init}" → "${resp}" (RFE ${r.rfe_date?.value ?? '?'}; comparator confidence ${judgment.confidence.toFixed(2)})`,
+      );
+    }
+  }
+  if (mismatches.length === 0) {
+    return anyPopulated
+      ? { fired: false, reason: 'not_applicable' }
+      : { fired: false, reason: 'data_incomplete' };
+  }
+  return {
+    fired: true,
+    severity: 5,
+    finding: `Material change in response to USCIS detected: ${mismatches.join('; ')}. Matter of Izummi forecloses curing a deficient initial filing via post-hoc revision.`,
+    authority: 'Matter of Izummi, 22 I&N Dec. 169',
+  };
+}
+
+/**
+ * `external_evidence_contradiction_risk` — severity 4. Pre-filing
+ * reviewer hint: when claimed_business_model differs from
+ * observed_business_model (manual external check or Yelp/Google/BBB
+ * pull), surface the contradiction risk before USCIS independently
+ * fact-finds it. observed null → downgrade to data_incomplete.
+ *
+ * Authority: firm policy (no statutory anchor).
+ * Empirical anchor: Flatturbo — petitioner claimed e-commerce only;
+ * USCIS pulled 3 Yelp reviews showing automotive repair services.
+ */
+export const externalEvidenceContradictionRiskGate: GateFn = (facts) => {
+  const claimed = (facts.enterprise.claimed_business_model?.value ?? '').trim();
+  const automated = (facts.enterprise.observed_business_model?.value ?? '').trim();
+  const manual = (
+    facts.enterprise.observed_business_model_manual_input?.value ?? ''
+  ).trim();
+  // Phase-6: prefer the manual attorney-typed input when present (the
+  // automated puller is out of scope; the typed-aggregate hook surfaces
+  // observed_business_model_manual_input via aggregateTypedMemoryToE2's
+  // options.observedBusinessModelManualInput).
+  const observed = manual || automated;
+  const sourceLabel = manual ? 'attorney manual input' : 'externally observed';
+  if (!claimed) return { fired: false, reason: 'data_incomplete' };
+  if (!observed) {
+    return {
+      fired: false,
+      reason: 'data_incomplete',
+      note: 'observed_business_model not populated — run external check (Yelp / Google / BBB / Wayback) or attorney-type observed_business_model_manual_input before filing',
+    };
+  }
+  if (normName(claimed) === normName(observed)) {
+    return { fired: false, reason: 'not_applicable' };
+  }
+  return {
+    fired: true,
+    severity: 4,
+    finding: `Claimed business model "${claimed}" differs from ${sourceLabel} "${observed}". USCIS routinely pulls Yelp/Google/BBB; surface the discrepancy pre-filing rather than be fact-found.`,
+    authority: 'firm policy',
+  };
+};
+
+/* ---------------------------------------------------------------------- */
+/* Phase-8 gates — Phase-7 cover-letter narrative-claim consumers.        */
+/* ---------------------------------------------------------------------- */
+
+const OPERATIONAL_AUTHORITY_SCOPES: ReadonlySet<string> = new Set([
+  'contract_signing',
+  'banking_authority',
+  'day_to_day_operations',
+]);
+
+/**
+ * `develop_and_direct_role_authority_thin` — severity 4. Fires when the
+ * cover letter surfaces a develop-and-direct role grant whose
+ * `authority_scope` does NOT include any of `contract_signing`,
+ * `banking_authority`, or `day_to_day_operations`. A title-only grant
+ * (e.g. member resolution naming the Beneficiary "President" without
+ * enumerating operational authority) is the textbook E5 vulnerability —
+ * USCIS reads it as ceremonial.
+ *
+ * Authority: 9 FAM 402.9-7(1) (develop-and-direct).
+ */
+export const developAndDirectRoleAuthorityThinGate: GateFn = (facts) => {
+  const grant = facts.cover_letter_phase7?.develop_and_direct_role_grant;
+  if (!grant) return { fired: false, reason: 'data_incomplete' };
+  const scope = grant.authority_scope ?? [];
+  const hasOperational = scope.some((s) => OPERATIONAL_AUTHORITY_SCOPES.has(s));
+  if (hasOperational) return { fired: false, reason: 'not_applicable' };
+  return {
+    fired: true,
+    severity: 4,
+    finding: `Develop-and-direct role grant ("${grant.role_title}" per ${grant.granting_document_ref}) lacks operational authority. Granted scope: [${
+      scope.length > 0 ? scope.join(', ') : 'none enumerated'
+    }]. USCIS reads title-only authority as ceremonial.`,
+    authority: '9 FAM 402.9-7(1) develop-and-direct',
+  };
+};
+
+/**
+ * `five_year_horizon_marginal_failure` — severity 4. Fires when the
+ * cover letter's five-year business horizon caps year-5 employment at
+ * the Beneficiary alone (`year_5_employee_count <= 1`). Walsh & Pollard
+ * requires more-than-Beneficiary employment irrespective of revenue —
+ * a profitable solo enterprise still trips marginality.
+ *
+ * Authority: 9 FAM 402.9-6(E); Matter of Walsh and Pollard, 20 I&N Dec.
+ * 60 (BIA 1988).
+ */
+export const fiveYearHorizonMarginalFailureGate: GateFn = (facts) => {
+  const horizon = facts.cover_letter_phase7?.five_year_horizon;
+  if (!horizon) return { fired: false, reason: 'data_incomplete' };
+  const count = horizon.year_5_employee_count;
+  if (count == null) return { fired: false, reason: 'data_incomplete' };
+  if (count > 1) return { fired: false, reason: 'not_applicable' };
+  return {
+    fired: true,
+    severity: 4,
+    finding: `Five-year business horizon projects ${count} year-5 employee(s) — at or below Beneficiary-only employment. Walsh & Pollard requires more-than-Beneficiary employment regardless of revenue level.`,
+    authority: '9 FAM 402.9-6(E); Matter of Walsh and Pollard',
+  };
+};
+
+/**
+ * Gate registry. The pre-filing reviewer fans these out and folds the
+ * fired outcomes into the LLM reviewer's input (or surfaces them
+ * directly on the matter dashboard). Each entry is a `(name, fn)` pair
+ * matching the runFxValidationGate / runPassportValidityGate pattern in
+ * ingest/typed-aggregate.ts — pure, exported, individually testable.
+ */
+export const E2_DETERMINISTIC_GATES: ReadonlyArray<{ name: GateName; fn: GateFn }> = [
+  { name: 'ownership_volatility', fn: ownershipVolatilityGate },
+  { name: 'co_petitioner_fund_circularity', fn: coPetitionerFundCircularityGate },
+  { name: 'unaccounted_sof_share', fn: unaccountedSofShareGate },
+  { name: 'multi_round_rfe_escalation', fn: multiRoundRfeEscalationGate },
+  { name: 'b2_status_violation_signal', fn: b2StatusViolationSignalGate },
+  { name: 'status_gap_pre_filing', fn: statusGapPreFilingGate },
+  { name: 'material_change_in_response_to_uscis', fn: materialChangeInResponseToUscisGate },
+  { name: 'external_evidence_contradiction_risk', fn: externalEvidenceContradictionRiskGate },
+  { name: 'develop_and_direct_role_authority_thin', fn: developAndDirectRoleAuthorityThinGate },
+  { name: 'five_year_horizon_marginal_failure', fn: fiveYearHorizonMarginalFailureGate },
+];
+
+export interface GateRunResult {
+  name: GateName;
+  outcome: GateOutcome;
+}
+
+/** Run every E-2 deterministic gate and return all outcomes. */
+export function runE2DeterministicGates(facts: E2Facts): GateRunResult[] {
+  return E2_DETERMINISTIC_GATES.map(({ name, fn }) => ({ name, outcome: fn(facts) }));
+}
+
+/**
+ * Async variant: same as runE2DeterministicGates, but routes the
+ * `material_change_in_response_to_uscis` gate through the LLM comparator
+ * so paraphrases ("operational since August 2022" vs "began operations
+ * 2022-08-19") don't false-positive. All other gates run synchronously
+ * — the comparator is the only one that needs the async path.
+ */
+export async function runE2DeterministicGatesAsync(
+  facts: E2Facts,
+  comparator: AssertionComparator,
+): Promise<GateRunResult[]> {
+  const out: GateRunResult[] = [];
+  for (const { name, fn } of E2_DETERMINISTIC_GATES) {
+    if (name === 'material_change_in_response_to_uscis') {
+      out.push({
+        name,
+        outcome: await materialChangeInResponseToUscisGateAsync(facts, comparator),
+      });
+    } else {
+      out.push({ name, outcome: fn(facts) });
+    }
+  }
+  return out;
+}
+
+/**
+ * Render the deterministic-gate findings as a Markdown system block for
+ * the LLM reviewer. Every gate appears in the table (fired or not) so
+ * the LLM can see the full coverage; fired severity-5 entries are
+ * additionally highlighted in the trailing instruction paragraph. The
+ * layout matches the Phase-2 spec in REFACTOR-NOTES-2026-04-29.md.
+ */
+export function renderGateBlock(results: GateRunResult[]): string {
+  const rows: string[] = [];
+  for (const { name, outcome } of results) {
+    if (outcome.fired) {
+      rows.push(
+        `| ${name} | ${outcome.severity} | fired | ${outcome.finding.replace(/\n/g, ' ')} |`,
+      );
+    } else {
+      const note = outcome.reason === 'data_incomplete' ? outcome.note ?? 'inputs missing' : '';
+      rows.push(`| ${name} | — | ${outcome.reason} | ${note} |`);
+    }
+  }
+  return [
+    '## Deterministic gate findings (run by checker before LLM review)',
+    '',
+    'The following deterministic gates were evaluated against the extracted facts.',
+    'Severity legend: 5 = case-fatal; 4 = high RFE risk; 3 = moderate; 2 = minor; 1 = informational.',
+    '',
+    '| Gate | Severity | Status | Finding |',
+    '|---|---|---|---|',
+    ...rows,
+    '',
+    "The LLM reviewer's job is to: (a) accept the deterministic findings as authoritative; (b) add qualitative risk analysis the gates cannot detect (narrative coherence, voice consistency, defensive paragraph adequacy, exhibit citation compliance); (c) NEVER override a fired severity-5 gate without an explicit attorney note attached to the case facts. Reference fired gates by name in the relevant `weak_spots` / `inconsistencies` entries so the human reviewer can cross-walk this layer.",
+  ].join('\n');
+}
+
+export interface FullReviewResult {
+  deterministic: GateRunResult[];
+  llm: ReviewResult;
+}
+
+export interface RunFullReviewOptions extends CheckDraftOptions {
+  /**
+   * Override the assertion comparator used by the
+   * `material_change_in_response_to_uscis` gate. Defaults to a fresh
+   * Haiku-backed comparator per call (cache is per-call). Tests pass a
+   * mock implementation. Set to `null` to skip the comparator entirely
+   * and fall back to string-equality (the legacy Phase-2 behavior).
+   */
+  comparator?: AssertionComparator | null;
+}
+
+/**
+ * Phase-2 orchestrator. Runs deterministic E-2 gates, then calls the
+ * LLM reviewer (which itself injects the same gate outcomes into its
+ * system context via checkDraft). Returns both layers so callers can
+ * surface the gate outcomes on the dashboard independently of the LLM
+ * narrative. For non-E-2 case types `deterministic` is an empty array.
+ *
+ * Phase-5: routes the `material_change_in_response_to_uscis` gate
+ * through an LLM comparator so paraphrased same-fact assertions don't
+ * false-positive. Pass `comparator: null` to opt out.
+ */
+export async function runFullReview(
+  caseFacts: CaseFacts,
+  draft: string,
+  verifyReport?: VerifyReport,
+  options?: RunFullReviewOptions,
+): Promise<FullReviewResult> {
+  let deterministic: GateRunResult[] = [];
+  if (caseFacts.case_type === 'E2') {
+    if (options?.comparator === null) {
+      deterministic = runE2DeterministicGates(caseFacts.facts);
+    } else {
+      const comparator = options?.comparator ?? createAssertionComparator();
+      deterministic = await runE2DeterministicGatesAsync(caseFacts.facts, comparator);
+    }
+  }
+  const llm = await checkDraft(caseFacts, draft, verifyReport, options);
+  return { deterministic, llm };
 }

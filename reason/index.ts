@@ -1,4 +1,35 @@
-export { checkDraft, type ReviewResult } from './checker';
+export {
+  checkDraft,
+  type ReviewResult,
+  ownershipVolatilityGate,
+  coPetitionerFundCircularityGate,
+  unaccountedSofShareGate,
+  multiRoundRfeEscalationGate,
+  b2StatusViolationSignalGate,
+  statusGapPreFilingGate,
+  materialChangeInResponseToUscisGate,
+  materialChangeInResponseToUscisGateAsync,
+  MATERIAL_CHANGE_COMPARATOR_THRESHOLD,
+  externalEvidenceContradictionRiskGate,
+  developAndDirectRoleAuthorityThinGate,
+  fiveYearHorizonMarginalFailureGate,
+  E2_DETERMINISTIC_GATES,
+  runE2DeterministicGates,
+  runE2DeterministicGatesAsync,
+  renderGateBlock,
+  runFullReview,
+  type GateOutcome,
+  type GateName,
+  type GateFn,
+  type GateRunResult,
+  type FullReviewResult,
+  type RunFullReviewOptions,
+} from './checker';
+export {
+  createAssertionComparator,
+  type AssertionComparator,
+  type AssertionComparison,
+} from './material-change-comparator';
 export {
   ReviewReportSchema,
   type ReviewReport,

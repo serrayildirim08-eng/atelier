@@ -126,6 +126,14 @@ const E2InvestorSchema = z.object({
   passport_number: Field(z.string()),
   passport_expiry: Field(z.string()),
   current_us_status: Field(z.string()),
+  // Phase-2 (Flatturbo OCR) gate inputs. All optional/null-defaulted.
+  // current_status: granular B-2 / B-1 / ESTA detector input for
+  // b2_status_violation_signal. prior_status_expiration_date +
+  // work_authorization_date drive status_gap_pre_filing and the
+  // pre-authorization-operations branch of b2_status_violation_signal.
+  current_status: Field(z.string()).optional(),
+  prior_status_expiration_date: Field(z.string()).optional(),
+  work_authorization_date: Field(z.string()).optional(),
 });
 
 const E2EnterpriseSchema = z.object({
@@ -137,6 +145,19 @@ const E2EnterpriseSchema = z.object({
   industry: Field(z.string()),
   naics_code: Field(z.string()),
   physical_address: Field(z.string()),
+  // Phase-2 (Flatturbo OCR) gate inputs. All optional/null-defaulted.
+  // fully_operational_since_date: when the case theory claims day-to-day
+  // ops began; compared against work_authorization_date and
+  // filed_date_i129 by b2_status_violation_signal. claimed vs observed
+  // business_model populates external_evidence_contradiction_risk.
+  fully_operational_since_date: Field(z.string()).optional(),
+  claimed_business_model: Field(z.string()).optional(),
+  observed_business_model: Field(z.string()).optional(),
+  // Phase-6 manual-input stub for external_evidence_contradiction_risk.
+  // Attorney-typed one-liner from a manual Yelp/Google/BBB/website check.
+  // No automated puller — the gate prefers this when populated; falls
+  // back to observed_business_model otherwise.
+  observed_business_model_manual_input: Field(z.string()).optional(),
 });
 
 const OwnershipEntrySchema = z.object({
@@ -159,6 +180,10 @@ const E2InvestmentSchema = z.object({
   total_cost_of_enterprise_usd: Field(z.number()),
   proportionality_percent: Field(z.number()),
   items: z.array(InvestmentItemSchema),
+  // Gate input (Phase-0.7+). Optional — claimed (cover-letter / I-129E) USD
+  // amount, used by unaccounted_sof_share against documented_amount_usd
+  // sums on source_of_funds.
+  claimed_amount_usd: Field(z.number()).optional(),
 });
 
 const SourceOfFundsChainSchema = z.object({
@@ -167,6 +192,149 @@ const SourceOfFundsChainSchema = z.object({
   origin_evidence: Field(z.string()),
   final_destination: Field(z.string()),
   notes: Field(z.string()),
+  // Gate inputs (Phase-0.7+). Optional — null when extractor doesn't populate.
+  // documented_amount_usd is the amount the firm has primary evidence for
+  // (used by unaccounted_sof_share). source_person.full_name is the human
+  // whose funds these are (used by co_petitioner_fund_circularity to match
+  // against matter.co_petitioners).
+  documented_amount_usd: Field(z.number()).optional(),
+  source_person: z
+    .object({
+      full_name: Field(z.string()),
+    })
+    .optional(),
+});
+
+const OwnershipHistoryEntrySchema = z.object({
+  effective_date: Field(z.string()),
+  // The set of owner names *as of this transition*. Distinct sets across
+  // entries = a transition. Used by ownership_volatility gate.
+  owner_names: z.array(Field(z.string())),
+  source_doc: Field(z.string()),
+});
+
+const CoPetitionerRelationshipEnum = z.enum([
+  'spouse',
+  'child',
+  'co_investor',
+  'sibling',
+  'parent',
+  'business_partner',
+  'unknown',
+]);
+
+const CoPetitionerSubAppEnum = z.enum([
+  'sub1',
+  'sub2',
+  'sub3',
+  'sub4',
+  'sub5',
+  'sub6',
+  'derivative_only',
+  'none',
+]);
+
+const CoPetitionerSchema = z.object({
+  full_name: Field(z.string()),
+  role: Field(z.string()),
+  // Phase-6 enrichment fields. All optional / null-defaulted so legacy
+  // matters validate. Used by the dossier UI to render co-petitioner
+  // role detail; co_petitioner_fund_circularity gate consults
+  // sub_application_status when distinguishing a Sub2 lender from a
+  // pure derivative dependent.
+  relationship_to_principal: Field(CoPetitionerRelationshipEnum).optional(),
+  sub_application_status: Field(CoPetitionerSubAppEnum).optional(),
+  role_in_petitioner_entity: Field(z.string()).optional(),
+});
+
+const MatterMetaSchema = z.object({
+  co_petitioners: z.array(CoPetitionerSchema).optional(),
+  // Phase-7 Task B — attorney-supplied per-matter sub-application alias
+  // overrides. Keys are firm-internal folder / filename variants
+  // ("Subordinate-One", "S1_PetitionerB"); values are canonical sub
+  // slots ("sub1".."sub6"). Takes precedence over the static
+  // SUB_APPLICATION_ALIAS_MAP in lib/case-folder-aliases.ts.
+  sub_application_aliases: z.record(z.string(), z.string()).optional(),
+});
+
+// Phase-8 — cover-letter narrative-claim slot. Mirrors the per-cover-letter
+// CoverLetterRichFactsSchema shapes captured in
+// ingest/extractors/cover-letter.schema.ts but lives on E2FactsSchema so
+// the drafter + reviewer can read these without round-tripping through
+// the typed-memory pipeline. All three sub-shapes are nullable + optional;
+// the Phase-8 enricher (deriveCoverLetterPhase7Fields → enrichPhase8Fields)
+// populates whichever fields the cover-letter rich extractor surfaced.
+const CoverLetterPhase7PassportFootnoteSchema = z.object({
+  paragraph_text: z.string(),
+  prior_passport_number: z.string(),
+  current_passport_number: z.string(),
+});
+
+const CoverLetterPhase7HorizonSchema = z.object({
+  year_1_revenue_usd: z.number().nullable(),
+  year_3_revenue_usd: z.number().nullable(),
+  year_5_revenue_usd: z.number().nullable(),
+  year_5_employee_count: z.number().nullable(),
+});
+
+const DevelopAndDirectAuthorityScopeEnum = z.enum([
+  'contract_signing',
+  'banking_authority',
+  'hire_fire',
+  'day_to_day_operations',
+  'strategic_planning',
+]);
+
+export type DevelopAndDirectAuthorityScope = z.infer<
+  typeof DevelopAndDirectAuthorityScopeEnum
+>;
+
+const CoverLetterPhase7RoleGrantSchema = z.object({
+  role_title: z.string(),
+  granting_document_ref: z.string(),
+  authority_scope: z.array(DevelopAndDirectAuthorityScopeEnum),
+});
+
+const CoverLetterPhase7Schema = z.object({
+  passport_renewal_footnote: CoverLetterPhase7PassportFootnoteSchema
+    .nullable()
+    .optional(),
+  five_year_horizon: CoverLetterPhase7HorizonSchema.nullable().optional(),
+  develop_and_direct_role_grant: CoverLetterPhase7RoleGrantSchema
+    .nullable()
+    .optional(),
+});
+
+export type CoverLetterPhase7 = z.infer<typeof CoverLetterPhase7Schema>;
+
+const RfeEntrySchema = z.object({
+  rfe_date: Field(z.string()),
+  subject_category: Field(
+    z.enum([
+      'bona_fide_enterprise',
+      'marginality',
+      'substantial_investment',
+      'source_of_funds',
+      'classification',
+      'maintenance_of_status',
+      'other',
+      // Phase-4 additions (rfe-notice rich extractor closed enum). Older
+      // names are preserved for back-compat; new fixtures emit the
+      // Phase-4 names.
+      'nationality_or_ownership',
+      'develop_and_direct',
+      'procedural_status',
+      'classification_ambiguity',
+      'multiple',
+    ]),
+  ),
+  notes: Field(z.string()),
+  // Phase-2 (Flatturbo OCR) gate inputs for material_change_in_response_to_uscis.
+  // Verbatim assertion from the initial filing vs the assertion in the
+  // RFE/NOID response on the same factual point (date / ownership /
+  // business activity / operational status). Mismatch trips Matter of Izummi.
+  initial_filing_assertion: Field(z.string()).optional(),
+  response_assertion: Field(z.string()).optional(),
 });
 
 const E2ElementsEvidenceSchema = z.object({
@@ -185,6 +353,19 @@ export const E2FactsSchema = z.object({
   source_of_funds: z.array(SourceOfFundsChainSchema),
   elements_evidence: E2ElementsEvidenceSchema,
   conflict_register: z.array(ConflictEntrySchema),
+  // Phase-0.7+ gate inputs. All optional/null-defaulted — pre-existing
+  // matters extracted before these fields landed continue to validate.
+  matter: MatterMetaSchema.optional(),
+  ownership_history: z.array(OwnershipHistoryEntrySchema).optional(),
+  filed_date_i129: Field(z.string()).optional(),
+  rfes: z.array(RfeEntrySchema).optional(),
+  // Phase-8 — cover-letter narrative claims surfaced from the cover-letter
+  // rich extractor. Drafter consumes these to drive the passport-renewal
+  // footnote, the five-year horizon section, and the develop-and-direct
+  // authority surfacing. Reviewer's two new gates
+  // (`develop_and_direct_role_authority_thin`, `five_year_horizon_marginal_failure`)
+  // also read this slot.
+  cover_letter_phase7: CoverLetterPhase7Schema.optional(),
 });
 
 export type E2Facts = z.infer<typeof E2FactsSchema>;
@@ -342,14 +523,33 @@ export const EB1CFactsSchema = z.object({
 export type EB1CFacts = z.infer<typeof EB1CFactsSchema>;
 
 /* ---------------------------------------------------------------------- */
+/* Drafter mode (Phase-0.7 will detect; default 'initial' until then)      */
+/* ---------------------------------------------------------------------- */
+
+export const DraftModeEnum = z.enum([
+  'initial',
+  'premium_upgrade',
+  'rfe_response',
+  'service_request',
+]);
+export type DraftMode = z.infer<typeof DraftModeEnum>;
+
+/* ---------------------------------------------------------------------- */
 /* Discriminated union                                                    */
 /* ---------------------------------------------------------------------- */
 
+import type { E2PrincipalSubtype } from './extractors/subtype-detect.schema';
+
 export type CaseFacts =
-  | { case_type: 'E2'; facts: E2Facts }
-  | { case_type: 'EB1A'; facts: EB1AFacts }
-  | { case_type: 'EB1B'; facts: EB1BFacts }
-  | { case_type: 'EB1C'; facts: EB1CFacts };
+  | {
+      case_type: 'E2';
+      facts: E2Facts;
+      subtype?: E2PrincipalSubtype | null;
+      draft_mode?: DraftMode | null;
+    }
+  | { case_type: 'EB1A'; facts: EB1AFacts; draft_mode?: DraftMode | null }
+  | { case_type: 'EB1B'; facts: EB1BFacts; draft_mode?: DraftMode | null }
+  | { case_type: 'EB1C'; facts: EB1CFacts; draft_mode?: DraftMode | null };
 
 /* ---------------------------------------------------------------------- */
 /* Detection schema                                                       */

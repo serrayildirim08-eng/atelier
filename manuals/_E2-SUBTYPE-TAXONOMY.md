@@ -8,6 +8,20 @@
 
 ---
 
+## Detector caveats — folder labels are NOT trustable
+
+**Critical finding from the 7-case calibration batch (`_CROSS-CASE-SYNTHESIS-2026-04-29.md` § 2):** the SharePoint folder label `(BUS)` is NOT a reliable Subtype 1 indicator. Cemre's case was BUS-labeled but doctrinally Subtype 3 (corporate parent = principal treaty investor; Beneficiary = executive employee). The Phase-0.6 detector must use:
+
+1. Cover letter "Classification Sought" line
+2. I-129 E Supplement investor identity
+3. Ownership chain analysis (member resolutions / share certs)
+
+Folder labels are intake artifacts and may not match doctrinal classification.
+
+**Canonical mis-classification exemplar:** **Imm-464-2023** (Cemre Musluoglu / Musluoglu Global). The matter was filed as Subtype 1 ("Principal Treaty Investor"), USCIS issued an RFE on classification ambiguity ("Unclear whether [Beneficiary] is applying as a primary treaty investor or an employee of a treaty investor"), and the firm corrected to Subtype 3 in the vol2 cover letter. Approved post-correction. Use this as the regression test for the detector — any pipeline that classifies Imm-464-2023 as Subtype 1 from the BUS folder label alone is broken.
+
+---
+
 ## 1. The full E-2 universe
 
 ```

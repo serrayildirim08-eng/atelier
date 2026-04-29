@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useState, useMemo, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import type { DragEvent, ChangeEvent } from 'react';
-import type { ReviewReport } from '@/reason';
+import type { GateRunResult, ReviewReport } from '@/reason';
 import type { AggregateAuditPayload, CaseType, E2Facts } from '@/ingest';
 import {
   PreGenerationApprovalModal,
@@ -63,6 +63,11 @@ interface IngestResult {
   draft?: string;
   draftError?: { code: string; message: string };
   review?: ReviewReport;
+  /**
+   * Phase-5: deterministic E-2 gate outcomes from runFullReview. Surfaced
+   * on the review pane independently of the LLM narrative.
+   */
+  deterministic_gates?: GateRunResult[];
   reviewError?: { code: string; message: string };
   error?: { code: string; message: string };
   e2_subtype?: {
@@ -4467,6 +4472,53 @@ function DraftPane({
 /* Review pane                                                             */
 /* ---------------------------------------------------------------------- */
 
+function DeterministicGatesPanel({ gates }: { gates?: GateRunResult[] }) {
+  if (!gates || gates.length === 0) return null;
+  const fired = gates.filter((g) => g.outcome.fired);
+  const dataIncomplete = gates.filter(
+    (g) => !g.outcome.fired && g.outcome.reason === 'data_incomplete',
+  );
+  if (fired.length === 0 && dataIncomplete.length === 0) return null;
+  return (
+    <div>
+      <div className="flex items-baseline gap-3 mb-4 pb-2 border-b border-rule">
+        <h3 className="smcp text-graphite">Deterministic gates</h3>
+        <span className="font-mono text-meta text-graphite-soft tabular-nums">
+          {fired.length} fired · {dataIncomplete.length} data_incomplete
+        </span>
+      </div>
+      {fired.length === 0 ? (
+        <p className="text-body text-graphite leading-relaxed">
+          No deterministic gates fired. {dataIncomplete.length > 0
+            ? `${dataIncomplete.length} gate(s) returned data_incomplete — extractor inputs are missing.`
+            : null}
+        </p>
+      ) : (
+        <div className="grid gap-3">
+          {fired.map((g, i) => {
+            // Severity 5 = block (critical-equivalent); 4 = warning (major).
+            const sev = g.outcome.fired ? g.outcome.severity : null;
+            const severityLabel = sev === 5 ? 'critical' : sev === 4 ? 'major' : 'minor';
+            return (
+              <FindingCard key={i} severity={severityLabel} eyebrow={g.name}>
+                {g.outcome.fired && (
+                  <>
+                    <div className="text-body text-ink mb-2 leading-relaxed">
+                      {g.outcome.finding}
+                    </div>
+                    <DefMini label="severity" value={String(g.outcome.severity)} />
+                    <DefMini label="authority" value={g.outcome.authority} />
+                  </>
+                )}
+              </FindingCard>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReviewPane({ result }: { result: IngestResult }) {
   if (result.reviewError) {
     return (
@@ -4508,6 +4560,8 @@ function ReviewPane({ result }: { result: IngestResult }) {
         <SectionLabel label="summary" />
         <p className="text-lede text-ink leading-relaxed">{r.summary}</p>
       </div>
+
+      <DeterministicGatesPanel gates={result.deterministic_gates} />
 
       <FindingGroup
         title="Inconsistencies"
