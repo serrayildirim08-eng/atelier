@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Atelier — Reviewer Panel (D2 prototype)</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,300..900,0..100,0..1&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --color-paper: #FAFAFA;
+    --color-paper-2: #F0F0F0;
+    --color-paper-deep: #D4D4D4;
+    --color-ink: #0A0A0A;
+    --color-ink-2: #1F1F1F;
+    --color-graphite: #404040;
+    --color-graphite-soft: #595959;
+    --color-rule: rgba(10,10,10,0.10);
+    --color-rule-strong: rgba(10,10,10,0.32);
+
+    --color-cream: #F7F2E8;
+    --color-cream-2: #EFE7D5;
+    --color-cream-rule: rgba(120,100,60,0.14);
+
+    --color-sage-deep: #5C6E5A;
+    --color-sage-wash: rgba(138,154,135,0.10);
+    --color-sky-deep: #607285;
+    --color-sky-wash: rgba(163,180,194,0.10);
+    --color-rubric: #B8392E;
+  }
+  html, body {
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: -apple-system, "Helvetica Neue", "Inter", system-ui, sans-serif;
+    font-size: 0.9375rem;
+    line-height: 1.62;
+    font-weight: 500;
+    -webkit-font-smoothing: antialiased;
+  }
+  .font-display { font-family: "Fraunces", Georgia, serif; font-variation-settings: "opsz" 144, "SOFT" 0, "WONK" 0; }
+  .font-display-section { font-family: "Fraunces", Georgia, serif; font-variation-settings: "opsz" 36, "SOFT" 0, "WONK" 0; }
+  .font-mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .smcp { font-family: ui-monospace, "SF Mono", Menlo, monospace; text-transform: uppercase; letter-spacing: 0.10em; font-weight: 600; font-size: 0.72rem; }
+  .cite { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.66rem; letter-spacing: 0.18em; font-weight: 600; text-transform: uppercase; }
+  .text-display { font-size: 2.4rem; }
+  .text-section { font-size: 1.5rem; }
+  .text-title { font-size: 1.05rem; }
+  .text-lede { font-size: 1rem; }
+  .text-body { font-size: 0.9375rem; }
+  .text-meta { font-size: 0.8125rem; }
+  .text-label { font-size: 0.72rem; }
+  .tabular-nums { font-variant-numeric: tabular-nums; }
+  .paper-grain {
+    background-color: var(--color-paper);
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(10,10,10,0.024) 1px, transparent 0),
+      radial-gradient(circle at 3px 4px, rgba(10,10,10,0.016) 1px, transparent 0);
+    background-size: 4px 4px, 7px 7px;
+  }
+  .cream-surface { background-color: var(--color-cream); }
+  .cream-2-surface { background-color: var(--color-cream-2); }
+  .sage-wash { background-color: var(--color-sage-wash); }
+  .sky-wash { background-color: var(--color-sky-wash); }
+  .text-graphite { color: var(--color-graphite); }
+  .text-graphite-soft { color: var(--color-graphite-soft); }
+  .text-ink-2 { color: var(--color-ink-2); }
+  .text-sage-deep { color: var(--color-sage-deep); }
+  .text-sky-deep { color: var(--color-sky-deep); }
+  .text-rubric { color: var(--color-rubric); }
+  .border-rule { border-color: var(--color-rule); }
+  .border-rule-strong { border-color: var(--color-rule-strong); }
+  .border-cream-rule { border-color: var(--color-cream-rule); }
+  .border-ink { border-color: var(--color-ink); }
+  .border-ink-2 { border-color: var(--color-ink-2); }
+  .border-sage-deep { border-color: var(--color-sage-deep); }
+  .border-sky-deep { border-color: var(--color-sky-deep); }
+  .border-rubric { border-color: var(--color-rubric); }
+  .dinkus {
+    display: flex; align-items: center; justify-content: center; gap: 0.9rem;
+    color: var(--color-graphite); font-family: ui-monospace, monospace;
+    font-size: 0.8rem; font-weight: 600; letter-spacing: 0.4em;
+  }
+  .dinkus::before, .dinkus::after { content: ""; flex: 1; border-top: 1px solid var(--color-rule); }
+  .brass-rule {
+    height: 1.5px;
+    background: linear-gradient(to right, transparent 0, var(--color-rule-strong) 8%, var(--color-rule-strong) 92%, transparent 100%);
+  }
+  /* Subtle entry */
+  @keyframes fadeUp { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform:none; } }
+  .fade-up { animation: fadeUp 280ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+</style>
+</head>
+<body class="paper-grain min-h-screen">
+
+  <!-- TopNav -->
+  <header class="border-b border-rule px-12 h-12 flex items-center justify-between">
+    <a href="#" class="flex items-baseline gap-2 text-meta text-graphite hover:text-ink">
+      <span class="font-mono">←</span>
+      <span class="smcp">return to the binder</span>
+    </a>
+    <div class="flex items-baseline gap-3">
+      <span class="smcp text-graphite-soft">matter</span>
+      <span class="font-mono text-meta text-ink-2">M-2026-04-29-Demir</span>
+    </div>
+  </header>
+
+  <!-- Verdict masthead -->
+  <section class="px-16 pt-14 pb-10 max-w-[1440px] mx-auto fade-up">
+    <div class="smcp text-graphite-soft mb-3">verdict</div>
+    <h1 class="font-display text-display font-bold text-ink leading-[1.04] tracking-[-0.025em] mb-5">
+      Major revisions before submission.
+    </h1>
+    <div class="flex gap-6 max-w-3xl">
+      <div class="w-1 self-stretch" style="background: var(--color-sky-deep); opacity: 0.5;"></div>
+      <p class="text-lede italic text-graphite leading-[1.65] max-w-prose">
+        Two dispositive gates fired on the source-of-funds chain — the
+        co-petitioner circularity and the unaccounted share. The narrative
+        does not yet address either. The factual-material findings cluster
+        around the develop-and-direct authority and the five-year horizon.
+      </p>
+    </div>
+    <div class="mt-8 flex items-baseline gap-5 text-meta font-mono tabular-nums text-graphite">
+      <span><span class="text-ink font-bold">2</span> dispositive</span>
+      <span class="opacity-30">·</span>
+      <span><span class="text-ink-2 font-semibold">7</span> material</span>
+      <span class="opacity-30">·</span>
+      <span><span class="text-graphite">3</span> minor</span>
+      <span class="opacity-30">·</span>
+      <span class="text-graphite-soft">3 not applicable</span>
+    </div>
+  </section>
+
+  <div class="brass-rule max-w-[1440px] mx-auto"></div>
+
+  <!-- Two-column body -->
+  <div class="max-w-[1440px] mx-auto grid grid-cols-[1fr_22rem] gap-12 px-16 py-12 items-start">
+
+    <!-- Letter / draft pane -->
+    <article class="prose-style max-w-[64ch]">
+      <header class="mb-6 flex items-baseline justify-between border-b border-rule pb-3">
+        <span class="smcp text-graphite-soft">draft · letter to consul</span>
+        <span class="font-mono text-meta tabular-nums text-graphite">v3 · 4 286 words</span>
+      </header>
+
+      <p class="mb-5 text-body leading-[1.62] text-ink-2">
+        I write on behalf of <strong class="text-ink">Mr. Mehmet Demir</strong>,
+        a national of the Republic of Türkiye, who seeks to enter the United
+        States as an E-2 nonimmigrant treaty investor pursuant to INA
+        § 101(a)(15)(E)(ii). Mr. Demir<sup class="font-mono text-meta text-ink ml-0.5">⁂4</sup>
+        has irrevocably committed and substantially deployed
+        <strong class="text-ink">USD 412,000</strong> into the development of
+        Treaty Co LLC, a Delaware limited liability company.
+      </p>
+      <p class="mb-5 text-body leading-[1.62] text-ink-2">
+        The capital was sourced from Mr. Demir's personal accounts in
+        Türkiye, transferred in three tranches between November 2024 and
+        February 2025<sup class="font-mono text-meta text-ink ml-0.5">⁂1</sup>.
+        Each tranche was wired through HSBC USA into the Treaty Co LLC
+        operating account ending <span class="font-mono">••••4471</span>.
+      </p>
+      <p class="mb-5 text-body leading-[1.62]">
+        <span class="bg-[color:var(--color-sky-wash)]" style="box-shadow: inset 2px 0 0 var(--color-sky-deep); padding: 0 0.25em;">
+          Approximately 64% of the deployed capital traces to a co-investor
+          loan from Treaty Holdings Ltd.
+        </span>
+        <sup class="font-mono text-meta text-ink ml-0.5">⁂2</sup> The loan
+        bears interest at 4.5% per annum and is repayable upon enterprise
+        profitability. As discussed below, the loan is not secured by the
+        enterprise assets and therefore the at-risk requirement under …
+      </p>
+      <p class="mb-5 text-body leading-[1.62] text-ink-2 italic text-graphite">
+        … (passage continues; abbreviated for prototype)
+      </p>
+      <p class="mb-5 text-body leading-[1.62] text-ink-2">
+        Mr. Demir will personally develop and direct the enterprise<sup class="font-mono text-meta text-ink ml-0.5">⁂3</sup>
+        in the capacity of Managing Member, with day-to-day operational
+        authority over staffing, capital deployment, and strategic
+        direction.
+      </p>
+    </article>
+
+    <!-- Findings rail -->
+    <aside class="cream-surface border border-cream-rule p-7 sticky top-6 max-h-[calc(100vh-3rem)] overflow-y-auto">
+
+      <!-- Filter chips -->
+      <div class="flex flex-wrap items-baseline gap-2 mb-7" role="group" aria-label="filter findings by severity">
+        <button class="px-3 py-1.5 bg-ink text-[color:var(--color-paper)] smcp">all 12</button>
+        <button class="px-3 py-1.5 border border-rule text-graphite smcp hover:border-ink">
+          <span class="font-mono mr-1">▣</span> dispositive 2
+        </button>
+        <button class="px-3 py-1.5 border border-rule text-graphite smcp hover:border-ink">
+          <span class="font-mono mr-1">▢</span> material 7
+        </button>
+        <button class="px-3 py-1.5 border border-rule text-graphite-soft smcp hover:border-ink">
+          minor 3
+        </button>
+        <button class="px-3 py-1.5 border border-dashed border-rule text-graphite-soft smcp">
+          na 3
+        </button>
+      </div>
+
+      <!-- Section: Gate findings -->
+      <header class="mb-5">
+        <h2 class="font-display-section text-section font-semibold text-ink leading-tight">Gate findings</h2>
+        <div class="text-meta text-graphite-soft mt-1 font-mono tabular-nums">11 evaluated · 2 fired · 6 passed · 3 NA</div>
+      </header>
+
+      <div class="grid gap-4">
+
+        <!-- Severity 5 fired (dispositive) -->
+        <article class="border-l-2 border-ink pl-5 pr-3 py-4 cream-2-surface fade-up" id="finding-1">
+          <header class="flex items-baseline gap-3 mb-2">
+            <span class="font-mono text-label text-ink leading-none">▣</span>
+            <span class="smcp text-ink">dispositive</span>
+            <span class="ml-auto font-mono text-label text-graphite-soft tabular-nums">⁂1</span>
+          </header>
+          <h3 class="text-title font-bold text-ink leading-snug mb-1.5">
+            Co-petitioner fund circularity
+          </h3>
+          <p class="text-body text-ink-2 leading-[1.6] mb-3">
+            Two of three SOF rows route through accounts owned by the
+            petitioning entity itself. Textbook bootstrap problem under the
+            FAM substantiality analysis.
+          </p>
+          <footer class="grid gap-2">
+            <div>
+              <span class="smcp text-graphite-soft mr-2">authority</span>
+              <span class="cite text-ink">9 FAM 402.9-6(B)(1)</span>
+            </div>
+            <div class="text-meta text-graphite italic leading-[1.55]">
+              <span class="smcp text-graphite-soft not-italic mr-2">from facts</span>
+              "Account ending ••••4471 — held by Treaty Co LLC, the petitioning entity."
+            </div>
+          </footer>
+        </article>
+
+        <!-- Severity 5 fired (dispositive) -->
+        <article class="border-l-2 border-ink pl-5 pr-3 py-4 cream-2-surface fade-up" id="finding-2">
+          <header class="flex items-baseline gap-3 mb-2">
+            <span class="font-mono text-label text-ink leading-none">▣</span>
+            <span class="smcp text-ink">dispositive</span>
+            <span class="ml-auto font-mono text-label text-graphite-soft tabular-nums">⁂2</span>
+          </header>
+          <h3 class="text-title font-bold text-ink leading-snug mb-1.5">
+            Unaccounted SOF share
+          </h3>
+          <p class="text-body text-ink-2 leading-[1.6] mb-3">
+            Claimed deployed capital of USD 412,000; documented chain
+            accounts for USD 264,300. The remaining 35.8% has no source.
+          </p>
+          <footer class="grid gap-2">
+            <div>
+              <span class="smcp text-graphite-soft mr-2">authority</span>
+              <span class="cite text-ink">9 FAM 402.9-6(B)(2)</span>
+            </div>
+            <div class="text-meta text-graphite italic leading-[1.55]">
+              <span class="smcp text-graphite-soft not-italic mr-2">from facts</span>
+              "source_of_funds total = $264 300 ; total_committed_usd = $412 000"
+            </div>
+          </footer>
+        </article>
+
+        <!-- Severity 4 fired (material) -->
+        <article class="border-l-[1.5px] border-ink-2 pl-5 pr-3 py-4 fade-up" id="finding-3">
+          <header class="flex items-baseline gap-3 mb-2">
+            <span class="font-mono text-label text-ink-2 leading-none">▢</span>
+            <span class="smcp text-ink-2">material</span>
+            <span class="ml-auto font-mono text-label text-graphite-soft tabular-nums">⁂3</span>
+          </header>
+          <h3 class="text-title font-semibold text-ink leading-snug mb-1.5">
+            Develop-and-direct authority thin
+          </h3>
+          <p class="text-body text-ink-2 leading-[1.6] mb-3">
+            The Operating Agreement grants Managing Member status but
+            does not enumerate hire/fire, capital, or strategic authority
+            with specificity required by 9 FAM 402.9-4(B)(1).
+          </p>
+          <footer class="grid gap-2">
+            <div>
+              <span class="smcp text-graphite-soft mr-2">authority</span>
+              <span class="cite text-ink">9 FAM 402.9-4(B)(1)</span>
+            </div>
+          </footer>
+        </article>
+
+        <!-- Not applicable, collapsed -->
+        <details class="border-l border-dashed border-rule pl-5 pr-3 py-3">
+          <summary class="flex items-baseline gap-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+            <span class="font-mono text-label text-graphite-soft leading-none">—</span>
+            <span class="smcp text-graphite-soft">not applicable</span>
+            <span class="ml-auto font-mono text-meta text-graphite-soft">3 gates</span>
+          </summary>
+          <div class="text-meta text-graphite-soft italic mt-3 leading-[1.55]">
+            ownership_volatility · multi_round_rfe_escalation ·
+            material_change_in_response_to_uscis — not applicable on
+            first-time consular filings.
+          </div>
+        </details>
+
+      </div>
+
+      <div class="dinkus my-8">⁂</div>
+
+      <!-- Section: Inconsistencies -->
+      <header class="mb-5">
+        <h2 class="font-display-section text-section font-semibold text-ink leading-tight">Inconsistencies</h2>
+        <div class="text-meta text-graphite-soft mt-1 font-mono tabular-nums">2 found</div>
+      </header>
+
+      <div class="grid gap-4">
+
+        <!-- Severity 5 inconsistency -->
+        <article class="border-l-2 border-ink pl-5 pr-3 py-4 cream-2-surface fade-up" id="finding-4">
+          <header class="flex items-baseline gap-3 mb-2">
+            <span class="font-mono text-label text-ink leading-none">▣</span>
+            <span class="smcp text-ink">dispositive</span>
+            <span class="ml-auto font-mono text-label text-graphite-soft tabular-nums">⁂4</span>
+          </header>
+          <h3 class="text-title font-bold text-ink leading-snug mb-3">
+            Unsupported alias for principal
+          </h3>
+          <div class="grid grid-cols-2 gap-2 mb-3">
+            <div class="bg-[color:var(--color-paper-2)] border-l border-graphite-soft pl-3 pr-2 py-2.5">
+              <div class="smcp text-graphite-soft mb-1.5">in letter</div>
+              <div class="font-mono text-meta italic text-ink-2 leading-[1.5]">
+                "also known as Mehmed Demir"
+              </div>
+            </div>
+            <div class="sky-wash border-l border-sky-deep pl-3 pr-2 py-2.5">
+              <div class="smcp text-graphite-soft mb-1.5">in facts</div>
+              <div class="font-mono text-meta italic text-ink-2 leading-[1.5]">
+                aliases: [ ] (empty)
+              </div>
+            </div>
+          </div>
+          <div>
+            <span class="smcp text-graphite-soft mr-2">category</span>
+            <span class="text-meta text-ink-2">hallucination</span>
+          </div>
+        </article>
+
+      </div>
+
+      <div class="dinkus my-8">⁂</div>
+
+      <!-- Section: Weak spots -->
+      <header class="mb-5">
+        <h2 class="font-display-section text-section font-semibold text-ink leading-tight">Weak spots</h2>
+        <div class="text-meta text-graphite-soft mt-1 font-mono tabular-nums">3 found</div>
+      </header>
+
+      <div class="grid gap-4">
+
+        <!-- Material weak spot with sage suggestion -->
+        <article class="border-l-[1.5px] border-ink-2 pl-5 pr-3 py-4 fade-up">
+          <header class="flex items-baseline gap-3 mb-2">
+            <span class="font-mono text-label text-ink-2 leading-none">▢</span>
+            <span class="smcp text-ink-2">material</span>
+          </header>
+          <h3 class="text-title font-semibold text-ink leading-snug mb-1.5">
+            Five-year horizon vs. business plan drift
+          </h3>
+          <p class="text-body text-ink-2 leading-[1.6] mb-3">
+            Letter projects $1.2M revenue Y3; business plan filed shows
+            $740K Y3 baseline. The 62% gap is unexplained.
+          </p>
+          <div class="grid gap-2 mb-3">
+            <div class="text-body leading-[1.55]">
+              <span class="smcp text-graphite-soft mr-2">rfe risk</span>
+              <span class="text-ink-2">Adjudicator will request reconciliation between letter and exhibit; risk of marginality determination if not addressed.</span>
+            </div>
+            <div class="sage-wash border-l border-sage-deep pl-3 pr-2 py-2.5 text-body text-ink-2 leading-[1.55]">
+              <span class="smcp text-sage-deep mr-2">fix</span>
+              Reconcile in Section V. Cite the business plan's optimistic
+              scenario footnote and tie the letter's $1.2M to that scenario
+              explicitly.
+            </div>
+          </div>
+        </article>
+
+        <!-- Minor weak spot, collapsed -->
+        <details class="border-l border-rule-strong pl-5 pr-3 py-3">
+          <summary class="flex items-baseline gap-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+            <span class="font-mono text-label text-graphite leading-none">·</span>
+            <span class="smcp text-graphite">minor</span>
+            <span class="ml-3 text-body italic text-graphite-soft truncate">Tonal slip in Section II — "groundbreaking"</span>
+          </summary>
+          <div class="mt-3 text-body text-ink-2 leading-[1.6]">
+            Section II calls the enterprise "groundbreaking." Voice
+            register breaks; remainder of letter is restrained. Substitute
+            with neutral descriptor.
+          </div>
+        </details>
+
+      </div>
+
+      <div class="dinkus my-8">⁂</div>
+
+      <!-- Section: Missing arguments -->
+      <header class="mb-5">
+        <h2 class="font-display-section text-section font-semibold text-ink leading-tight">Missing arguments</h2>
+        <div class="text-meta text-graphite-soft mt-1 font-mono tabular-nums">1 found</div>
+      </header>
+
+      <div class="grid gap-4">
+
+        <article class="border-l-[1.5px] border-ink-2 pl-5 pr-3 py-4 fade-up">
+          <header class="flex items-baseline gap-3 mb-2">
+            <span class="font-mono text-label text-ink-2 leading-none">§</span>
+            <span class="smcp text-ink-2">missing argument</span>
+          </header>
+          <h3 class="text-title font-semibold text-ink leading-snug mb-1.5">
+            Marginality test
+          </h3>
+          <p class="text-body text-ink-2 leading-[1.6] mb-3">
+            Element: <span class="cite text-ink">e2_marginality</span>.
+            Letter argues substantiality and proportionality but does not
+            address marginality directly under 9 FAM 402.9-6(D).
+          </p>
+          <div class="grid gap-2">
+            <div class="text-body leading-[1.55]">
+              <span class="smcp text-graphite-soft mr-2">missing</span>
+              <span class="text-ink-2">An explicit non-marginality showing — projected job creation, owner's reliance on income, or both.</span>
+            </div>
+            <div class="sage-wash border-l border-sage-deep pl-3 pr-2 py-2.5 text-body text-ink-2 leading-[1.55]">
+              <span class="smcp text-sage-deep mr-2">add</span>
+              Section VI paragraph: cite the 4 W-2 hires Y1, projected 9 by
+              Y3, and the principal's other income sources.
+            </div>
+          </div>
+        </article>
+
+      </div>
+
+    </aside>
+
+  </div>
+
+  <footer class="max-w-[1440px] mx-auto px-16 pb-16 pt-4">
+    <div class="dinkus mb-4">D2 PROTOTYPE · ATELIER REVIEWER PANEL · 2026-04-29</div>
+    <div class="text-meta text-graphite-soft text-center max-w-prose mx-auto leading-[1.55]">
+      Static sketch. No state, no interactions. Severity hierarchy carried
+      by typography weight, ornament density (sigil + rule weight), and
+      surface tint — never by hue. Rubric red is reserved for explicit
+      HITL stop-points only and does not appear on this view.
+    </div>
+  </footer>
+
+</body>
+</html>

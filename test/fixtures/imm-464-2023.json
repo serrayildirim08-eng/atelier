@@ -1,0 +1,89 @@
+{
+  "fixture_id": "imm-464-2023",
+  "matter_label": "Cemre Musluoglu / Musluoglu Global LLC",
+  "sharepoint_folder_label": "BUS",
+  "case_outcome": "APPROVED with RFE (post-correction)",
+  "regression_purpose": "Canonical mis-classification exemplar from manuals/_E2-SUBTYPE-TAXONOMY.md §11. The SharePoint folder label '(BUS)' is NOT a reliable Subtype 1 indicator. Cemre's case was BUS-labeled but doctrinally Subtype 3 (corporate parent = principal treaty investor; Beneficiary = executive employee). USCIS RFE'd on classification ambiguity; firm corrected to Subtype 3 in vol2 cover letter and was approved.",
+  "expected_principal_subtype": "executive_supervisory_employee",
+  "expected_procedural_posture": "uscis_extension",
+  "must_not_classify_as": "individual_investor",
+  "case_facts_sample": {
+    "case_type": "E2",
+    "subtype": "executive_supervisory_employee",
+    "draft_mode": "initial",
+    "facts": {
+      "matter": {
+        "matter_id": "Imm-464-2023",
+        "petitioner_name": "Musluoglu Global LLC",
+        "beneficiary_name": "Cemre Musluoglu",
+        "filed_date_i129": "2023-09-15",
+        "co_petitioners": [],
+        "sub_application_aliases": []
+      },
+      "investor": {
+        "full_name": "Cemre Musluoglu",
+        "treaty_country": "Turkey",
+        "current_status": "E-2",
+        "prior_status_expiration_date": "2024-08-31",
+        "work_authorization_date": "2023-10-12"
+      },
+      "enterprise": {
+        "legal_name": "Musluoglu Global LLC",
+        "treaty_country_ownership_percent": 100,
+        "fully_operational_since_date": "2022-04-01",
+        "claimed_business_model": "International construction trade and project sourcing",
+        "naics_code": "237310"
+      },
+      "investment": {
+        "claimed_amount_usd": 196000,
+        "documented_amount_usd": 36000
+      },
+      "ownership_history": [
+        {
+          "owner_name": "Musluoglu Holdings A.S. (Turkish parent corporation)",
+          "owner_type": "treaty_country_corporation",
+          "ownership_percent": 100,
+          "effective_date": "2022-04-01",
+          "note": "Foreign treaty-country parent is the principal treaty investor; Beneficiary is an executive employee, not the personal investor."
+        }
+      ],
+      "source_of_funds": [
+        {
+          "source_person": { "full_name": "Musluoglu Holdings A.S." },
+          "documented_amount_usd": 36000,
+          "origin": "corporate_parent_capital_injection",
+          "note": "Wire from Turkish parent corporation to US subsidiary; no personal SOF chain present."
+        }
+      ],
+      "rfes": [
+        {
+          "subject_category": "classification_ambiguity",
+          "initial_filing_assertion": "Beneficiary classified as primary treaty investor (Subtype 1) in initial cover letter.",
+          "response_assertion": "Vol2 cover letter corrects classification: Beneficiary is an executive employee of the corporate-parent treaty investor (Subtype 3). Approved post-correction.",
+          "rfe_date": "2024-02-14"
+        },
+        {
+          "subject_category": "source_of_funds",
+          "initial_filing_assertion": "$196,000 invested.",
+          "response_assertion": "Documented $36,000; investment-amount inconsistency disclosed and reconciled with audited corporate financials of the foreign parent.",
+          "rfe_date": "2024-02-14"
+        }
+      ]
+    }
+  },
+  "raw_doc_signals_present": [
+    "Foreign corporate Articles of Incorporation for Musluoglu Holdings A.S. (Turkish parent)",
+    "Audited financials for the Turkish parent corporation",
+    "Board resolution authorizing the parent's investment in the US subsidiary",
+    "Single corporate-parent -> US-subsidiary wire confirmation",
+    "Beneficiary CV titled at executive level (Director / GM at the Turkish parent)",
+    "NO Membership Interest Transfer Agreement granting personal ownership to Beneficiary",
+    "NO personal source-of-funds chain (no Tapu / personal bank statements / personal currency conversion)"
+  ],
+  "raw_doc_signals_absent_for_subtype_1": [
+    "No personal property sale (Tapu) record",
+    "No personal foreign-bank statements documenting investor's own savings",
+    "No Membership Interest Transfer Agreement naming Beneficiary as a >=50% personal member",
+    "No personal currency conversion receipts"
+  ]
+}

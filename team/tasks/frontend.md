@@ -47,8 +47,9 @@ Senior: `frontend-senior`. ID prefix `F`.
 **Notes:** D2 spec gelmeden başlama — yoksa wireframe stage'de boğulursun. F2 başlamadan önce design.md'de D2 done mu kontrol et.
 
 ### F3 — Loading progress error/timeout/retry polish
-**Status:** todo
+**Status:** blocked
 **Owner:** frontend-junior-2
+**Blocker:** D1 (skeleton/shimmer için B&W Notion-DNA token sistemi gerekli; DNA olmadan ad-hoc hex'ten kaçınmak imkânsız)
 **Why:** PDF parse-time `page-budget large docs` bir kısmı handle etti ama UI tarafında 30+ saniyeye çıkan ingest'lerde kullanıcı blank state veya stuck loading bar görüyor.
 **Acceptance:**
 - [ ] Timeout state (>60s tek PDF) sessiz, editorial bir mesajla görünür ("This file is taking longer than usual…")

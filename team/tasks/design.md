@@ -21,37 +21,35 @@ Atelier DNA: **şu an B&W Notion-DNA token system kuruldu, ama hedef luxury-edit
 ## Açık task'lar
 
 ### D1 — Atelier DNA audit + kanonikleştirme
-**Status:** todo
+**Status:** done
 **Owner:** ui-designer
-**Why:** `c5f188f` commit'i "B&W token system + Notion-DNA matter dashboard" demiş, mevcut UI bu temelde duruyor. Ama Serra'nın hedefi luxury-editorial. Şu anki agent prompt'u (luxury-editorial / Aesop) ile fiili kod (B&W / Notion) çelişiyor. Bu çatışma **çözülene kadar** F1, F2, F3 başlayamaz — herhangi bir polish hangi DNA'ya doğru çekecek bilmiyor.
+**Completed:** 2026-04-29
 **Deliverables:**
-- [ ] `team/design/_DNA.md` — Atelier'in kanonik design DNA dokümanı (palette token isimleri, type scale, spacing scale, motion timing, ornament policy, allowed/forbidden zone)
-- [ ] `team/design/_DNA-audit.md` — mevcut B&W Notion-DNA UI'ın (matter dashboard, intake, reviewer, loading) audit'i: nereler luxury-editorial yönünde tweak gerektiriyor (typography, whitespace, motion, icon treatment, microcopy ton)
-- [ ] Top 3-5 prescriptive fix önerisi, dosya/component bazında
-- [ ] `~/.claude/agents/ui-designer.md` ve `~/.claude/agents/frontend-senior.md` prompt'larını güncel kanonik DNA ile güncelle (önemli — yoksa ekip ayrışacak)
-**Emotional thesis:** "İmmigrasyon avukatlığının kalemi gümüş, kâğıdı el yapımı — dijital olduğunda da o ağırlık hissedilmeli." (Serra netleştirebilir)
-**Anti-references:** Linear, Stripe, Notion'ın kendi UI'ı, Material Design, glassmorphism, "AI startup" gradient'leri
-**References to study:** Aesop web, Kinfolk magazine layout, Monocle dergi tipografisi, Apartamento, Cabana magazine
+- [x] `team/design/_DNA.md` v1.0 — kanonik DNA, B&W concrete-and-jet base + cream/sage/sky warmth layer + rubric red, type scale (Fraunces + sans + mono), spacing, motion tokens, ornament library, microcopy, HITL exception
+- [x] `team/design/_DNA-audit.md` v1.0 — 4 kategoride sapma + top 5 prescriptive fix (palette token genişlemesi, sidebar warmth, verified→sage, provenance→sky, spacing rhythm bump)
+- [x] `~/.claude/agents/ui-designer.md` güncellendi — emotional thesis, kanonik DNA reference, HITL exception
+- [x] `~/.claude/agents/frontend-senior.md` güncellendi — DNA reference, forbidden zone (ASCII arrows), HITL exception, review citation kuralı
 **Notes:**
-- Notion-DNA'nın YAPISI (information density, table-like matter dashboard) iyi — onu KORUYORUZ
-- Notion-DNA'nın RUHU (sans-serif sade, açık-koyu mod, generic spacing) — onu DEĞİŞTİRİYORUZ → editorial serif display, daha geniş line-height, palette'e cream/sage/sky sıcaklık katmanları katma
-- Bu task L size — 2-3 saat kafa+yazma, sub-1h'ta acele etme
+- Mevcut UI roadmap'in iddia ettiği kadar Notion-DNA değil — fiilen monastic-editorial (Bluebook + Apple Notes hibrit). Omurga sağlam, eksik olan warmth ve severity vocabulary.
+- `globals.css`'te `--color-rubric` ve `--color-rubric-soft` token'ları yanlış değerlerde (graphite duplicate). DNA §3.3'te düzeltildi; F1'de implementation gerekli.
+- F1 ve F3 artık unblock — D2 ile devam ediyorum.
 
 ### D2 — Reviewer paneli: gate sonuçları spec
-**Status:** blocked
+**Status:** done
 **Owner:** ui-designer
-**Blocker:** D1 bitmeli (DNA olmadan severity hierarchy'sinin görsel ayrımı tutarsız olur)
-**Why:** F2'nin başlayabilmesi için spec gerekli. Backend zaten `runFullReview` ile deterministic+llm sonuçları dönüyor; UI sunum kararı alınmamış.
+**Completed:** 2026-04-29
 **Deliverables:**
-- [ ] `team/design/reviewer-gates/spec.md` — layout, severity 4 vs 5 görsel ayrımı (renk değil, ağırlık/typo/ornament), authority cite treatment, collapsed-vs-expanded davranış
-- [ ] `team/design/reviewer-gates/moodboard.md` — 6-12 referans (legal annotation tradition'larından — Bluebook, redline, marginalia)
-- [ ] `team/design/reviewer-gates/prototype.html` — statik Tailwind sketch
-**Emotional thesis:** "Margin'a düşülmüş bir avukat notu" — sayfa kenarındaki kalem işareti gibi. Alarm değil, dikkat çekme.
-**Anti-references:** Sentry, Datadog, Linear issue listesi — anything that screams "alert"
-**Notes:** Severity 4 ile 5 arasındaki fark RENK ile değil, type weight + ornament density ile yapılmalı (B&W system kısıtı + luxury-editorial kuralı uyumlu).
+- [x] `team/design/reviewer-gates/spec.md` v1.0 — verdict masthead + letter pane + sticky cream rail; severity 5/4/minor/na ornament axis (type weight + left rule + sigil ▣▢·—); inconsistency parallel-quote card (letter-excerpt vs facts-value); HITL-only rubric reservation; full state vocabulary; backend contract bound to `runFullReview` `FullReviewResult` (gates + ReviewReport)
+- [x] `team/design/reviewer-gates/moodboard.md` v1.0 — 12 references with explicit borrow/don't-borrow notes (Bluebook, Aesop, Kinfolk, Monocle, Cabana, Apartamento, Yorker fact-check, 19th-c codex, Field Notes; counter: Linear/Sentry/Datadog as anti-anchors)
+- [x] `team/design/reviewer-gates/prototype.html` — static Tailwind sketch with concrete gate fixtures (co-petitioner circularity, unaccounted SOF, develop-and-direct authority thin, alias hallucination, 5-yr horizon weak spot, marginality missing argument)
+- [x] `team/design/reviewer-gates/rationale.md` v1.0 — why severity-without-hue, why two columns, why asterism, why no rubric on this view
+**Notes:**
+- F2 unblock — junior-1 spec'in §10 hand-off checklist'ini izleyebilir.
+- Spec rubric red'i bu view'dan açıkça uzak tutuyor; rubric yalnızca HITL stop-point'lerinde (engagement letter, citation gate, pre-generation approval, conflict-flagged) kullanılacak. D5/D6'da bu kararı tekrar ele alacağız.
 
 ---
 
 ## Tamamlananlar (arşiv)
 
-_—_
+- **D1** (2026-04-29) — Atelier DNA v1.0 kanonikleşti. `team/design/_DNA.md` + `_DNA-audit.md`. Mevcut "concrete & jet" base korundu; cream / sage / sky warmth katmanı + rubric red token'ları eklendi (F1'de implementation gerekli). ui-designer + frontend-senior prompt'ları güncellendi. F1 ve F3 unblock.
+- **D2** (2026-04-29) — Reviewer panel spec v1.0. `team/design/reviewer-gates/{spec,moodboard,prototype,rationale}`. Severity 5/4/minor/na ornament axis (type weight + left rule + sigil) — renksiz hiyerarşi. Backend `runFullReview` çıktısına bağlı. F2 unblock.
