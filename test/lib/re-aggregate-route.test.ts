@@ -193,4 +193,80 @@ describe('POST /api/re-aggregate', () => {
     const res = await POST(reqWith({ matter_root: file }));
     expect(res.status).toBe(400);
   });
+
+  it('walks .pdf, .docx and image files as ingestable inputs', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'matter-mixed-'));
+    try {
+      writeFileSync(join(folder, 'doc.pdf'), Buffer.from('%PDF-1.4 a'));
+      writeFileSync(join(folder, 'memo.docx'), Buffer.from('PK docx'));
+      writeFileSync(join(folder, 'photo.jpg'), Buffer.from('\xFF\xD8\xFF'));
+      writeFileSync(join(folder, 'scan.png'), Buffer.from('\x89PNG'));
+      writeFileSync(join(folder, 'README.txt'), Buffer.from('skip me'));
+
+      const res = await POST(reqWith({ matter_root: folder }));
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        result: { source_pdfs?: string[] };
+        stats: { pdf_count: number };
+      };
+      // .txt is filtered; the other four are picked up regardless of
+      // extension. Order is filesystem-dependent so assert as a set.
+      expect(new Set(body.result.source_pdfs)).toEqual(
+        new Set(['doc.pdf', 'memo.docx', 'photo.jpg', 'scan.png']),
+      );
+      expect(body.stats.pdf_count).toBe(4);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+
+  it('passes forcedDocType to classifyAndExtractOnePdf when an override is set', async () => {
+    const folder = mkdtempSync(join(tmpdir(), 'matter-ovr-'));
+    const overridesPath = join(tmpRoot, 'overrides.json');
+    process.env.MATTER_OVERRIDES_PATH = overridesPath;
+    try {
+      writeFileSync(join(folder, 'mystery.pdf'), Buffer.from('%PDF-1.4 mystery'));
+      writeFileSync(join(folder, 'plain.pdf'), Buffer.from('%PDF-1.4 plain'));
+
+      const { applyOverridePatch } = await import('@/lib/matter-overrides');
+      await applyOverridePatch(
+        {
+          matter_root: folder,
+          document: {
+            filename: 'mystery.pdf',
+            doc_type_override: 'passport',
+            display_name: "John's passport",
+          },
+        },
+        overridesPath,
+      );
+
+      const typedExtract = (await import(
+        '@/ingest/typed-extract'
+      )) as unknown as {
+        classifyAndExtractOnePdf: ReturnType<typeof vi.fn>;
+      };
+      typedExtract.classifyAndExtractOnePdf.mockClear();
+
+      const res = await POST(reqWith({ matter_root: folder }));
+      expect(res.status).toBe(200);
+
+      const calls = typedExtract.classifyAndExtractOnePdf.mock.calls as Array<
+        [{ filename: string; forcedDocType?: string }]
+      >;
+      const byFilename = new Map(calls.map((c) => [c[0].filename, c[0]]));
+      expect(byFilename.get('mystery.pdf')?.forcedDocType).toBe('passport');
+      expect(byFilename.get('plain.pdf')?.forcedDocType).toBeUndefined();
+
+      const body = (await res.json()) as {
+        matter_override?: { documents: Record<string, unknown> } | null;
+        stats: { override_count: number };
+      };
+      expect(body.matter_override?.documents['mystery.pdf']).toBeTruthy();
+      expect(body.stats.override_count).toBe(1);
+    } finally {
+      rmSync(folder, { recursive: true, force: true });
+      delete process.env.MATTER_OVERRIDES_PATH;
+    }
+  });
 });

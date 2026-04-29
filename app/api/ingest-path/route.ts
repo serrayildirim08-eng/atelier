@@ -19,13 +19,14 @@ import type { E2CaseSubtype } from '@/ingest/extractors/subtype-detect.schema';
 import { extractPdfText } from '@/ingest/pdf';
 import { draftCoverLetterStream } from '@/draft';
 import { runFullReview } from '@/reason';
+import { getMatterOverride } from '@/lib/matter-overrides';
 
 export const runtime = 'nodejs';
 export const maxDuration = 3600;
 
 const INGESTABLE_EXTENSIONS = ['.pdf', '.docx', '.jpg', '.jpeg', '.png', '.webp', '.gif'];
 
-async function walkPdfs(root: string): Promise<string[]> {
+async function walkIngestableFiles(root: string): Promise<string[]> {
   const out: string[] = [];
   async function recur(dir: string) {
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -90,7 +91,7 @@ export async function POST(request: Request): Promise<Response> {
 
   let pdfPaths: string[];
   try {
-    pdfPaths = await walkPdfs(rootPath);
+    pdfPaths = await walkIngestableFiles(rootPath);
   } catch (e: unknown) {
     return Response.json(
       {
@@ -101,6 +102,20 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
   const matterName = path.basename(rootPath);
+
+  // Load any persisted manual overrides for this matter (display names +
+  // doc_type overrides). Re-opening a folder picks corrections back up.
+  // Best-effort — absent file means no overrides yet.
+  let matterOverride;
+  try {
+    matterOverride = await getMatterOverride(rootPath);
+  } catch (e: unknown) {
+    console.warn(
+      '[ingest-path] failed to read matter overrides:',
+      e instanceof Error ? e.message : String(e),
+    );
+    matterOverride = null;
+  }
 
   const encoder = new TextEncoder();
   const send = (controller: ReadableStreamDefaultController, obj: unknown) => {
@@ -198,7 +213,12 @@ export async function POST(request: Request): Promise<Response> {
         concurrency,
         async (item) => {
           const buffer = await fs.readFile(item.absPath);
-          return classifyAndExtractOnePdf({ filename: item.filename, buffer });
+          const docOverride = matterOverride?.documents?.[item.filename];
+          return classifyAndExtractOnePdf({
+            filename: item.filename,
+            buffer,
+            forcedDocType: docOverride?.doc_type_override ?? undefined,
+          });
         },
         (i, r) => {
           send(controller, {
@@ -395,7 +415,7 @@ export async function POST(request: Request): Promise<Response> {
       // while the (slow) drafter + reviewer keep running. The final
       // `result` event below will then arrive with draft + review
       // merged in.
-      send(controller, { type: 'result_partial', result });
+      send(controller, { type: 'result_partial', result, matter_override: matterOverride ?? null });
 
       // Phase 3 — draft (Sonnet)
       send(controller, {
@@ -464,7 +484,7 @@ export async function POST(request: Request): Promise<Response> {
         }
       }
 
-      send(controller, { type: 'result', result });
+      send(controller, { type: 'result', result, matter_override: matterOverride ?? null });
       send(controller, { type: 'done', total: pdfPaths.length });
       controller.close();
       } catch (e: unknown) {

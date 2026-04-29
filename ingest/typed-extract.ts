@@ -626,6 +626,16 @@ Output: ONE JSON object matching the doc_type-discriminated PerPdfFacts schema. 
 export interface TypedExtractInput {
   filename: string;
   buffer: Buffer;
+  /**
+   * Manual doc_type override. When set, the classifier skips Tier-0 + Haiku
+   * entirely, synthesizes a thin facts stub for the forced type, and routes
+   * the second-pass extractors using that doc_type instead of whatever the
+   * classifier would have returned. Cache is bypassed both on read and write
+   * so the override never poisons the content-hash cache (the same byte
+   * content under a different override would otherwise hit a stale entry).
+   * Used by the manual reclassification flow on re-aggregate.
+   */
+  forcedDocType?: DocType;
 }
 
 const MAX_TEXT_CHARS = 60_000;
@@ -648,8 +658,11 @@ export async function classifyAndExtractOnePdf(
   // originals, email-attachment forwards, sync copies) skip the Haiku call
   // and the rich extractors. Errors are not cached upstream so we don't
   // need a negative-cache check here.
+  // Manual override path bypasses the cache: the same byte content under a
+  // different doc_type override would otherwise hit a stale entry and the
+  // grouping/rich-extraction wouldn't reflect the user's reclassification.
   const hash = pdfContentHash(input.buffer);
-  const cached = readPdfCache(hash);
+  const cached = input.forcedDocType ? null : readPdfCache(hash);
   if (cached) {
     return { filename: input.filename, ...cached };
   }
@@ -699,23 +712,26 @@ export async function classifyAndExtractOnePdf(
       source_quote: null,
       confidence: null,
     };
+    const imageDocType: DocType = input.forcedDocType ?? 'other';
     const imageEntry: Omit<PerPdfResult, 'filename' | 'error'> = {
       pageCount: 1,
       facts: {
-        doc_type: 'other',
+        doc_type: imageDocType,
         suggested_filename: nullField,
         display_name: nullField,
         one_line_summary: {
-          value: `Raw ${imageMediaType} image — image-photo classifier ran in lieu of text extraction.`,
+          value: input.forcedDocType
+            ? `Raw ${imageMediaType} image — manually classified as ${imageDocType}; image-photo classifier ran in lieu of text extraction.`
+            : `Raw ${imageMediaType} image — image-photo classifier ran in lieu of text extraction.`,
           source_page: null,
           source_quote: null,
           confidence: 0.4,
         },
         key_facts: [],
-      },
+      } as PerPdfFacts,
       imagePhoto: scanImagePhoto,
     };
-    writePdfCache(hash, imageEntry);
+    if (!input.forcedDocType) writePdfCache(hash, imageEntry);
     return { filename: input.filename, ...imageEntry };
   }
 
@@ -762,23 +778,26 @@ export async function classifyAndExtractOnePdf(
       source_quote: null,
       confidence: null,
     };
+    const scanDocType: DocType = input.forcedDocType ?? 'other';
     const scanEntry: Omit<PerPdfResult, 'filename' | 'error'> = {
       pageCount: parsed.pageCount,
       facts: {
-        doc_type: 'other',
+        doc_type: scanDocType,
         suggested_filename: nullField,
         display_name: nullField,
         one_line_summary: {
-          value: 'Scanned document — text extraction returned sparse content; OCR/vision required.',
+          value: input.forcedDocType
+            ? `Scanned document — manually classified as ${scanDocType}; text extraction returned sparse content (OCR/vision required for field-level facts).`
+            : 'Scanned document — text extraction returned sparse content; OCR/vision required.',
           source_page: null,
           source_quote: null,
           confidence: 0.4,
         },
         key_facts: [],
-      },
+      } as PerPdfFacts,
       imagePhoto: scanImagePhoto,
     };
-    writePdfCache(hash, scanEntry);
+    if (!input.forcedDocType) writePdfCache(hash, scanEntry);
     return { filename: input.filename, ...scanEntry };
   }
 
@@ -790,6 +809,34 @@ export async function classifyAndExtractOnePdf(
   const text = sampleLongText(parsed.text, MAX_TEXT_CHARS);
   const parseMs = TIMING_ENABLED ? Date.now() - tParse0 : 0;
 
+  // Manual override fast-path: skip Tier-0 + Haiku + JSON parse + Zod
+  // validation. Build a thin facts stub directly with the forced doc_type
+  // so the second-pass routing below picks the matching rich extractor.
+  // The discriminated-union schema has variant-specific required fields,
+  // but downstream consumers only read facts.doc_type + the common
+  // top-level fields; the type assertion is intentional.
+  let facts: PerPdfFacts;
+  let haikuMs = 0;
+  if (input.forcedDocType) {
+    const nullField = {
+      value: null,
+      source_page: null,
+      source_quote: null,
+      confidence: null,
+    };
+    facts = {
+      doc_type: input.forcedDocType,
+      suggested_filename: nullField,
+      display_name: nullField,
+      one_line_summary: {
+        value: `Manually classified as ${input.forcedDocType}; rich extraction (if any) ran for that doc_type.`,
+        source_page: null,
+        source_quote: null,
+        confidence: 0.5,
+      },
+      key_facts: [],
+    } as PerPdfFacts;
+  } else {
   // Tier-0 deterministic classifier — runs before Haiku for two purposes:
   //   1. Bias the Haiku prompt with a strong prior (cuts noisy doc_type
   //      misclassifications, especially on bilingual / image-heavy docs).
@@ -821,7 +868,7 @@ export async function classifyAndExtractOnePdf(
   // params across 17 variants — exceeds Anthropic's structured-output cap
   // (16 union params). Use manual JSON parse + Zod validate, same pattern
   // as ingest/claude.ts extractFactsByCaseType.
-  const tHaiku0 = TIMING_ENABLED ? Date.now() : 0;
+  const tHaiku0 = Date.now();
   let response;
   try {
     response = await getAnthropic().messages.create({
@@ -923,7 +970,7 @@ export async function classifyAndExtractOnePdf(
     usage: response.usage,
   });
 
-  const facts = validated.data as PerPdfFacts;
+  facts = validated.data as PerPdfFacts;
 
   // Tier-0 quality check: if Haiku classified as 'other' but Tier-0 had a
   // confident hit, surface the disagreement at telemetry level. Keep
@@ -935,6 +982,9 @@ export async function classifyAndExtractOnePdf(
     );
   }
 
+  haikuMs = TIMING_ENABLED ? Date.now() - tHaiku0 : 0;
+  } // end of !forcedDocType else-branch
+
   // Second pass: route to each rich extractor whose flavor includes the
   // first-pass doc_type. Multiple extractors may apply to the same PDF
   // (e.g., a money_movement document is both bank-receipt-flavored and
@@ -945,7 +995,6 @@ export async function classifyAndExtractOnePdf(
   // first-pass facts and surface the second-pass error at telemetry
   // level. The cross-extractor gates (consideration drift, FX validation,
   // Tapu defensive flag) all run in the aggregator.
-  const haikuMs = TIMING_ENABLED ? Date.now() - tHaiku0 : 0;
   const tRich0 = TIMING_ENABLED ? Date.now() : 0;
 
   const richInput = {
@@ -1368,7 +1417,7 @@ export async function classifyAndExtractOnePdf(
     i129eSupplement,
     businessPlan,
   };
-  writePdfCache(hash, entry);
+  if (!input.forcedDocType) writePdfCache(hash, entry);
 
   if (TIMING_ENABLED) {
     const richMs = Date.now() - tRich0;

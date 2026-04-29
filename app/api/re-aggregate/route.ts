@@ -2,25 +2,27 @@
  * POST /api/re-aggregate
  *
  * Phase 11 — re-runs the cross-document aggregator (`aggregateTypedMemoryToE2`)
- * against the existing per-PDF cache without re-extracting anything.
+ * against the existing per-PDF cache without re-extracting unchanged
+ * documents.
  *
  * Use case: attorney already ingested a case folder once (the per-PDF
  * cache at `db/pdf-cache/v1/<sha256>.json` is populated), but wants to
  * pick up a typed-aggregate change OR re-derive the unified facts after
- * editing aliases / intake — without paying the O(n) Haiku tokens for
- * every PDF a second time. The home page's "Re-aggregate" button posts
- * the matter root here.
+ * editing aliases / intake / manual reclassification — without paying
+ * the O(n) Haiku tokens for every PDF a second time. The home page's
+ * "Re-aggregate" button posts the matter root here.
  *
  * What runs:
- *   - walkPdfs over `matter_root` (no Anthropic)
- *   - classifyAndExtractOnePdf per PDF — the content-hash cache hits and
- *     returns the cached PerPdfResult; misses (any PDF added since last
- *     ingest) extract through the normal path
+ *   - walkIngestableFiles over `matter_root` (no Anthropic)
+ *   - classifyAndExtractOnePdf per file — content-hash cache hits are
+ *     reused; misses (any file added since last ingest) extract through
+ *     the normal path. Files carrying a manual doc_type override bypass
+ *     the cache and re-extract under the override doc_type.
  *   - aggregateTypedMemoryToE2 against the rebuilt typed memory
  *
  * What does NOT run: Phase-0.6 subtype detection, drafter, reviewer.
- * This route is read-only against the cache; it never deletes prior
- * extracts and never wipes the on-disk cache.
+ * This route is read-only against the cache for unchanged documents and
+ * never deletes prior extracts or wipes the on-disk cache.
  *
  * Body:    { matter_root: string }       (absolute folder path)
  * Response: IngestSuccess (subset — caseFacts + aggregate_audit + source_pdfs)
@@ -37,13 +39,14 @@ import {
 } from '@/ingest/typed-extract';
 import { groupByDocType, type PerPdfResult } from '@/ingest/typed-memory';
 import { aggregateTypedMemoryToE2 } from '@/ingest/typed-aggregate';
+import { getMatterOverride } from '@/lib/matter-overrides';
 
 export const runtime = 'nodejs';
 export const maxDuration = 600;
 
 const INGESTABLE_EXTENSIONS = ['.pdf', '.docx', '.jpg', '.jpeg', '.png', '.webp', '.gif'];
 
-async function walkPdfs(root: string): Promise<string[]> {
+async function walkIngestableFiles(root: string): Promise<string[]> {
   const out: string[] = [];
   async function recur(dir: string) {
     const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -100,9 +103,23 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const matterName = path.basename(rootPath);
-  let pdfPaths: string[];
+
+  // Load any manual matter/document overrides (display names + doc_type
+  // overrides). Best-effort; absent file means no overrides yet.
+  let matterOverride;
   try {
-    pdfPaths = await walkPdfs(rootPath);
+    matterOverride = await getMatterOverride(rootPath);
+  } catch (e: unknown) {
+    console.warn(
+      '[re-aggregate] failed to read matter overrides:',
+      e instanceof Error ? e.message : String(e),
+    );
+    matterOverride = null;
+  }
+
+  let filePaths: string[];
+  try {
+    filePaths = await walkIngestableFiles(rootPath);
   } catch (e: unknown) {
     return Response.json(
       {
@@ -112,16 +129,19 @@ export async function POST(request: Request): Promise<Response> {
       { status: 500 },
     );
   }
-  if (pdfPaths.length === 0) {
+  if (filePaths.length === 0) {
     const empty: IngestResult = {
       filename: matterName,
       pageCount: 0,
-      error: { code: 'no_pdfs', message: 'No PDFs found in folder.' },
+      error: { code: 'no_pdfs', message: 'No ingestable files found in folder.' },
     };
     return Response.json({ result: empty });
   }
 
-  const inputs = pdfPaths.map((p) => ({ filename: path.relative(rootPath, p), absPath: p }));
+  const inputs = filePaths.map((p) => ({
+    filename: path.relative(rootPath, p),
+    absPath: p,
+  }));
   const concurrency = getTypedExtractConcurrency();
 
   let perPdfResults: PerPdfResult[];
@@ -131,7 +151,12 @@ export async function POST(request: Request): Promise<Response> {
       concurrency,
       async (item) => {
         const buffer = await fs.readFile(item.absPath);
-        return classifyAndExtractOnePdf({ filename: item.filename, buffer });
+        const docOverride = matterOverride?.documents?.[item.filename];
+        return classifyAndExtractOnePdf({
+          filename: item.filename,
+          buffer,
+          forcedDocType: docOverride?.doc_type_override ?? undefined,
+        });
       },
     );
   } catch (e: unknown) {
@@ -177,7 +202,7 @@ export async function POST(request: Request): Promise<Response> {
       pageCount: totalPages,
       detection_confidence: 1,
       detection_reasoning:
-        'Re-aggregated from cached per-PDF extracts (no PDF parsing or per-PDF Haiku calls).',
+        'Re-aggregated from cached per-PDF extracts (no PDF parsing or per-PDF Haiku calls for unchanged docs).',
       caseFacts: { case_type: 'E2', facts: caseFacts },
       source_pdfs: sourcePdfs,
       aggregate_audit: {
@@ -210,12 +235,63 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
+  // Build the per-PDF stream payload the UI binder needs to refresh its
+  // typed-memory state (so doc_type override changes show up in grouping
+  // immediately without forcing a re-ingest). Mirrors the `pdf_result`
+  // event shape from the ingest-path NDJSON stream.
+  const perPdfPayload = perPdfResults.map((r) => ({
+    filename: r.filename,
+    doc_type: r.facts?.doc_type ?? null,
+    error: r.error ?? null,
+    facts: r.facts ?? null,
+    pageCount: r.pageCount,
+    subtypes: {
+      formation_doc_subtype: r.corporateFormation?.formation_doc_subtype ?? null,
+      contract_subtype: r.contract?.contract_subtype ?? null,
+      government_doc_subtype: r.governmentDoc?.government_doc_subtype ?? null,
+      tax_return_subtype: r.taxReturn?.tax_return_subtype ?? null,
+      statement_subtype: r.financialStatement?.statement_subtype ?? null,
+      credential_subtype: r.credential?.credential_subtype ?? null,
+      payroll_subtype: r.payroll?.payroll_subtype ?? null,
+      wire_subtype: r.wireConfirmation?.wire_subtype ?? null,
+      vital_record_subtype: r.vitalRecords?.vital_record_subtype ?? null,
+      foreign_doc_subtype: r.foreignCorporate?.foreign_doc_subtype ?? null,
+    },
+    rich: {
+      passport: r.passport ?? null,
+      visaStamp: r.visaStamp ?? null,
+      i94: r.i94 ?? null,
+      vitalRecords: r.vitalRecords ?? null,
+      corporateFormation: r.corporateFormation ?? null,
+      foreignCorporate: r.foreignCorporate ?? null,
+      contract: r.contract ?? null,
+      customerContract: r.customerContract ?? null,
+      realEstatePurchase: r.realEstatePurchase ?? null,
+      bankReceipt: r.bankReceipt ?? null,
+      wireConfirmation: r.wireConfirmation ?? null,
+      taxReturn: r.taxReturn ?? null,
+      financialStatement: r.financialStatement ?? null,
+      payroll: r.payroll ?? null,
+      jobOffer: r.jobOffer ?? null,
+      serviceRecord: r.serviceRecord ?? null,
+      cv: r.cv ?? null,
+      credential: r.credential ?? null,
+      recommendationLetter: r.recommendationLetter ?? null,
+      governmentDoc: r.governmentDoc ?? null,
+      imagePhoto: r.imagePhoto ?? null,
+      incentiveDocument: r.incentiveDocument ?? null,
+    },
+  }));
+
   return Response.json({
     result,
+    per_pdf: perPdfPayload,
+    matter_override: matterOverride ?? null,
     stats: {
-      pdf_count: pdfPaths.length,
+      pdf_count: filePaths.length,
       success_count: successCount,
       total_pages: totalPages,
+      override_count: Object.keys(matterOverride?.documents ?? {}).length,
     },
   });
 }

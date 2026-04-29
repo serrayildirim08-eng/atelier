@@ -406,6 +406,15 @@ export default function Page() {
   const [selectedEntryKey, setSelectedEntryKey] = useState<string | null>(null);
   const [entryLabels, setEntryLabels] = useState<Record<string, string>>({});
   const [dashboardOverrides, setDashboardOverrides] = useState<Record<string, string>>({});
+  // Persisted manual overrides for the current matter (matter display name +
+  // per-document display name + per-document doc_type override). Loaded from
+  // /api/matter-overrides on matter open and refreshed on each PATCH; the
+  // re-aggregate response also re-emits the latest map.
+  const [matterOverride, setMatterOverride] = useState<{
+    matter_root: string;
+    matter_display_name?: string | null;
+    documents: Record<string, { display_name?: string | null; doc_type_override?: DocType | null }>;
+  } | null>(null);
   // In-flight draft text streamed from the route during Phase 3. Cleared
   // when the closing `result` event lands (which carries the server-
   // authoritative final draft). DraftPane reads result.draft ?? this.
@@ -430,7 +439,146 @@ export default function Page() {
     setStreamingDraft('');
     setStreamEvents([]);
     setStreamStartedAt(null);
+    setMatterOverride(null);
   }, []);
+
+  // Hydrate entryLabels from a server-side override map. Each persisted
+  // document override carries a display_name keyed by relative filename;
+  // we map back to the entryKey form (`<doc_type>::<filename>`) using the
+  // current typedMemory so the existing rename UI keeps using its key
+  // convention. doc_type may have shifted under an override, so resolve
+  // it via the override itself when present.
+  const hydrateEntryLabelsFromOverride = useCallback(
+    (
+      ov: {
+        documents: Record<
+          string,
+          { display_name?: string | null; doc_type_override?: DocType | null }
+        >;
+      } | null,
+      mem: TypedMemory,
+    ) => {
+      if (!ov) return;
+      const next: Record<string, string> = {};
+      for (const [filename, doc] of Object.entries(ov.documents ?? {})) {
+        const label = doc.display_name;
+        if (!label) continue;
+        const effectiveType: DocType =
+          doc.doc_type_override ??
+          (Object.entries(mem).find(([, list]) =>
+            (list ?? []).some((e) => e.filename === filename),
+          )?.[0] as DocType | undefined) ??
+          'other';
+        next[`${effectiveType}::${filename}`] = label;
+      }
+      setEntryLabels((prev) => ({ ...prev, ...next }));
+    },
+    [],
+  );
+
+  // Re-aggregate handler — POSTs to /api/re-aggregate, picks up the fresh
+  // per-PDF payload + matter_override, and replays them into state so doc
+  // grouping / display names / matter title all update without a re-ingest.
+  // Generated drafts/reviews on the current matter are preserved (the route
+  // returns only caseFacts + audit; the Dossier merge keeps draft/review).
+  const runReaggregate = useCallback(async () => {
+    if (!matterRoot) return;
+    const res = await fetch('/api/re-aggregate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ matter_root: matterRoot }),
+    });
+    const data = (await res.json()) as {
+      result?: IngestResult;
+      per_pdf?: PerPdfMemoryEntry[];
+      matter_override?: typeof matterOverride;
+      error?: string;
+      message?: string;
+    };
+    if (!res.ok || !data.result) {
+      throw new Error(data.message ?? data.error ?? `HTTP ${res.status}`);
+    }
+    const next = data.result;
+    if ('error' in next && next.error) {
+      throw new Error(`${next.error.code}: ${next.error.message}`);
+    }
+    // Replace matter-level facts + audit; preserve draft/review/e2_subtype.
+    setResults((prev) =>
+      prev.map((r) => {
+        if (r.filename !== next.filename) return r;
+        if ('error' in r && r.error) return r;
+        return {
+          ...r,
+          caseFacts: next.caseFacts ?? r.caseFacts,
+          aggregate_audit: next.aggregate_audit ?? r.aggregate_audit,
+          source_pdfs: next.source_pdfs ?? r.source_pdfs,
+          pageCount: next.pageCount ?? r.pageCount,
+          detection_confidence: next.detection_confidence ?? r.detection_confidence,
+          detection_reasoning: next.detection_reasoning ?? r.detection_reasoning,
+        };
+      }),
+    );
+    // Rebuild typedMemory from the per-PDF payload — necessary so doc_type
+    // overrides and re-grouping reflect immediately in the Exhibits / Memory
+    // panes without a fresh ingest.
+    if (Array.isArray(data.per_pdf)) {
+      const fresh: TypedMemory = {};
+      for (const entry of data.per_pdf) {
+        const bucket: DocType = entry.doc_type ?? 'other';
+        const list = fresh[bucket] ?? [];
+        list.push(entry);
+        fresh[bucket] = list;
+      }
+      setTypedMemory(fresh);
+      if (data.matter_override) hydrateEntryLabelsFromOverride(data.matter_override, fresh);
+    }
+    if (data.matter_override !== undefined) {
+      setMatterOverride(data.matter_override ?? null);
+    }
+  }, [matterRoot, hydrateEntryLabelsFromOverride]);
+
+  // Patch the persisted override store and update local state. Called from
+  // DossierHeader (matter rename) and DocumentInlinePreview (per-document
+  // rename + doc_type override).
+  const applyMatterOverridePatch = useCallback(
+    async (
+      patch: {
+        matter_display_name?: string | null;
+        document?: {
+          filename: string;
+          display_name?: string | null;
+          doc_type_override?: DocType | null;
+        };
+      },
+    ): Promise<boolean> => {
+      if (!matterRoot) return false;
+      try {
+        const res = await fetch('/api/matter-overrides', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ matter_root: matterRoot, ...patch }),
+        });
+        const data = (await res.json()) as {
+          matter_override?: typeof matterOverride;
+          error?: string;
+          message?: string;
+        };
+        if (!res.ok) {
+          console.warn('[matter-overrides] PATCH failed:', data.error, data.message);
+          return false;
+        }
+        setMatterOverride(data.matter_override ?? null);
+        return true;
+      } catch (e: unknown) {
+        console.warn(
+          '[matter-overrides] PATCH error:',
+          e instanceof Error ? e.message : String(e),
+        );
+        return false;
+      }
+    },
+    [matterRoot],
+  );
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -597,6 +745,7 @@ export default function Page() {
     setTypedMemory({});
     setPerPdfCount({ done: 0, total: 0 });
     setMatterRoot(rootPath);
+    setMatterOverride(null);
     setStreamingDraft('');
     setStreamEvents([]);
     setStreamStartedAt(Date.now());
@@ -707,6 +856,14 @@ export default function Page() {
             // The closing `result` event will replace this entry with a
             // fully-populated record once draft + review land.
             const partial = evt.result as IngestResult;
+            const ov = (evt.matter_override as typeof matterOverride) ?? null;
+            if (ov) {
+              setMatterOverride(ov);
+              setTypedMemory((mem) => {
+                hydrateEntryLabelsFromOverride(ov, mem);
+                return mem;
+              });
+            }
             collected.push(partial);
             // Phase 11 — merge by matter basename so re-running the same
             // folder replaces the prior entry in-place instead of
@@ -729,6 +886,14 @@ export default function Page() {
             // fully-populated one (draft + review attached). If no
             // partial was emitted (error path), append normally.
             const finalResult = evt.result as IngestResult;
+            const ov = (evt.matter_override as typeof matterOverride) ?? null;
+            if (ov) {
+              setMatterOverride(ov);
+              setTypedMemory((mem) => {
+                hydrateEntryLabelsFromOverride(ov, mem);
+                return mem;
+              });
+            }
             if (collected.length > 0) {
               collected[collected.length - 1] = finalResult;
             } else {
@@ -842,6 +1007,11 @@ export default function Page() {
               prev.map((r, i) => (i === selectedIdx ? updater(r) : r)),
             );
           }}
+          matterDisplayName={matterOverride?.matter_display_name ?? null}
+          onSetMatterDisplayName={(value) =>
+            applyMatterOverridePatch({ matter_display_name: value })
+          }
+          onReaggregate={runReaggregate}
         />
         <Marginalia
           result={selected}
@@ -902,7 +1072,12 @@ export default function Page() {
 
       {matterOverlayOpen && (
         <MatterOverlay
-          matterName={selected?.filename ?? matterRoot ?? 'Matter'}
+          matterName={
+            matterOverride?.matter_display_name ??
+            selected?.filename ??
+            matterRoot ??
+            'Matter'
+          }
           matterRoot={matterRoot}
           result={selected}
           typedMemory={typedMemory}
@@ -916,6 +1091,12 @@ export default function Page() {
           onSetDashboardOverride={(path, val) =>
             setDashboardOverrides((prev) => ({ ...prev, [path]: val }))
           }
+          documentOverrides={matterOverride?.documents ?? null}
+          onApplyDocOverride={async (filename, patch) =>
+            applyMatterOverridePatch({
+              document: { filename, ...patch },
+            })
+          }
           onClose={() => setMatterOverlayOpen(false)}
         />
       )}
@@ -927,6 +1108,12 @@ export default function Page() {
           typedMemory={typedMemory}
           caseFacts={selected?.caseFacts}
           aggregateAudit={selected?.aggregate_audit}
+          documentOverride={
+            matterOverride?.documents?.[pdfDetailFilename] ?? null
+          }
+          onApplyDocOverride={async (filename, patch) =>
+            applyMatterOverridePatch({ document: { filename, ...patch } })
+          }
           onClose={() => setPdfDetailFilename(null)}
         />
       )}
@@ -1186,6 +1373,9 @@ function Dossier({
   onOpenPdf,
   streamingDraft,
   onResultUpdate,
+  matterDisplayName,
+  onSetMatterDisplayName,
+  onReaggregate,
 }: {
   result: IngestResult | undefined;
   tab: DossierTab;
@@ -1200,6 +1390,9 @@ function Dossier({
   onOpenPdf: (filename: string) => void;
   streamingDraft?: string;
   onResultUpdate?: (updater: (r: IngestResult) => IngestResult) => void;
+  matterDisplayName?: string | null;
+  onSetMatterDisplayName?: (value: string | null) => Promise<boolean> | boolean;
+  onReaggregate?: () => Promise<void>;
 }) {
   const memoryHasEntries = Object.values(typedMemory).some(
     (list) => Array.isArray(list) && list.length > 0,
@@ -1232,6 +1425,9 @@ function Dossier({
         result={result}
         matterRoot={matterRoot}
         onResultUpdate={onResultUpdate}
+        matterDisplayName={matterDisplayName}
+        onSetMatterDisplayName={onSetMatterDisplayName}
+        onReaggregate={onReaggregate}
       />
       <DossierTabs tab={tab} onTab={onTab} result={result} />
       <div className="flex-1 overflow-y-auto min-h-0">
@@ -2379,9 +2575,11 @@ function DossierError({ result }: { result: IngestResult }) {
 function ReAggregateButton({
   matterRoot,
   onResultUpdate,
+  onReaggregate,
 }: {
   matterRoot: string;
   onResultUpdate: (updater: (r: IngestResult) => IngestResult) => void;
+  onReaggregate?: () => Promise<void>;
 }) {
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2389,6 +2587,16 @@ function ReAggregateButton({
   const onClick = async () => {
     setRunning(true);
     setError(null);
+    if (onReaggregate) {
+      try {
+        await onReaggregate();
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setRunning(false);
+      }
+      return;
+    }
     try {
       const res = await fetch('/api/re-aggregate', {
         method: 'POST',
@@ -2461,20 +2669,94 @@ function DossierHeader({
   result,
   matterRoot,
   onResultUpdate,
+  matterDisplayName,
+  onSetMatterDisplayName,
+  onReaggregate,
 }: {
   result: IngestResult;
   matterRoot?: string | null;
   onResultUpdate?: (updater: (r: IngestResult) => IngestResult) => void;
+  matterDisplayName?: string | null;
+  onSetMatterDisplayName?: (value: string | null) => Promise<boolean> | boolean;
+  onReaggregate?: () => Promise<void>;
 }) {
   const caseType = result.caseFacts?.case_type;
   const conf = result.detection_confidence;
   const assessment = result.review?.overall_assessment;
   const clientName = guessClientName(result);
+  const effectiveMatterName = (matterDisplayName ?? '').trim() || result.filename;
+  const matterRenamed = !!matterDisplayName && matterDisplayName !== result.filename;
+
+  const [editingMatterName, setEditingMatterName] = useState(false);
+  const [matterNameDraft, setMatterNameDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const saveMatterName = async (raw: string) => {
+    if (!onSetMatterDisplayName) {
+      setEditingMatterName(false);
+      return;
+    }
+    const trimmed = raw.trim();
+    setSaving(true);
+    try {
+      // Empty input clears the override; same name as folder also clears.
+      const next = trimmed.length === 0 || trimmed === result.filename ? null : trimmed;
+      await onSetMatterDisplayName(next);
+    } finally {
+      setSaving(false);
+      setEditingMatterName(false);
+    }
+  };
 
   return (
     <header className="px-9 pt-7 pb-5">
       <div className="flex items-center gap-3 font-mono text-meta text-graphite mb-3">
-        <span className="truncate">{result.filename}</span>
+        {editingMatterName ? (
+          <input
+            autoFocus
+            value={matterNameDraft}
+            disabled={saving}
+            onChange={(e) => setMatterNameDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void saveMatterName(matterNameDraft);
+              else if (e.key === 'Escape') setEditingMatterName(false);
+            }}
+            onBlur={() => void saveMatterName(matterNameDraft)}
+            className="font-mono text-meta text-ink bg-transparent border-b border-ink outline-none min-w-[10rem] max-w-[20rem] truncate"
+            placeholder={result.filename}
+            aria-label="Rename matter"
+            maxLength={200}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              if (!onSetMatterDisplayName) return;
+              setMatterNameDraft(effectiveMatterName);
+              setEditingMatterName(true);
+            }}
+            disabled={!onSetMatterDisplayName}
+            title={
+              onSetMatterDisplayName
+                ? 'Rename matter (display only — source folder is not renamed)'
+                : undefined
+            }
+            className={
+              'truncate text-left hover:text-ink transition-colors ' +
+              (onSetMatterDisplayName ? 'cursor-text' : 'cursor-default')
+            }
+          >
+            {effectiveMatterName}
+          </button>
+        )}
+        {matterRenamed && !editingMatterName && (
+          <span
+            className="font-mono text-label text-graphite-soft truncate"
+            title={`source folder: ${result.filename}`}
+          >
+            ({result.filename})
+          </span>
+        )}
         <span className="text-rule-strong">·</span>
         <span className="tabular-nums">{result.pageCount} pp</span>
         {caseType && (
@@ -2494,6 +2776,7 @@ function DossierHeader({
             <ReAggregateButton
               matterRoot={matterRoot}
               onResultUpdate={onResultUpdate}
+              onReaggregate={onReaggregate}
             />
           </span>
         )}
@@ -5620,6 +5903,8 @@ function PdfDetailModal({
   typedMemory,
   caseFacts,
   aggregateAudit,
+  documentOverride,
+  onApplyDocOverride,
   onClose,
 }: {
   filename: string;
@@ -5627,6 +5912,14 @@ function PdfDetailModal({
   typedMemory: TypedMemory;
   caseFacts: { case_type: CaseType; facts: Record<string, unknown> } | undefined;
   aggregateAudit?: AggregateAuditPayload;
+  documentOverride?: {
+    display_name?: string | null;
+    doc_type_override?: DocType | null;
+  } | null;
+  onApplyDocOverride?: (
+    filename: string,
+    patch: { display_name?: string | null; doc_type_override?: DocType | null },
+  ) => Promise<boolean>;
   onClose: () => void;
 }) {
   const entry = findEntryByFilename(typedMemory, filename);
@@ -5691,6 +5984,24 @@ function PdfDetailModal({
   const richEntries = entry.rich
     ? Object.entries(entry.rich).filter(([, v]) => v !== null && v !== undefined)
     : [];
+  const overrideDisplayName = documentOverride?.display_name ?? null;
+  const overrideDocType = documentOverride?.doc_type_override ?? null;
+  const renderedTitle =
+    overrideDisplayName ?? displayName ?? trimFilename(filename);
+
+  const persistDisplayName = (raw: string | null) => {
+    if (!onApplyDocOverride) return;
+    const trimmed = raw?.trim() ?? '';
+    void onApplyDocOverride(filename, {
+      display_name: trimmed.length === 0 ? null : trimmed,
+    });
+  };
+  const persistDocType = (value: string) => {
+    if (!onApplyDocOverride) return;
+    void onApplyDocOverride(filename, {
+      doc_type_override: value.length === 0 ? null : (value as DocType),
+    });
+  };
 
   return (
     <div
@@ -5701,13 +6012,57 @@ function PdfDetailModal({
         className="bg-paper border border-rule m-6 flex-1 max-w-[1400px] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="px-6 py-3 border-b border-rule flex items-baseline justify-between gap-4">
+        <header className="px-6 py-3 border-b border-rule flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1">
             <div className="smcp text-graphite-soft mb-0.5">document detail</div>
-            <h2 className="text-body text-ink truncate">{displayName ?? trimFilename(filename)}</h2>
+            {onApplyDocOverride ? (
+              <input
+                defaultValue={renderedTitle}
+                onBlur={(e) => {
+                  if (e.target.value.trim() !== renderedTitle) {
+                    persistDisplayName(e.target.value);
+                  }
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+                }}
+                className="text-body text-ink bg-transparent border-b border-transparent focus:border-ink outline-none w-full truncate"
+                aria-label="Rename document (display only)"
+                maxLength={200}
+              />
+            ) : (
+              <h2 className="text-body text-ink truncate">{renderedTitle}</h2>
+            )}
             <div className="text-meta text-graphite-soft font-mono mt-0.5 truncate">
               {filename} · {entry.pageCount} pages · {entry.doc_type ?? 'unknown'}
+              {overrideDocType && overrideDocType !== entry.doc_type && (
+                <span className="ml-2 border border-ink px-1.5 py-0.5 smcp text-ink">
+                  override · {overrideDocType} · pending re-aggregate
+                </span>
+              )}
             </div>
+            {onApplyDocOverride && (
+              <div className="mt-2 flex items-center gap-3 flex-wrap">
+                <label className="smcp text-label text-graphite-soft">
+                  document type
+                </label>
+                <select
+                  value={overrideDocType ?? ''}
+                  onChange={(e) => persistDocType(e.target.value)}
+                  className="font-mono text-meta text-ink bg-paper border border-rule px-2 py-1 hover:border-rule-strong"
+                  title="Manually reclassify this document. Click Re-aggregate to re-extract under the selected type."
+                >
+                  <option value="">(auto · {entry.doc_type ?? 'unknown'})</option>
+                  {(Object.entries(DOC_TYPE_LABELS) as [DocType, string][]).map(
+                    ([k, lbl]) => (
+                      <option key={k} value={k}>
+                        {lbl} · {k}
+                      </option>
+                    ),
+                  )}
+                </select>
+              </div>
+            )}
           </div>
           <button
             type="button"
@@ -5845,6 +6200,8 @@ function MatterOverlay({
   onSetLabel,
   dashboardOverrides,
   onSetDashboardOverride,
+  documentOverrides,
+  onApplyDocOverride,
   onClose,
 }: {
   matterName: string;
@@ -5857,6 +6214,13 @@ function MatterOverlay({
   onSetLabel: (key: string, label: string) => void;
   dashboardOverrides: Record<string, string>;
   onSetDashboardOverride: (path: string, value: string) => void;
+  documentOverrides:
+    | Record<string, { display_name?: string | null; doc_type_override?: DocType | null }>
+    | null;
+  onApplyDocOverride?: (
+    filename: string,
+    patch: { display_name?: string | null; doc_type_override?: DocType | null },
+  ) => Promise<boolean>;
   onClose: () => void;
 }) {
   const buckets = (Object.entries(typedMemory) as [DocType, PerPdfMemoryEntry[]][])
@@ -5899,6 +6263,8 @@ function MatterOverlay({
             onSelectEntry={onSelectEntry}
             entryLabels={entryLabels}
             onSetLabel={onSetLabel}
+            documentOverrides={documentOverrides}
+            onApplyDocOverride={onApplyDocOverride}
           />
         </div>
       </div>
@@ -6266,6 +6632,8 @@ function MatterDocumentsSection({
   onSelectEntry,
   entryLabels,
   onSetLabel,
+  documentOverrides,
+  onApplyDocOverride,
 }: {
   buckets: [DocType, PerPdfMemoryEntry[]][];
   matterRoot: string | null;
@@ -6273,6 +6641,13 @@ function MatterDocumentsSection({
   onSelectEntry: (key: string | null) => void;
   entryLabels: Record<string, string>;
   onSetLabel: (key: string, label: string) => void;
+  documentOverrides:
+    | Record<string, { display_name?: string | null; doc_type_override?: DocType | null }>
+    | null;
+  onApplyDocOverride?: (
+    filename: string,
+    patch: { display_name?: string | null; doc_type_override?: DocType | null },
+  ) => Promise<boolean>;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {};
@@ -6322,7 +6697,10 @@ function MatterDocumentsSection({
                   {entries.map((e) => {
                     const key = entryKey(docType, e.filename);
                     const expanded = selectedEntryKey === key;
-                    const label = entryLabels[key] ?? getSuggestedDocLabel(e);
+                    const persistedLabel = documentOverrides?.[e.filename]?.display_name ?? null;
+                    const label = entryLabels[key] ?? persistedLabel ?? getSuggestedDocLabel(e);
+                    const docOverride = documentOverrides?.[e.filename] ?? null;
+                    const docTypeOverride = docOverride?.doc_type_override ?? null;
                     return (
                       <li key={key} className="border-b border-rule last:border-b-0">
                         <button
@@ -6362,6 +6740,14 @@ function MatterDocumentsSection({
                               {basenameOf(e.filename)}
                             </div>
                           </div>
+                          {docTypeOverride && (
+                            <span
+                              className="shrink-0 font-mono text-label text-ink border border-ink px-1.5 py-0.5 smcp"
+                              title={`Manually classified as ${docTypeOverride}; click Re-aggregate to apply.`}
+                            >
+                              override · {docTypeOverride}
+                            </span>
+                          )}
                           {e.error && (
                             <span className="shrink-0 font-mono text-label text-ink ">
                               error
@@ -6376,7 +6762,11 @@ function MatterDocumentsSection({
                             matterRoot={matterRoot}
                             label={label}
                             onSetLabel={onSetLabel}
-                            overridden={entryLabels[key] !== undefined}
+                            overridden={
+                              entryLabels[key] !== undefined || persistedLabel !== null
+                            }
+                            docTypeOverride={docTypeOverride}
+                            onApplyDocOverride={onApplyDocOverride}
                           />
                         )}
                       </li>
@@ -6400,6 +6790,8 @@ function DocumentInlinePreview({
   label,
   onSetLabel,
   overridden,
+  docTypeOverride,
+  onApplyDocOverride,
 }: {
   entry: PerPdfMemoryEntry;
   entryKeyValue: string;
@@ -6408,15 +6800,45 @@ function DocumentInlinePreview({
   label: string;
   onSetLabel: (key: string, value: string) => void;
   overridden: boolean;
+  docTypeOverride?: DocType | null;
+  onApplyDocOverride?: (
+    filename: string,
+    patch: { display_name?: string | null; doc_type_override?: DocType | null },
+  ) => Promise<boolean>;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');
+  const [savingType, setSavingType] = useState(false);
   const absPath = matterRoot
     ? `${matterRoot}${matterRoot.endsWith('/') ? '' : '/'}${entry.filename}`
     : null;
   const pdfSrc = absPath
     ? `/api/file?path=${encodeURIComponent(absPath)}`
     : null;
+  const effectiveOverrideType = docTypeOverride ?? null;
+  const overrideMismatch =
+    effectiveOverrideType !== null && effectiveOverrideType !== docType;
+
+  const persistRename = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    onSetLabel(entryKeyValue, trimmed);
+    if (onApplyDocOverride) {
+      void onApplyDocOverride(entry.filename, { display_name: trimmed });
+    }
+  };
+
+  const onChangeDocType = async (value: string) => {
+    if (!onApplyDocOverride) return;
+    setSavingType(true);
+    try {
+      // Empty option clears the override.
+      const next = value.length === 0 ? null : (value as DocType);
+      await onApplyDocOverride(entry.filename, { doc_type_override: next });
+    } finally {
+      setSavingType(false);
+    }
+  };
 
   return (
     <div className="px-5 py-5 border-t border-rule space-y-5 bg-paper">
@@ -6429,7 +6851,7 @@ function DocumentInlinePreview({
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
-                  if (draft.trim()) onSetLabel(entryKeyValue, draft.trim());
+                  persistRename(draft);
                   setEditing(false);
                 } else if (e.key === 'Escape') {
                   setEditing(false);
@@ -6439,7 +6861,7 @@ function DocumentInlinePreview({
             />
             <button
               onClick={() => {
-                if (draft.trim()) onSetLabel(entryKeyValue, draft.trim());
+                persistRename(draft);
                 setEditing(false);
               }}
               className="smcp text-meta text-ink hover:text-graphite"
@@ -6469,6 +6891,42 @@ function DocumentInlinePreview({
             <span className="ml-2 text-rule-strong">(auto-named)</span>
           )}
         </div>
+        {onApplyDocOverride && (
+          <div className="mt-3 flex items-center gap-3 flex-wrap">
+            <label className="smcp text-label text-graphite-soft">
+              document type
+            </label>
+            <select
+              value={effectiveOverrideType ?? ''}
+              disabled={savingType}
+              onChange={(e) => void onChangeDocType(e.target.value)}
+              className="font-mono text-meta text-ink bg-paper border border-rule px-2 py-1 hover:border-rule-strong"
+              title="Manually reclassify this document. Click Re-aggregate to re-extract under the selected type."
+            >
+              <option value="">(auto · {DOC_TYPE_LABELS[docType]})</option>
+              {(Object.entries(DOC_TYPE_LABELS) as [DocType, string][]).map(
+                ([k, lbl]) => (
+                  <option key={k} value={k}>
+                    {lbl} · {k}
+                  </option>
+                ),
+              )}
+            </select>
+            {overrideMismatch && (
+              <span
+                className="font-mono text-label text-ink border border-ink px-1.5 py-0.5 smcp"
+                title={`Override pending: this document will re-bucket under ${effectiveOverrideType} on the next Re-aggregate.`}
+              >
+                pending re-aggregate
+              </span>
+            )}
+            {savingType && (
+              <span className="font-mono text-label text-graphite-soft animate-pulse">
+                saving…
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {pdfSrc ? (
