@@ -19,6 +19,7 @@ import type {
   PreviewGenerator,
   PreviewRecord,
 } from '@/lib/preview-store';
+import { globalGenerationQueue } from '@/lib/generation-queue';
 
 interface ApprovalModalProps {
   open: boolean;
@@ -30,6 +31,13 @@ interface ApprovalModalProps {
   onClose: () => void;
   onApproved?: (result: ApprovalResult) => void;
   onRejected?: () => void;
+  /**
+   * Phase 11 — when true, "approve & generate" enqueues the
+   * `/api/matter/[id]/approve` POST as a background job and closes the
+   * modal immediately. The completion fires onApproved through the queue
+   * subscription. Defaults to true.
+   */
+  backgroundGenerate?: boolean;
 }
 
 export interface ApprovalResult {
@@ -55,6 +63,7 @@ const SEVERITY_RANK: Record<number, { glyph: string; weight: string }> = {
 
 export function PreGenerationApprovalModal(props: ApprovalModalProps) {
   const { open, matterId, generator, args, onClose, onApproved, onRejected } = props;
+  const backgroundGenerate = props.backgroundGenerate !== false;
   const [preview, setPreview] = useState<PreviewRecord | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -112,6 +121,76 @@ export function PreGenerationApprovalModal(props: ApprovalModalProps) {
       setError('Attorney initials are required');
       return;
     }
+
+    // Rejection path stays synchronous — it's a fast filesystem write
+    // (no Anthropic call), so blocking the modal for the round-trip is
+    // fine and the attorney expects the rejection state immediately.
+    if (!approved) {
+      setSubmitting(true);
+      setError(null);
+      try {
+        const r = await fetch(`/api/matter/${encodeURIComponent(matterId)}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            preview_id: preview.preview_id,
+            approved: false,
+            attorney_initials: initials.trim(),
+            edits: [],
+            case_facts: props.caseFacts,
+            typed_memory: props.typedMemory,
+          }),
+        });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body?.error ?? `HTTP ${r.status}`);
+        onRejected?.();
+        onClose();
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    // Approval — Phase 11: hand the slow generator fetch off to the
+    // background queue and close the modal so the attorney can keep
+    // browsing other matters / files while the artifact is drafted.
+    const previewId = preview.preview_id;
+    const initialsTrim = initials.trim();
+    const editsForBody = editArray;
+    const caseFactsForBody = props.caseFacts;
+    const typedMemoryForBody = props.typedMemory;
+
+    if (backgroundGenerate) {
+      globalGenerationQueue.enqueue(matterId, generator, async () => {
+        const r = await fetch(`/api/matter/${encodeURIComponent(matterId)}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            preview_id: previewId,
+            approved: true,
+            attorney_initials: initialsTrim,
+            edits: editsForBody,
+            case_facts: caseFactsForBody,
+            typed_memory: typedMemoryForBody,
+          }),
+        });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body?.error ?? `HTTP ${r.status}`);
+        const result: ApprovalResult = {
+          output_path: body.output_path ?? null,
+          output_inline: body.output_inline ?? null,
+          preview: body.preview as PreviewRecord,
+        };
+        onApproved?.(result);
+        return result;
+      });
+      onClose();
+      return;
+    }
+
+    // Synchronous fallback (kept for callers that explicitly opt out).
     setSubmitting(true);
     setError(null);
     try {
@@ -119,25 +198,21 @@ export function PreGenerationApprovalModal(props: ApprovalModalProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          preview_id: preview.preview_id,
-          approved,
-          attorney_initials: initials.trim(),
-          edits: approved ? editArray : [],
-          case_facts: props.caseFacts,
-          typed_memory: props.typedMemory,
+          preview_id: previewId,
+          approved: true,
+          attorney_initials: initialsTrim,
+          edits: editsForBody,
+          case_facts: caseFactsForBody,
+          typed_memory: typedMemoryForBody,
         }),
       });
       const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body?.error ?? `HTTP ${r.status}`);
-      if (approved) {
-        onApproved?.({
-          output_path: body.output_path ?? null,
-          output_inline: body.output_inline ?? null,
-          preview: body.preview as PreviewRecord,
-        });
-      } else {
-        onRejected?.();
-      }
+      onApproved?.({
+        output_path: body.output_path ?? null,
+        output_inline: body.output_inline ?? null,
+        preview: body.preview as PreviewRecord,
+      });
       onClose();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));

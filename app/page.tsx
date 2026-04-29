@@ -16,6 +16,8 @@ import {
   LoadingProgress,
   type LoadingStreamEvent,
 } from '@/app/components/loading-progress';
+import { GenerationToastStack } from '@/app/components/generation-toast';
+import { mergeResultsByFilename } from '@/lib/results-merge';
 import {
   aggregateGatesToConflicts,
   auditFromMemory,
@@ -85,6 +87,7 @@ interface IngestResult {
     detection_signals?: string[];
   } | null;
   aggregate_audit?: AggregateAuditPayload;
+  source_pdfs?: string[];
 }
 
 type DossierTab = 'facts' | 'exhibits' | 'draft' | 'review' | 'log' | 'audit' | 'binder' | 'context';
@@ -583,8 +586,13 @@ export default function Page() {
   };
 
   const handleFolderPath = useCallback(async (rootPath: string) => {
+    // Phase 11 — do NOT wipe `results` on re-run. Prior matters (and the
+    // current matter's prior extracts) stay in place until the new
+    // streamed result lands. The collected[] array below merges by
+    // matter basename (`filename`) so re-running the same folder
+    // updates that matter in-place rather than dropping every other
+    // matter on the binder.
     setLoading(true);
-    setResults([]);
     setProgress(null);
     setTypedMemory({});
     setPerPdfCount({ done: 0, total: 0 });
@@ -607,16 +615,15 @@ export default function Page() {
 
       if (!res.ok || !res.body) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
-        setResults([
-          {
-            filename: rootPath,
-            pageCount: 0,
-            error: {
-              code: 'http_' + res.status,
-              message: data.error ?? `HTTP ${res.status}`,
-            },
+        const errorResult: IngestResult = {
+          filename: rootPath.split('/').pop() ?? rootPath,
+          pageCount: 0,
+          error: {
+            code: 'http_' + res.status,
+            message: data.error ?? `HTTP ${res.status}`,
           },
-        ]);
+        };
+        setResults((prev) => mergeResultsByFilename(prev, errorResult));
         return;
       }
 
@@ -701,8 +708,19 @@ export default function Page() {
             // fully-populated record once draft + review land.
             const partial = evt.result as IngestResult;
             collected.push(partial);
-            setResults([...collected]);
-            if (collected.length === 1) setSelectedIdx(0);
+            // Phase 11 — merge by matter basename so re-running the same
+            // folder replaces the prior entry in-place instead of
+            // appending a duplicate or wiping siblings. The setResults
+            // updater also computes the post-merge index for the
+            // current matter and forwards it to setSelectedIdx so the
+            // dossier focuses on the matter that just produced the
+            // partial rather than whatever was selected before.
+            setResults((prev) => {
+              const merged = mergeResultsByFilename(prev, partial);
+              const idx = merged.findIndex((r) => r.filename === partial.filename);
+              if (idx >= 0) setSelectedIdx(idx);
+              return merged;
+            });
             setLoading(false);
             // Keep `progress` set so the inline background-chip on the
             // header can show "drafting…" / "reviewing…".
@@ -716,9 +734,13 @@ export default function Page() {
             } else {
               collected.push(finalResult);
             }
-            setResults([...collected]);
+            setResults((prev) => {
+              const merged = mergeResultsByFilename(prev, finalResult);
+              const idx = merged.findIndex((r) => r.filename === finalResult.filename);
+              if (idx >= 0) setSelectedIdx(idx);
+              return merged;
+            });
             setStreamingDraft('');
-            if (collected.length === 1) setSelectedIdx(0);
           } else if (evt.type === 'done') {
             setProgress(null);
             // Auto-navigation to /matter/<id> disabled: that route reads
@@ -734,16 +756,15 @@ export default function Page() {
         (e instanceof DOMException && e.name === 'AbortError') ||
         (e instanceof Error && e.name === 'AbortError');
       if (!isAbort) {
-        setResults([
-          {
-            filename: rootPath,
-            pageCount: 0,
-            error: {
-              code: 'network',
-              message: e instanceof Error ? e.message : String(e),
-            },
+        const errorResult: IngestResult = {
+          filename: rootPath.split('/').pop() ?? rootPath,
+          pageCount: 0,
+          error: {
+            code: 'network',
+            message: e instanceof Error ? e.message : String(e),
           },
-        ]);
+        };
+        setResults((prev) => mergeResultsByFilename(prev, errorResult));
       }
     } finally {
       setLoading(false);
@@ -848,6 +869,12 @@ export default function Page() {
           </div>
         </div>
       )}
+
+      {/* Phase 11 — background generation jobs (cover letter / forms /
+          declarations / NoIDs / business plan) surface here so the
+          approval modal can close immediately on submit and the
+          attorney can keep navigating while the artifact is drafted. */}
+      <GenerationToastStack />
 
       {dragActive && <DragOverlay />}
 
@@ -1201,7 +1228,11 @@ function Dossier({
 
   return (
     <section className="min-h-0 flex flex-col paper-grain">
-      <DossierHeader result={result} />
+      <DossierHeader
+        result={result}
+        matterRoot={matterRoot}
+        onResultUpdate={onResultUpdate}
+      />
       <DossierTabs tab={tab} onTab={onTab} result={result} />
       <div className="flex-1 overflow-y-auto min-h-0">
         {tab === 'facts' && (
@@ -2334,7 +2365,107 @@ function DossierError({ result }: { result: IngestResult }) {
   );
 }
 
-function DossierHeader({ result }: { result: IngestResult }) {
+/**
+ * Phase 11 — re-runs the cross-document aggregator (`aggregateTypedMemoryToE2`)
+ * via /api/re-aggregate without re-extracting any PDFs. The per-PDF
+ * cache (lib/pdf-cache) makes this near-free for the per-document Haiku
+ * step; the only real cost is the matter-level Sonnet aggregator (~30s).
+ *
+ * Mirrors the Phase-9 "Re-run review" button pattern (DeterministicGatesPanel)
+ * but at the aggregation layer. Replaces caseFacts + aggregate_audit on
+ * success; leaves draft/review untouched (the attorney can re-run review
+ * separately from the review pane).
+ */
+function ReAggregateButton({
+  matterRoot,
+  onResultUpdate,
+}: {
+  matterRoot: string;
+  onResultUpdate: (updater: (r: IngestResult) => IngestResult) => void;
+}) {
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onClick = async () => {
+    setRunning(true);
+    setError(null);
+    try {
+      const res = await fetch('/api/re-aggregate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matter_root: matterRoot }),
+      });
+      const data = (await res.json()) as {
+        result?: IngestResult;
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok || !data.result) {
+        setError(data.message ?? data.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      const next = data.result;
+      // Failure shape — surface the error and bail without touching state.
+      if ('error' in next && next.error) {
+        setError(`${next.error.code}: ${next.error.message}`);
+        return;
+      }
+      onResultUpdate((r) => {
+        if ('error' in r && r.error) return r;
+        // Replace the matter-level facts + deterministic gate rows from
+        // the fresh aggregate; preserve draft / review / e2_subtype so
+        // the attorney's downstream work survives.
+        return {
+          ...r,
+          caseFacts: next.caseFacts ?? r.caseFacts,
+          aggregate_audit: next.aggregate_audit ?? r.aggregate_audit,
+          source_pdfs: next.source_pdfs ?? r.source_pdfs,
+          pageCount: next.pageCount ?? r.pageCount,
+          detection_confidence:
+            next.detection_confidence ?? r.detection_confidence,
+          detection_reasoning:
+            next.detection_reasoning ?? r.detection_reasoning,
+        };
+      });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={running}
+        title="Re-run the matter-level aggregator against the cached per-PDF extracts. No PDFs are re-parsed; the cover letter and review are untouched."
+        className={
+          'smcp text-meta px-3 py-1 border border-rule-strong bg-paper hover:bg-stone-50 disabled:opacity-50 disabled:cursor-wait ' +
+          (running ? 'animate-pulse' : '')
+        }
+      >
+        {running ? 'Re-aggregating…' : 'Re-aggregate'}
+      </button>
+      {error && (
+        <span className="font-mono text-meta text-ink" role="alert">
+          {error}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function DossierHeader({
+  result,
+  matterRoot,
+  onResultUpdate,
+}: {
+  result: IngestResult;
+  matterRoot?: string | null;
+  onResultUpdate?: (updater: (r: IngestResult) => IngestResult) => void;
+}) {
   const caseType = result.caseFacts?.case_type;
   const conf = result.detection_confidence;
   const assessment = result.review?.overall_assessment;
@@ -2357,6 +2488,14 @@ function DossierHeader({ result }: { result: IngestResult }) {
             <span className="text-rule-strong">·</span>
             <span className="tabular-nums">conf {conf.toFixed(2)}</span>
           </>
+        )}
+        {matterRoot && onResultUpdate && (
+          <span className="ml-auto">
+            <ReAggregateButton
+              matterRoot={matterRoot}
+              onResultUpdate={onResultUpdate}
+            />
+          </span>
         )}
       </div>
 
