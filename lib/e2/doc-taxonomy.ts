@@ -710,9 +710,32 @@ const FINANCIAL: DocType[] = [
     definition: 'Monthly personal bank account statement.',
     identifying_signals: {
       // ASCII-folded forms catch French "Relevé Bancaire" via the fold()
-      // step in classify-fallback.ts (NFD strip).
-      filename_regex: [/bank.*statement|hesap.*ekstre|kontoauszug|releve.*bancaire|releve.*compte/i],
-      keyword_phrases: ['Statement Period', 'Beginning Balance', 'Ending Balance'],
+      // step in classify-fallback.ts (NFD strip). Bank brand names cover
+      // the ubiquitous US clients whose attorneys export statements with
+      // filenames like "BofA_2025-03.pdf" or "Chase_eStmt.pdf" that
+      // carry no "bank" or "statement" token.
+      filename_regex: [
+        /bank.*statement|hesap.*ekstre|kontoauszug|releve.*bancaire|releve.*compte/i,
+        // Letter-only boundaries so "BofA_2025-03.pdf" hits despite the
+        // underscore — `\b` would treat _ as a word char and fail.
+        /(?<![a-z])(estatement|estmt|stmt|account.*statement|checking|savings)(?![a-z])/i,
+        /(?<![a-z])(bofa|chase|citibank|citi|wells.*fargo|capital.*one|jpmorgan|usaa|truist|pnc|us\s*bank)(?![a-z])/i,
+      ],
+      keyword_phrases: [
+        'Statement Period',
+        'Beginning Balance',
+        'Ending Balance',
+        'Account Number',
+        'Available Balance',
+        'Bank of America',
+        'JPMorgan Chase',
+        'Chase',
+        'Citibank',
+        'Wells Fargo',
+        'Capital One',
+        'Account Statement',
+        'Account Activity',
+      ],
     },
     foreign_language_equivalents: {
       tr: { native_name: 'Hesap Ekstresi' },
@@ -731,8 +754,21 @@ const FINANCIAL: DocType[] = [
     category: 'bank_statement',
     definition: 'Monthly business bank account statement for the U.S. enterprise.',
     identifying_signals: {
-      filename_regex: [/business.*bank|business.*statement/i],
-      keyword_phrases: ['Business Checking', 'Business Account', 'EIN'],
+      // Same brand-name pattern as the personal statement, but with the
+      // entity / business-checking signals layered on top so a brand-only
+      // filename ("Chase_03_2025.pdf") still classifies generically as
+      // bank_statement and the aggregator can decide personal vs business
+      // via the account name on the page.
+      filename_regex: [
+        /business.*bank|business.*statement|business.*checking/i,
+        /(?<![a-z])(bofa|chase|citibank|citi|wells.*fargo|capital.*one|jpmorgan|usaa|truist|pnc|us\s*bank)(?![a-z]).*business/i,
+      ],
+      keyword_phrases: [
+        'Business Checking',
+        'Business Account',
+        'EIN',
+        'Business Savings',
+      ],
     },
     fills_proof_slots: ['E3.operating_evidence', 'E2.SOF.us_deployment'],
     extractor_skill: 'financial-statement',
@@ -1158,8 +1194,18 @@ const CONTRACTS_AND_INVOICES: DocType[] = [
     category: 'invoice_or_receipt',
     definition: 'Invoice from a vendor — typically paired with a paid_invoice or wire to prove operations.',
     identifying_signals: {
-      filename_regex: [/invoice|fatura/i],
-      keyword_phrases: ['Invoice', 'Bill To', 'Total Due'],
+      filename_regex: [/invoice|fatura|inv[-_]?\d|bill[-_]\d/i],
+      keyword_phrases: [
+        'Invoice',
+        'Bill To',
+        'Total Due',
+        'Subtotal',
+        'Amount Due',
+        'Invoice Number',
+        'Invoice Date',
+        'Due Date',
+        'Tax Total',
+      ],
     },
     foreign_language_equivalents: { tr: { native_name: 'Fatura' } },
     fills_proof_slots: ['E3.operating_evidence'],
@@ -1174,8 +1220,18 @@ const CONTRACTS_AND_INVOICES: DocType[] = [
     category: 'invoice_or_receipt',
     definition: 'Invoice marked paid — evidence funds were spent (at risk).',
     identifying_signals: {
-      filename_regex: [/paid|receipt|odendi|facture|recu|recibo|rechnung/i],
-      keyword_phrases: ['Paid', 'Payment Received', 'Receipt', 'Facture', 'Reçu', 'Rechnung'],
+      filename_regex: [/paid|receipt|odendi|facture|recu|recibo|rechnung|makbuz/i],
+      keyword_phrases: [
+        'Paid',
+        'Payment Received',
+        'Receipt',
+        'Paid in Full',
+        'Amount Paid',
+        'Payment Confirmation',
+        'Facture',
+        'Reçu',
+        'Rechnung',
+      ],
     },
     fills_proof_slots: ['E2.investment_amount_proof', 'E2.at_risk_evidence', 'E2.in_process_walsh_pollard'],
     extractor_skill: 'bank-receipt',

@@ -67,6 +67,49 @@ describe('Tier-0 — accent fold over filenames', () => {
   });
 });
 
+describe('Tier-0 — US bank brand + invoice patterns', () => {
+  it('matches BofA-only filename as bank_statement_personal', () => {
+    const r = classifyFilename('BofA_2025-03.pdf');
+    expect(r.candidates[0]?.doc_type_id).toBe('bank_statement_personal');
+  });
+
+  it('matches Chase-only filename as bank_statement_personal', () => {
+    const r = classifyFilename('Chase_03_2025.pdf');
+    expect(r.candidates[0]?.doc_type_id).toBe('bank_statement_personal');
+  });
+
+  it('matches eStmt filename pattern', () => {
+    const r = classifyFilename('eStmt_2025_April.pdf');
+    expect(r.candidates[0]?.doc_type_id).toBe('bank_statement_personal');
+  });
+
+  it('matches "Wells Fargo Business" as some bank_statement variant', () => {
+    // Personal vs business is a content-driven distinction; for filename-
+    // only Tier-0 either fine id is acceptable as long as the coarse
+    // bucket is bank_statement.
+    const r = classifyFilename('Wells Fargo Business 03 2025.pdf');
+    expect(r.candidates[0]?.doc_type_id).toMatch(/^bank_statement_/);
+    expect(coarseFromFineDocTypeId(r.candidates[0]?.doc_type_id ?? null)).toBe(
+      'bank_statement',
+    );
+  });
+
+  it('matches "INV-12345.pdf" as vendor_invoice', () => {
+    const r = classifyFilename('INV-12345.pdf');
+    expect(r.candidates[0]?.doc_type_id).toBe('vendor_invoice');
+  });
+
+  it('matches "Receipt March.pdf" as paid_invoice', () => {
+    const r = classifyFilename('Receipt March.pdf');
+    expect(r.candidates[0]?.doc_type_id).toBe('paid_invoice');
+  });
+
+  it('matches "Makbuz" (Turkish receipt) as paid_invoice', () => {
+    const r = classifyFilename('Makbuz 2025-03.pdf');
+    expect(r.candidates[0]?.doc_type_id).toBe('paid_invoice');
+  });
+});
+
 describe('coarseFromFineDocTypeId', () => {
   it('maps foreign-language hits to coarse buckets', () => {
     expect(coarseFromFineDocTypeId('diploma')).toBe('credential');
