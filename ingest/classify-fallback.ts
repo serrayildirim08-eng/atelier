@@ -43,16 +43,31 @@ interface MatchTrace {
   hits: string[];
 }
 
+/**
+ * Strip Unicode diacritics so accented filenames/text match plain-ASCII
+ * regexes (`/diplom/i` matches "Diplôme", `/identite/i` matches
+ * "Identité"). Matters for French / German / Turkish evidence — the
+ * existing taxonomy regexes are mostly ASCII-fold, and without this we
+ * miss every accented variant.
+ */
+function fold(s: string): string {
+  return s
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase();
+}
+
 function scoreOne(filename: string, firstPageText: string, formFieldNames: string[], dt: DocType): MatchTrace {
   const hits: string[] = [];
   let score = 0;
 
-  const lowerFilename = filename.toLowerCase();
-  const lowerText = firstPageText.toLowerCase();
+  const foldedFilename = fold(filename);
+  const foldedText = fold(firstPageText);
 
-  // Filename regex
+  // Filename regex — tested against accent-folded form so accented
+  // filenames hit the same patterns as their ASCII equivalents.
   for (const re of dt.identifying_signals.filename_regex ?? []) {
-    if (re.test(lowerFilename)) {
+    if (re.test(foldedFilename)) {
       score += FILENAME_HIT;
       hits.push(`filename ~ ${re.source}`);
       break; // count filename signal once
@@ -61,15 +76,15 @@ function scoreOne(filename: string, firstPageText: string, formFieldNames: strin
 
   // First-page header regex
   for (const re of dt.identifying_signals.header_regex ?? []) {
-    if (re.test(firstPageText)) {
+    if (re.test(firstPageText) || re.test(foldedText)) {
       score += HEADER_HIT;
       hits.push(`header ~ ${re.source}`);
     }
   }
 
-  // Keyword phrases
+  // Keyword phrases (folded substring match)
   for (const phrase of dt.identifying_signals.keyword_phrases ?? []) {
-    if (lowerText.includes(phrase.toLowerCase())) {
+    if (foldedText.includes(fold(phrase))) {
       score += KEYWORD_HIT;
       hits.push(`keyword "${phrase}"`);
     }

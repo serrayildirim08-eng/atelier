@@ -664,6 +664,33 @@ export async function classifyAndExtractOnePdf(
   const hash = pdfContentHash(input.buffer);
   const cached = input.forcedDocType ? null : readPdfCache(hash);
   if (cached) {
+    // Lazy re-classify shim: entries that landed on doc_type='other'
+    // before the Tier-0 image/scan classifier shipped — and any future
+    // cache pollution from regex gaps — get re-tested through Tier-0
+    // when read from cache. Filename signal is the only thing we need;
+    // the rich extractors don't re-run (their cached output stays put).
+    // The cache itself is NOT updated, so any future regex tweak gets
+    // a clean re-evaluation on the next read. Cheap (regex-only).
+    if (cached.facts?.doc_type === 'other') {
+      const lazyT0 = classifyByTier0({
+        filename: input.filename,
+        first_page_text: '',
+      });
+      const lazyCoarse = coarseFromFineDocTypeId(
+        lazyT0.candidates[0]?.doc_type_id ?? null,
+      );
+      if (lazyCoarse && lazyCoarse !== 'other' && cached.facts) {
+        const patchedFacts = {
+          ...cached.facts,
+          doc_type: lazyCoarse,
+        } as unknown as PerPdfFacts;
+        return {
+          filename: input.filename,
+          ...cached,
+          facts: patchedFacts,
+        };
+      }
+    }
     return { filename: input.filename, ...cached };
   }
 

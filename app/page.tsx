@@ -3719,15 +3719,18 @@ function isMissingValue(v: unknown): boolean {
   return false;
 }
 
+// Paths whose null values are not actionable "missing" data. conflict_register
+// fact_*_doc / fact_*_page are optional citation anchors: deterministic-gate
+// conflicts span documents (no single page) and single-document gates only
+// populate one side. Surfacing them as missing turns the panel into noise.
+const OPTIONAL_NULL_PATH = /^conflict_register\[\d+\]\.fact_[ab]_(page|doc)$/;
+
 function collectMissingPaths(node: unknown, prefix: string, out: string[]): void {
   if (node === null || node === undefined) return;
   if (typeof node !== 'object') return;
   if (isFieldWrapper(node)) {
-    // confidence === 1 with a null value is the deterministic-gate convention
-    // for "intentionally not applicable" (cross-document conflicts that don't
-    // anchor to a single page). Don't surface those as missing.
-    const intentionallyNull = node.value === null && node.confidence === 1;
-    if (!intentionallyNull && isMissingValue(node.value)) out.push(prefix || '(root)');
+    if (OPTIONAL_NULL_PATH.test(prefix)) return;
+    if (isMissingValue(node.value)) out.push(prefix || '(root)');
     return;
   }
   if (Array.isArray(node)) {
@@ -7681,10 +7684,8 @@ function MatterDocumentsSection({
     }
   }
 
-  return (
-    <section>
-      {needsReview.length > 0 && (
-        <div className="mb-7 border-2 border-ink paper-recess">
+  const needsReviewBlock = needsReview.length > 0 ? (
+        <div className="mt-7 border-2 border-ink paper-recess">
           <div className="px-5 py-3 border-b-2 border-ink flex items-baseline justify-between">
             <div className="flex items-baseline gap-3">
               <span className="font-display text-title text-ink">needs review</span>
@@ -7788,7 +7789,10 @@ function MatterDocumentsSection({
             })}
           </ul>
         </div>
-      )}
+      ) : null;
+
+  return (
+    <section>
       <SectionTitle marker="·" label="documents · click to preview" />
       <div className="space-y-5">
         {buckets.map(([docType, entries]) => {
@@ -7921,6 +7925,7 @@ function MatterDocumentsSection({
           );
         })}
       </div>
+      {needsReviewBlock}
     </section>
   );
 }

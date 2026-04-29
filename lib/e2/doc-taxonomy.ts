@@ -168,7 +168,10 @@ const IDENTITY: DocType[] = [
     category: 'identity',
     definition: 'Visa-compliant 2x2 inch photograph (51x51mm), white background, taken within 6 months.',
     identifying_signals: {
-      filename_regex: [/photo|fotoğraf|foto/i, /2x2|passport.*photo/i],
+      // Word-boundaries on `photo` so "Photoshop", "photography",
+      // "screenshot" etc. don't false-match. The 2x2 / passport-photo
+      // patterns stay loose because they're already specific.
+      filename_regex: [/\b(photo|fotograf|foto)\b/i, /2x2|passport.*photo/i],
       structural_hints: ['square aspect ratio', 'white/off-white background'],
     },
     fills_proof_slots: ['APP.photographs'],
@@ -706,7 +709,9 @@ const FINANCIAL: DocType[] = [
     category: 'bank_statement',
     definition: 'Monthly personal bank account statement.',
     identifying_signals: {
-      filename_regex: [/bank.*statement|hesap.*ekstre|kontoauszug/i],
+      // ASCII-folded forms catch French "Relevé Bancaire" via the fold()
+      // step in classify-fallback.ts (NFD strip).
+      filename_regex: [/bank.*statement|hesap.*ekstre|kontoauszug|releve.*bancaire|releve.*compte/i],
       keyword_phrases: ['Statement Period', 'Beginning Balance', 'Ending Balance'],
     },
     foreign_language_equivalents: {
@@ -966,8 +971,8 @@ const REAL_ESTATE: DocType[] = [
     category: 'real_estate',
     definition: 'Lease of commercial premises for the U.S. enterprise.',
     identifying_signals: {
-      filename_regex: [/commercial.*lease|lease.*agreement|kira.*sözleşme/i],
-      keyword_phrases: ['Commercial Lease', 'Landlord', 'Tenant', 'Premises'],
+      filename_regex: [/commercial.*lease|lease.*agreement|kira.*sozlesme|bail.*commercial|contrat.*bail/i],
+      keyword_phrases: ['Commercial Lease', 'Landlord', 'Tenant', 'Premises', 'Bail Commercial'],
     },
     fills_proof_slots: ['E2.at_risk_evidence', 'E2.in_process_walsh_pollard', 'E3.business_premises'],
     extractor_skill: 'contract',
@@ -981,8 +986,8 @@ const REAL_ESTATE: DocType[] = [
     category: 'real_estate',
     definition: 'Residential lease — supports AMIGOS Act domicile and dependent housing facts.',
     identifying_signals: {
-      filename_regex: [/residential.*lease|apartment.*lease|kira.*konut/i],
-      keyword_phrases: ['Residential Lease', 'Tenant', 'Premises'],
+      filename_regex: [/residential.*lease|apartment.*lease|kira.*konut|bail.*habitation|bail.*location|mietvertrag/i],
+      keyword_phrases: ['Residential Lease', 'Tenant', 'Premises', 'Mietvertrag'],
     },
     fills_proof_slots: ['E1.cbi_amigos_domicile'],
     extractor_skill: 'contract',
@@ -1169,8 +1174,8 @@ const CONTRACTS_AND_INVOICES: DocType[] = [
     category: 'invoice_or_receipt',
     definition: 'Invoice marked paid — evidence funds were spent (at risk).',
     identifying_signals: {
-      filename_regex: [/paid|receipt|ödendi/i],
-      keyword_phrases: ['Paid', 'Payment Received', 'Receipt'],
+      filename_regex: [/paid|receipt|odendi|facture|recu|recibo|rechnung/i],
+      keyword_phrases: ['Paid', 'Payment Received', 'Receipt', 'Facture', 'Reçu', 'Rechnung'],
     },
     fills_proof_slots: ['E2.investment_amount_proof', 'E2.at_risk_evidence', 'E2.in_process_walsh_pollard'],
     extractor_skill: 'bank-receipt',
@@ -1581,8 +1586,8 @@ const PAYROLL_EMPLOYMENT: DocType[] = [
     category: 'employment_evidence',
     definition: 'Salary payslip from treaty country — supports salary-origin SOF.',
     identifying_signals: {
-      filename_regex: [/payslip|maaş.*bordro|gehaltsabrechnung/i],
-      keyword_phrases: ['Maaş Bordrosu', 'Net Salary', 'Gross Salary'],
+      filename_regex: [/payslip|maas.*bordro|gehaltsabrechnung|bulletin.*paie|fiche.*paie|nomina/i],
+      keyword_phrases: ['Maaş Bordrosu', 'Net Salary', 'Gross Salary', 'Bulletin de Paie', 'Fiche de Paie'],
     },
     foreign_language_equivalents: { tr: { native_name: 'Maaş Bordrosu' } },
     fills_proof_slots: ['E2.SOF.origin_evidence'],
