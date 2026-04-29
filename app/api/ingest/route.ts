@@ -1,7 +1,4 @@
 import { ingestPdf, type IngestResult } from '@/ingest';
-import { draftCoverLetter } from '@/draft';
-import { runFullReview } from '@/reason';
-import { postDraft } from '@/lib/verify';
 
 export const runtime = 'nodejs';
 export const maxDuration = 300;
@@ -59,46 +56,9 @@ export async function POST(request: Request): Promise<Response> {
         };
       }
 
-      if ('error' in result) {
-        return result;
-      }
-
-      let letter: string;
-      try {
-        const drafted = await draftCoverLetter(result.caseFacts);
-        letter = drafted.letter;
-        result = { ...result, draft: letter };
-      } catch (e: unknown) {
-        return {
-          ...result,
-          draftError: {
-            code: 'draft_failed',
-            message: e instanceof Error ? e.message : String(e),
-          },
-        };
-      }
-
-      // Verify Phase B (deterministic — no I/O): citation allowlist + lint.
-      // Gives the reviewer pass concrete spans to fix instead of re-deriving.
-      const verifyReport = postDraft(letter, result.caseFacts.case_type);
-      result = { ...result, verify_report: verifyReport };
-
-      try {
-        const reviewed = await runFullReview(result.caseFacts, letter, verifyReport);
-        return {
-          ...result,
-          review: reviewed.llm.report,
-          deterministic_gates: reviewed.deterministic,
-        };
-      } catch (e: unknown) {
-        return {
-          ...result,
-          reviewError: {
-            code: 'review_failed',
-            message: e instanceof Error ? e.message : String(e),
-          },
-        };
-      }
+      // Drafting + review no longer auto-fire on ingest. The user
+      // triggers each artifact explicitly from the matter dashboard.
+      return result;
     }),
   );
 

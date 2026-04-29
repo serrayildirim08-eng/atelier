@@ -17,8 +17,6 @@ import {
 } from '@/ingest/extractors/subtype-detect';
 import type { E2CaseSubtype } from '@/ingest/extractors/subtype-detect.schema';
 import { extractPdfText } from '@/ingest/pdf';
-import { draftCoverLetterStream } from '@/draft';
-import { runFullReview } from '@/reason';
 import { getMatterOverride } from '@/lib/matter-overrides';
 
 export const runtime = 'nodejs';
@@ -410,80 +408,9 @@ export async function POST(request: Request): Promise<Response> {
         return;
       }
 
-      // Emit a `result_partial` here so the UI can close the loading
-      // overlay and let the user start reviewing facts/exhibits/audit
-      // while the (slow) drafter + reviewer keep running. The final
-      // `result` event below will then arrive with draft + review
-      // merged in.
-      send(controller, { type: 'result_partial', result, matter_override: matterOverride ?? null });
-
-      // Phase 3 — draft (Sonnet)
-      send(controller, {
-        type: 'progress',
-        stage: 'drafting',
-        label: 'Drafting cover letter from unified facts',
-        total: pdfPaths.length,
-      });
-
-      // Streaming drafter: text deltas flow to the UI as they're written
-      // (~30 s wall-clock for a 16K-token letter; first paragraph in 3-5 s).
-      // We still assemble the full letter server-side from the final-event
-      // payload so the downstream reviewer + the closing `result` event
-      // get the same authoritative text the deltas built up.
-      try {
-        let draft = '';
-        for await (const event of draftCoverLetterStream(result.caseFacts)) {
-          if (event.type === 'text_delta') {
-            draft += event.delta;
-            send(controller, { type: 'draft_delta', delta: event.delta });
-          } else {
-            draft = event.letter;
-          }
-        }
-        result = { ...result, draft };
-        send(controller, { type: 'draft_done' });
-      } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : String(e);
-        result = {
-          ...result,
-          draftError: { code: 'draft_failed', message },
-        };
-        send(controller, { type: 'draft_error', message });
-      }
-
-      // Phase 4 — review (Sonnet)
-      if ('draft' in result && result.draft) {
-        send(controller, {
-          type: 'progress',
-          stage: 'reviewing',
-          label: 'Praying to immigration gods · auditing draft against the unified facts',
-          total: pdfPaths.length,
-        });
-
-        const reviewHeartbeat = startHeartbeat(
-          'reviewing',
-          'Praying to immigration gods · auditing draft against the unified facts',
-        );
-        try {
-          const reviewed = await runFullReview(result.caseFacts, result.draft);
-          result = {
-            ...result,
-            review: reviewed.llm.report,
-            deterministic_gates: reviewed.deterministic,
-          };
-        } catch (e: unknown) {
-          result = {
-            ...result,
-            reviewError: {
-              code: 'review_failed',
-              message: e instanceof Error ? e.message : String(e),
-            },
-          };
-        } finally {
-          clearInterval(reviewHeartbeat);
-        }
-      }
-
+      // Drafting and review no longer auto-fire on ingest — the user
+      // triggers each artifact explicitly via the matter dashboard's
+      // Generate buttons after they've classified enough of the corpus.
       send(controller, { type: 'result', result, matter_override: matterOverride ?? null });
       send(controller, { type: 'done', total: pdfPaths.length });
       controller.close();

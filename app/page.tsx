@@ -404,6 +404,11 @@ export default function Page() {
   // currently-selected matter. Without this, rename / re-aggregate would
   // silently no-op after a full refresh until the folder is re-picked.
   const [matterRoots, setMatterRoots] = useState<Record<string, string>>({});
+  // Per-matter typedMemory snapshot. Persisted so the Exhibits / Audit /
+  // Memory panes re-populate on reload without forcing a re-ingest. Large
+  // (rich extraction objects) — if localStorage rejects a write we fall
+  // back to in-memory only and the user gets a re-fetch on click.
+  const [matterMemories, setMatterMemories] = useState<Record<string, TypedMemory>>({});
   const [matterOverlayOpen, setMatterOverlayOpen] = useState(false);
   // PDF detail modal state — when set, opens the PdfDetailModal showing
   // preview + structured rich extraction + audit findings for that PDF.
@@ -488,57 +493,62 @@ export default function Page() {
   // returns only caseFacts + audit; the Dossier merge keeps draft/review).
   const runReaggregate = useCallback(async () => {
     if (!matterRoot) return;
-    const res = await fetch('/api/re-aggregate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ matter_root: matterRoot }),
-    });
-    const data = (await res.json()) as {
-      result?: IngestResult;
-      per_pdf?: PerPdfMemoryEntry[];
-      matter_override?: typeof matterOverride;
-      error?: string;
-      message?: string;
-    };
-    if (!res.ok || !data.result) {
-      throw new Error(data.message ?? data.error ?? `HTTP ${res.status}`);
-    }
-    const next = data.result;
-    if ('error' in next && next.error) {
-      throw new Error(`${next.error.code}: ${next.error.message}`);
-    }
-    // Replace matter-level facts + audit; preserve draft/review/e2_subtype.
-    setResults((prev) =>
-      prev.map((r) => {
-        if (r.filename !== next.filename) return r;
-        if ('error' in r && r.error) return r;
-        return {
-          ...r,
-          caseFacts: next.caseFacts ?? r.caseFacts,
-          aggregate_audit: next.aggregate_audit ?? r.aggregate_audit,
-          source_pdfs: next.source_pdfs ?? r.source_pdfs,
-          pageCount: next.pageCount ?? r.pageCount,
-          detection_confidence: next.detection_confidence ?? r.detection_confidence,
-          detection_reasoning: next.detection_reasoning ?? r.detection_reasoning,
-        };
-      }),
-    );
-    // Rebuild typedMemory from the per-PDF payload — necessary so doc_type
-    // overrides and re-grouping reflect immediately in the Exhibits / Memory
-    // panes without a fresh ingest.
-    if (Array.isArray(data.per_pdf)) {
-      const fresh: TypedMemory = {};
-      for (const entry of data.per_pdf) {
-        const bucket: DocType = entry.doc_type ?? 'other';
-        const list = fresh[bucket] ?? [];
-        list.push(entry);
-        fresh[bucket] = list;
+    setReloadingDocs(true);
+    setReloadingDocsLabel('Re-aggregating from cache…');
+    try {
+      const res = await fetch('/api/re-aggregate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matter_root: matterRoot }),
+      });
+      const data = (await res.json()) as {
+        result?: IngestResult;
+        per_pdf?: PerPdfMemoryEntry[];
+        matter_override?: typeof matterOverride;
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok || !data.result) {
+        throw new Error(data.message ?? data.error ?? `HTTP ${res.status}`);
       }
-      setTypedMemory(fresh);
-      if (data.matter_override) hydrateEntryLabelsFromOverride(data.matter_override, fresh);
-    }
-    if (data.matter_override !== undefined) {
-      setMatterOverride(data.matter_override ?? null);
+      const next = data.result;
+      if ('error' in next && next.error) {
+        throw new Error(`${next.error.code}: ${next.error.message}`);
+      }
+      // Replace matter-level facts + audit; preserve draft/review/e2_subtype.
+      setResults((prev) =>
+        prev.map((r) => {
+          if (r.filename !== next.filename) return r;
+          if ('error' in r && r.error) return r;
+          return {
+            ...r,
+            caseFacts: next.caseFacts ?? r.caseFacts,
+            aggregate_audit: next.aggregate_audit ?? r.aggregate_audit,
+            source_pdfs: next.source_pdfs ?? r.source_pdfs,
+            pageCount: next.pageCount ?? r.pageCount,
+            detection_confidence: next.detection_confidence ?? r.detection_confidence,
+            detection_reasoning: next.detection_reasoning ?? r.detection_reasoning,
+          };
+        }),
+      );
+      if (Array.isArray(data.per_pdf)) {
+        const fresh: TypedMemory = {};
+        for (const entry of data.per_pdf) {
+          const bucket: DocType = entry.doc_type ?? 'other';
+          const list = fresh[bucket] ?? [];
+          list.push(entry);
+          fresh[bucket] = list;
+        }
+        setTypedMemory(fresh);
+        setMatterMemories((mp) => ({ ...mp, [next.filename]: fresh }));
+        if (data.matter_override) hydrateEntryLabelsFromOverride(data.matter_override, fresh);
+      }
+      if (data.matter_override !== undefined) {
+        setMatterOverride(data.matter_override ?? null);
+      }
+    } finally {
+      setReloadingDocs(false);
+      setReloadingDocsLabel(null);
     }
   }, [matterRoot, hydrateEntryLabelsFromOverride]);
 
@@ -641,6 +651,18 @@ export default function Page() {
     } catch {
       /* ignore — corrupt storage just means roots are not restored */
     }
+    try {
+      const rawMem = localStorage.getItem('akalan:matter-memories:v1');
+      if (rawMem) {
+        const parsed = JSON.parse(rawMem) as Record<string, TypedMemory>;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          // eslint-disable-next-line react-hooks/set-state-in-effect
+          setMatterMemories(parsed);
+        }
+      }
+    } catch {
+      /* ignore — corrupt storage just means memories are not restored */
+    }
   }, []);
 
   // Persist matter-root map whenever it changes.
@@ -656,18 +678,223 @@ export default function Page() {
     }
   }, [matterRoots]);
 
-  // Whenever the selected matter changes, rehydrate matterRoot from the
-  // persisted map. Lets rename / re-aggregate keep working after a full
-  // page reload (where transient matterRoot state is lost).
+  // Persist matter-memories map. Heavy on disk; quota errors are swallowed.
+  useEffect(() => {
+    try {
+      if (Object.keys(matterMemories).length === 0) {
+        localStorage.removeItem('akalan:matter-memories:v1');
+      } else {
+        localStorage.setItem(
+          'akalan:matter-memories:v1',
+          JSON.stringify(matterMemories),
+        );
+      }
+    } catch {
+      /* QuotaExceededError or similar — silently degrade to session-only */
+    }
+  }, [matterMemories]);
+
+  // Track which matter we've already auto-loaded this session, so a
+  // matter-select effect doesn't trigger /api/re-aggregate every time the
+  // user toggles tabs. Reset on cancel / clear so a fresh load can run.
+  const autoLoadedRef = useRef<Set<string>>(new Set());
+  // Surface re-aggregate in-flight to the UI so MemoryPane can render a
+  // visible loading state (banner + skeleton rows) while cached documents
+  // stream back. Otherwise users stare at the empty/idle Exhibits panel
+  // for ~30s of Sonnet aggregation with no signal that anything is
+  // happening.
+  const [reloadingDocs, setReloadingDocs] = useState(false);
+  const [reloadingDocsLabel, setReloadingDocsLabel] = useState<string | null>(null);
+
+  // Whenever the selected matter changes, rehydrate matterRoot + the
+  // persisted typedMemory snapshot. Lets rename / re-aggregate / Exhibits
+  // pane work after a full reload, with the matter overrides re-fetched
+  // from the server in the same effect.
   useEffect(() => {
     const selectedFilename = results[selectedIdx]?.filename;
     if (!selectedFilename) return;
-    const persisted = matterRoots[selectedFilename];
-    if (persisted && persisted !== matterRoot) {
+    const persistedRoot = matterRoots[selectedFilename];
+    if (persistedRoot && persistedRoot !== matterRoot) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setMatterRoot(persisted);
+      setMatterRoot(persistedRoot);
     }
-  }, [selectedIdx, results, matterRoots, matterRoot]);
+    const persistedMem = matterMemories[selectedFilename];
+    if (persistedMem) {
+      const hasAny = Object.values(persistedMem).some(
+        (l) => Array.isArray(l) && l.length > 0,
+      );
+      const currentEmpty = Object.values(typedMemory).every(
+        (l) => !Array.isArray(l) || l.length === 0,
+      );
+      if (hasAny && currentEmpty) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setTypedMemory(persistedMem);
+      }
+    }
+    // Refresh persisted overrides for this matter so the rename + override
+    // badges show without forcing a re-ingest.
+    if (persistedRoot) {
+      void fetch(
+        `/api/matter-overrides?matter_root=${encodeURIComponent(persistedRoot)}`,
+      )
+        .then((r) => r.json())
+        .then((data: { matter_override?: typeof matterOverride }) => {
+          setMatterOverride(data.matter_override ?? null);
+          if (data.matter_override) {
+            hydrateEntryLabelsFromOverride(
+              data.matter_override,
+              persistedMem ?? typedMemory,
+            );
+          }
+        })
+        .catch(() => {
+          /* network glitch — overrides will refresh on next interaction */
+        });
+    }
+    // We intentionally exclude typedMemory + matterOverride from deps to
+    // avoid an infinite restore loop; this effect should only fire when
+    // the user changes selection or the persisted maps update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIdx, results, matterRoots, matterMemories]);
+
+  // Auto re-aggregate on matter select when the typedMemory snapshot is
+  // empty and we know where the folder lives. Cheap (cache-hit per file +
+  // one Sonnet call) and runs once per session per matter so flipping
+  // tabs doesn't replay it.
+  useEffect(() => {
+    const sel = results[selectedIdx]?.filename;
+    if (!sel) return;
+    const root = matterRoots[sel];
+    if (!root) return;
+    if (autoLoadedRef.current.has(sel)) return;
+    const persisted = matterMemories[sel];
+    const hasMem =
+      persisted &&
+      Object.values(persisted).some((l) => Array.isArray(l) && l.length > 0);
+    if (hasMem) return;
+    autoLoadedRef.current.add(sel);
+    setReloadingDocs(true);
+    setReloadingDocsLabel('Reading cached extracts and re-grouping documents…');
+    void (async () => {
+      try {
+        const res = await fetch('/api/re-aggregate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ matter_root: root }),
+        });
+        const data = (await res.json()) as {
+          result?: IngestResult;
+          per_pdf?: PerPdfMemoryEntry[];
+          matter_override?: typeof matterOverride;
+        };
+        if (!res.ok || !data.result) return;
+        const next = data.result;
+        if ('error' in next && next.error) return;
+        setResults((prev) =>
+          prev.map((r) =>
+            r.filename === next.filename
+              ? {
+                  ...r,
+                  caseFacts: next.caseFacts ?? r.caseFacts,
+                  aggregate_audit: next.aggregate_audit ?? r.aggregate_audit,
+                  source_pdfs: next.source_pdfs ?? r.source_pdfs,
+                  pageCount: next.pageCount ?? r.pageCount,
+                }
+              : r,
+          ),
+        );
+        if (Array.isArray(data.per_pdf)) {
+          const fresh: TypedMemory = {};
+          for (const entry of data.per_pdf) {
+            const bucket: DocType = entry.doc_type ?? 'other';
+            const list = fresh[bucket] ?? [];
+            list.push(entry);
+            fresh[bucket] = list;
+          }
+          setTypedMemory(fresh);
+          setMatterMemories((mp) => ({ ...mp, [next.filename]: fresh }));
+          if (data.matter_override)
+            hydrateEntryLabelsFromOverride(data.matter_override, fresh);
+        }
+        if (data.matter_override !== undefined) {
+          setMatterOverride(data.matter_override ?? null);
+        }
+      } catch (e: unknown) {
+        console.warn(
+          '[auto-reload] re-aggregate failed:',
+          e instanceof Error ? e.message : String(e),
+        );
+      } finally {
+        setReloadingDocs(false);
+        setReloadingDocsLabel(null);
+      }
+    })();
+  }, [selectedIdx, results, matterRoots, matterMemories, hydrateEntryLabelsFromOverride]);
+
+  // Periodic background re-scan of the currently-selected matter folder.
+  // Picks up new documents the attorney drops into the folder without a
+  // manual click. Only runs while the window is focused and the page is
+  // visible, so the app idle in the background doesn't burn Sonnet
+  // tokens. Default cadence: every 10 minutes; tune via env if needed.
+  useEffect(() => {
+    if (!matterRoot) return;
+    let cancelled = false;
+    const PERIOD_MS = 10 * 60 * 1000;
+    const tick = async () => {
+      if (cancelled) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
+      try {
+        const res = await fetch('/api/re-aggregate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ matter_root: matterRoot }),
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          result?: IngestResult;
+          per_pdf?: PerPdfMemoryEntry[];
+          matter_override?: typeof matterOverride;
+        };
+        if (cancelled) return;
+        const next = data.result;
+        if (!next || ('error' in next && next.error)) return;
+        setResults((prev) =>
+          prev.map((r) =>
+            r.filename === next.filename
+              ? {
+                  ...r,
+                  caseFacts: next.caseFacts ?? r.caseFacts,
+                  aggregate_audit: next.aggregate_audit ?? r.aggregate_audit,
+                  source_pdfs: next.source_pdfs ?? r.source_pdfs,
+                  pageCount: next.pageCount ?? r.pageCount,
+                }
+              : r,
+          ),
+        );
+        if (Array.isArray(data.per_pdf)) {
+          const fresh: TypedMemory = {};
+          for (const entry of data.per_pdf) {
+            const bucket: DocType = entry.doc_type ?? 'other';
+            const list = fresh[bucket] ?? [];
+            list.push(entry);
+            fresh[bucket] = list;
+          }
+          setTypedMemory(fresh);
+          setMatterMemories((mp) => ({ ...mp, [next.filename]: fresh }));
+        }
+        if (data.matter_override !== undefined) {
+          setMatterOverride(data.matter_override ?? null);
+        }
+      } catch {
+        /* network glitch — try again next tick */
+      }
+    };
+    const id = setInterval(tick, PERIOD_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [matterRoot]);
 
   useEffect(() => {
     try {
@@ -908,6 +1135,13 @@ export default function Page() {
                 return mem;
               });
             }
+            // Persist the typedMemory snapshot for this matter so reloads
+            // can re-populate the Exhibits / Memory panes without a fresh
+            // ingest.
+            setTypedMemory((mem) => {
+              setMatterMemories((mp) => ({ ...mp, [partial.filename]: mem }));
+              return mem;
+            });
             collected.push(partial);
             // Phase 11 — merge by matter basename so re-running the same
             // folder replaces the prior entry in-place instead of
@@ -938,6 +1172,10 @@ export default function Page() {
                 return mem;
               });
             }
+            setTypedMemory((mem) => {
+              setMatterMemories((mp) => ({ ...mp, [finalResult.filename]: mem }));
+              return mem;
+            });
             if (collected.length > 0) {
               collected[collected.length - 1] = finalResult;
             } else {
@@ -993,6 +1231,80 @@ export default function Page() {
     if (!picked) return;
     handleFolderPath(picked);
   }, [handleFolderPath]);
+
+  // Re-link the currently-selected matter to a folder on disk and reload
+  // typedMemory from the per-PDF cache via /api/re-aggregate. Used when a
+  // matter survived a reload via localStorage but its matter_root was not
+  // persisted (matters ingested before matterRoots persistence shipped).
+  // Skips the heavy classifier/drafter/reviewer pipeline; only the Sonnet
+  // aggregator runs.
+  const relinkAndReaggregate = useCallback(async () => {
+    if (!window.akalan?.pickFolder) return;
+    const picked = await window.akalan.pickFolder();
+    if (!picked) return;
+    const sel = results[selectedIdx]?.filename;
+    setMatterRoot(picked);
+    if (sel) {
+      setMatterRoots((prev) => ({ ...prev, [sel]: picked }));
+    }
+    setReloadingDocs(true);
+    setReloadingDocsLabel('Loading documents from cache…');
+    try {
+    // runReaggregate reads matterRoot via closure; setState is async, so
+    // call the API directly with the picked path here.
+    const res = await fetch('/api/re-aggregate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ matter_root: picked }),
+    });
+    const data = (await res.json()) as {
+      result?: IngestResult;
+      per_pdf?: PerPdfMemoryEntry[];
+      matter_override?: typeof matterOverride;
+      error?: string;
+      message?: string;
+    };
+    if (!res.ok || !data.result) {
+      throw new Error(data.message ?? data.error ?? `HTTP ${res.status}`);
+    }
+    const next = data.result;
+    if ('error' in next && next.error) {
+      throw new Error(`${next.error.code}: ${next.error.message}`);
+    }
+    setResults((prev) =>
+      prev.map((r) => {
+        if (r.filename !== next.filename) return r;
+        if ('error' in r && r.error) return r;
+        return {
+          ...r,
+          caseFacts: next.caseFacts ?? r.caseFacts,
+          aggregate_audit: next.aggregate_audit ?? r.aggregate_audit,
+          source_pdfs: next.source_pdfs ?? r.source_pdfs,
+          pageCount: next.pageCount ?? r.pageCount,
+        };
+      }),
+    );
+    if (Array.isArray(data.per_pdf)) {
+      const fresh: TypedMemory = {};
+      for (const entry of data.per_pdf) {
+        const bucket: DocType = entry.doc_type ?? 'other';
+        const list = fresh[bucket] ?? [];
+        list.push(entry);
+        fresh[bucket] = list;
+      }
+      setTypedMemory(fresh);
+      setMatterMemories((mp) => ({ ...mp, [next.filename]: fresh }));
+      if (data.matter_override)
+        hydrateEntryLabelsFromOverride(data.matter_override, fresh);
+    }
+    if (data.matter_override !== undefined) {
+      setMatterOverride(data.matter_override ?? null);
+    }
+    } finally {
+      setReloadingDocs(false);
+      setReloadingDocsLabel(null);
+    }
+  }, [results, selectedIdx, hydrateEntryLabelsFromOverride]);
 
   return (
     <div
@@ -1056,6 +1368,18 @@ export default function Page() {
             applyMatterOverridePatch({ matter_display_name: value })
           }
           onReaggregate={runReaggregate}
+          onRelink={relinkAndReaggregate}
+          selectedEntryKey={selectedEntryKey}
+          onSelectEntry={setSelectedEntryKey}
+          onSetLabel={(key, label) =>
+            setEntryLabels((prev) => ({ ...prev, [key]: label }))
+          }
+          documentOverrides={matterOverride?.documents ?? null}
+          onApplyDocOverride={async (filename, patch) =>
+            applyMatterOverridePatch({ document: { filename, ...patch } })
+          }
+          reloadingDocs={reloadingDocs}
+          reloadingDocsLabel={reloadingDocsLabel}
         />
         <Marginalia
           result={selected}
@@ -1118,6 +1442,7 @@ export default function Page() {
         <MatterOverlay
           matterName={
             matterOverride?.matter_display_name ??
+            deriveAutoMatterName(selected) ??
             selected?.filename ??
             matterRoot ??
             'Matter'
@@ -1354,8 +1679,11 @@ function BinderRow({
     >
       <button onClick={onSelect} className="w-full text-left px-3 py-2.5 pr-9">
         <div className="flex items-baseline justify-between gap-2 mb-0.5">
-          <div className="text-body leading-snug truncate">
-            {trimFilename(result.filename)}
+          <div
+            className="text-body leading-snug truncate"
+            title={result.filename}
+          >
+            {deriveAutoMatterName(result) ?? trimFilename(result.filename)}
           </div>
           {caseType && (
             <span className="font-mono text-meta text-graphite shrink-0">
@@ -1420,6 +1748,14 @@ function Dossier({
   matterDisplayName,
   onSetMatterDisplayName,
   onReaggregate,
+  onRelink,
+  selectedEntryKey,
+  onSelectEntry,
+  onSetLabel,
+  documentOverrides,
+  onApplyDocOverride,
+  reloadingDocs,
+  reloadingDocsLabel,
 }: {
   result: IngestResult | undefined;
   tab: DossierTab;
@@ -1437,6 +1773,19 @@ function Dossier({
   matterDisplayName?: string | null;
   onSetMatterDisplayName?: (value: string | null) => Promise<boolean> | boolean;
   onReaggregate?: () => Promise<void>;
+  onRelink?: () => Promise<void>;
+  selectedEntryKey?: string | null;
+  onSelectEntry?: (key: string | null) => void;
+  onSetLabel?: (key: string, label: string) => void;
+  documentOverrides?:
+    | Record<string, { display_name?: string | null; doc_type_override?: DocType | null }>
+    | null;
+  onApplyDocOverride?: (
+    filename: string,
+    patch: { display_name?: string | null; doc_type_override?: DocType | null },
+  ) => Promise<boolean>;
+  reloadingDocs?: boolean;
+  reloadingDocsLabel?: string | null;
 }) {
   const memoryHasEntries = Object.values(typedMemory).some(
     (list) => Array.isArray(list) && list.length > 0,
@@ -1490,6 +1839,15 @@ function Dossier({
             onOpenMatter={onOpenMatter}
             matterId={result.filename}
             caseFacts={result.caseFacts}
+            onReaggregate={onReaggregate}
+            onRelink={onRelink}
+            selectedEntryKey={selectedEntryKey}
+            onSelectEntry={onSelectEntry}
+            onSetLabel={onSetLabel}
+            documentOverrides={documentOverrides}
+            onApplyDocOverride={onApplyDocOverride}
+            reloadingDocs={reloadingDocs}
+            reloadingDocsLabel={reloadingDocsLabel}
           />
         )}
         {tab === 'draft' && (
@@ -1922,6 +2280,142 @@ const EXHIBIT_CATEGORIES: ExhibitCategorySpec[] = [
   },
 ];
 
+/**
+ * Time-based estimated progress — ticks from 0 to ~94% over an expected
+ * duration (default 35s, the rough Sonnet aggregator wall-clock for a
+ * mid-sized matter), then holds. The actual completion is driven by the
+ * caller's `running` toggle: when it flips false we let the consumer
+ * snap to 100 if desired.
+ */
+function useEstimatedProgress(running: boolean, expectedMs = 35_000): number {
+  const [pct, setPct] = useState(0);
+  const startedAtRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!running) {
+      setPct(0);
+      startedAtRef.current = null;
+      return;
+    }
+    startedAtRef.current = Date.now();
+    let raf = 0;
+    const tick = () => {
+      const t0 = startedAtRef.current ?? Date.now();
+      const elapsed = Date.now() - t0;
+      // Asymptotic curve: fast initial climb, slowing as we approach 94.
+      const ratio = Math.min(1, elapsed / expectedMs);
+      const eased = 1 - Math.pow(1 - ratio, 2.4);
+      setPct(Math.min(94, Math.round(eased * 94)));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [running, expectedMs]);
+  return pct;
+}
+
+/**
+ * Editorial loading state for the Exhibits pane: spinning conic-gradient
+ * ring (sage→sky→ochre), animated percentage, sweep bar, and skeleton
+ * rows staggered in so the user feels the cache being read.
+ */
+function DocumentsLoading({ label }: { label: string | null }) {
+  const pct = useEstimatedProgress(true);
+  const skeletons = [0, 1, 2, 3, 4, 5];
+  return (
+    <div className="px-9 py-10 fade-in">
+      <div className="border border-rule paper-recess p-7 mb-6">
+        <div className="flex items-center gap-5">
+          <div className="ring-spin shrink-0" aria-hidden />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-3">
+              <span className="font-display text-title text-ink tabular-nums pct-tick">
+                {pct}
+                <span className="text-graphite-soft">%</span>
+              </span>
+              <span className="smcp text-label text-graphite tracking-wider truncate">
+                {label ?? 'reading documents from cache'}
+              </span>
+            </div>
+            <div className="sweep-bar mt-3" />
+            <div className="mt-2 font-mono text-label text-graphite-soft">
+              cache hit · re-grouping by doc type · aggregating into case facts
+            </div>
+          </div>
+        </div>
+      </div>
+      <div className="space-y-3">
+        {skeletons.map((i) => (
+          <div
+            key={i}
+            className="border border-rule paper-recess px-5 py-3 fade-up"
+            style={{ animationDelay: `${i * 90}ms` }}
+          >
+            <div className="flex items-baseline gap-3">
+              <span className="font-mono text-label text-graphite-soft tabular-nums w-6">
+                0{i + 1}
+              </span>
+              <div className="flex-1">
+                <div
+                  className="h-3 bg-paper-2 mb-1.5 animate-pulse"
+                  style={{
+                    width: `${42 + ((i * 13) % 35)}%`,
+                    animationDelay: `${i * 120}ms`,
+                  }}
+                />
+                <div
+                  className="h-2 bg-paper-2/70 animate-pulse"
+                  style={{
+                    width: `${22 + ((i * 9) % 18)}%`,
+                    animationDelay: `${i * 150 + 60}ms`,
+                  }}
+                />
+              </div>
+              <span className="font-mono text-label text-graphite-soft animate-pulse">
+                · · ·
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Slim banner rendered above the documents list when a background
+ * re-aggregate is in flight but earlier results are already on screen
+ * (so we don't blow them away with a full skeleton state). Carries the
+ * spinning ring + ticking percentage + sweep bar in compact form.
+ */
+function ReloadingBanner({ label }: { label: string | null }) {
+  const pct = useEstimatedProgress(true);
+  return (
+    <div
+      className="border border-rule paper-recess fade-in"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="px-4 py-2.5 flex items-center gap-4">
+        <div
+          className="ring-spin shrink-0"
+          style={{ width: '1.4rem', height: '1.4rem' }}
+          aria-hidden
+        />
+        <span className="font-mono text-meta text-ink tabular-nums pct-tick">
+          {pct}%
+        </span>
+        <span className="smcp text-label text-graphite tracking-wide truncate">
+          {label ?? 'reading documents from cache'}
+        </span>
+        <span className="ml-auto font-mono text-label text-graphite-soft">
+          live
+        </span>
+      </div>
+      <div className="sweep-bar" />
+    </div>
+  );
+}
+
 function MemoryPane({
   typedMemory,
   matterRoot,
@@ -1929,6 +2423,15 @@ function MemoryPane({
   onOpenMatter,
   matterId,
   caseFacts,
+  onReaggregate,
+  onRelink,
+  selectedEntryKey,
+  onSelectEntry,
+  onSetLabel,
+  documentOverrides,
+  onApplyDocOverride,
+  reloadingDocs,
+  reloadingDocsLabel,
 }: {
   typedMemory: TypedMemory;
   matterRoot: string | null;
@@ -1938,7 +2441,36 @@ function MemoryPane({
   matterId?: string;
   /** Live caseFacts forwarded to the approval flow. */
   caseFacts?: unknown;
+  selectedEntryKey?: string | null;
+  onSelectEntry?: (key: string | null) => void;
+  onSetLabel?: (key: string, label: string) => void;
+  documentOverrides?:
+    | Record<string, { display_name?: string | null; doc_type_override?: DocType | null }>
+    | null;
+  onApplyDocOverride?: (
+    filename: string,
+    patch: { display_name?: string | null; doc_type_override?: DocType | null },
+  ) => Promise<boolean>;
+  /**
+   * Manually re-pull the per-PDF cache. Surfaced to the empty-state CTA
+   * when matterRoot is set but typedMemory is blank — typically after a
+   * page reload where the in-memory snapshot was lost.
+   */
+  onReaggregate?: () => Promise<void>;
+  /**
+   * Re-link the matter to a folder on disk (the user re-picks it) and
+   * re-aggregate from the per-PDF cache. Surfaced when matterRoot is
+   * unknown — i.e., the matter survived localStorage but its source folder
+   * was never persisted (pre-matterRoots-persistence ingest).
+   */
+  onRelink?: () => Promise<void>;
+  /** True while a re-aggregate is in flight; drives skeleton + banner UI. */
+  reloadingDocs?: boolean;
+  /** Optional human label shown in the loading banner. */
+  reloadingDocsLabel?: string | null;
 }) {
+  const [reloading, setReloading] = useState(false);
+  const [reloadError, setReloadError] = useState<string | null>(null);
   // Compute the per-category aggregated entries from the raw doc_type
   // buckets. Empty categories still render so the firm's taxonomy is
   // visible at a glance — the dossier *should* show "Business Plan: 0
@@ -1957,6 +2489,26 @@ function MemoryPane({
   const populated = categoryEntries.filter((c) => c.entries.length > 0);
   const totalEntries = populated.reduce((acc, c) => acc + c.entries.length, 0);
 
+  // Generation gate: Serra's rule is that no artifact may be drafted
+  // until the corpus is at least 80% classified (i.e., not sitting in
+  // the 'other' bucket and not stuck on an extraction error). A doc
+  // that the attorney has manually moved out of 'other' counts as
+  // classified, which is why we resolve the override before checking.
+  const GENERATE_GATE_PERCENT = 80;
+  let classifiedCount = 0;
+  for (const { entries } of categoryEntries) {
+    for (const { docType, entry } of entries) {
+      const ovr = documentOverrides?.[entry.filename] ?? null;
+      const effectiveType = ovr?.doc_type_override ?? docType;
+      if (!entry.error && effectiveType !== 'other') {
+        classifiedCount += 1;
+      }
+    }
+  }
+  const classifyPercent =
+    totalEntries > 0 ? Math.floor((classifiedCount / totalEntries) * 100) : 0;
+  const generateGateOpen = classifyPercent >= GENERATE_GATE_PERCENT;
+
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [openGenerator, setOpenGenerator] = useState<PreviewGenerator | null>(null);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
@@ -1968,24 +2520,74 @@ function MemoryPane({
   } | null>(null);
 
   if (totalEntries === 0) {
+    const canReload = !!matterRoot && !!onReaggregate;
+    const canRelink = !matterRoot && !!onRelink;
+    if (reloadingDocs) {
+      return <DocumentsLoading label={reloadingDocsLabel ?? null} />;
+    }
     return (
       <div className="px-9 py-16 grid place-items-center">
-        <div className="border border-rule bg-paper grid place-items-center py-16 px-8 text-center max-w-md">
-          <div className="grid gap-3">
-            <div className="sigil mx-auto" style={{ width: '2.4rem', height: '2.4rem', fontSize: '0.85rem' }}>
+        <div className="border border-rule bg-paper grid place-items-center py-12 px-8 text-center max-w-lg">
+          <div className="grid gap-4">
+            <div
+              className="sigil mx-auto"
+              style={{ width: '2.4rem', height: '2.4rem', fontSize: '0.85rem' }}
+            >
               —
             </div>
             <p className="text-body text-graphite leading-relaxed">
-              Exhibits are empty. PDFs will appear here as they are classified.
+              {canReload
+                ? 'Re-loading documents from cache…'
+                : canRelink
+                  ? 'This matter was ingested before folder paths were remembered. Pick the original folder once and Atelier will keep it linked from now on.'
+                  : 'Exhibits are empty. PDFs will appear here as they are classified.'}
             </p>
+            {canRelink && (
+              <div className="flex flex-col items-center gap-2">
+                <button
+                  type="button"
+                  disabled={reloading}
+                  onClick={async () => {
+                    setReloading(true);
+                    setReloadError(null);
+                    try {
+                      await onRelink!();
+                    } catch (e: unknown) {
+                      setReloadError(
+                        e instanceof Error ? e.message : String(e),
+                      );
+                    } finally {
+                      setReloading(false);
+                    }
+                  }}
+                  className="border border-ink bg-paper px-4 py-1.5 text-meta text-ink hover:bg-ink hover:text-paper disabled:opacity-50 disabled:cursor-wait smcp"
+                >
+                  {reloading ? 'Loading…' : 'Locate matter folder'}
+                </button>
+                {reloadError && (
+                  <span className="font-mono text-label text-ink" role="alert">
+                    {reloadError}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
     );
   }
 
+  // Doc-type bucket list (same shape MatterOverlay uses) so the Exhibits
+  // pane can host the Needs Review pile + per-doc inline preview +
+  // reclassify directly, without forcing the user into the full overlay.
+  const docTypeBuckets = (
+    Object.entries(typedMemory) as [DocType, PerPdfMemoryEntry[]][]
+  )
+    .filter(([, list]) => Array.isArray(list) && list.length > 0)
+    .sort((a, b) => b[1].length - a[1].length);
+
   return (
-    <div className="px-9 py-7 grid gap-5">
+    <div className="px-9 py-7 grid gap-7">
       <button
         onClick={onOpenMatter}
         className="w-full flex items-baseline justify-between border border-ink bg-paper px-5 py-3 hover:bg-ink hover:text-paper transition-colors group"
@@ -1998,6 +2600,21 @@ function MemoryPane({
         </span>
       </button>
 
+      {reloadingDocs && <ReloadingBanner label={reloadingDocsLabel ?? null} />}
+
+      {onSelectEntry && onSetLabel && (
+        <MatterDocumentsSection
+          buckets={docTypeBuckets}
+          matterRoot={matterRoot}
+          selectedEntryKey={selectedEntryKey ?? null}
+          onSelectEntry={onSelectEntry}
+          entryLabels={entryLabels}
+          onSetLabel={onSetLabel}
+          documentOverrides={documentOverrides ?? null}
+          onApplyDocOverride={onApplyDocOverride}
+        />
+      )}
+
       {categoryEntries.map(({ spec, entries }) => (
         <ExhibitCategoryCard
           key={spec.key}
@@ -2008,6 +2625,9 @@ function MemoryPane({
           entryLabels={entryLabels}
           onOpenMatter={onOpenMatter}
           onPickGenerator={(g) => setOpenGenerator(g)}
+          generateGateOpen={generateGateOpen}
+          classifyPercent={classifyPercent}
+          generateGateThreshold={GENERATE_GATE_PERCENT}
           onPickDocument={
             matterRoot
               ? (filename) => {
@@ -2186,6 +2806,9 @@ function ExhibitCategoryCard({
   entryLabels,
   onOpenMatter,
   onPickGenerator,
+  generateGateOpen,
+  classifyPercent,
+  generateGateThreshold,
   onPickDocument,
 }: {
   spec: ExhibitCategorySpec;
@@ -2195,6 +2818,9 @@ function ExhibitCategoryCard({
   entryLabels: Record<string, string>;
   onOpenMatter: () => void;
   onPickGenerator?: (g: PreviewGenerator) => void;
+  generateGateOpen: boolean;
+  classifyPercent: number;
+  generateGateThreshold: number;
   onPickDocument?: (filename: string) => void;
 }) {
   const empty = entries.length === 0;
@@ -2256,23 +2882,37 @@ function ExhibitCategoryCard({
           )}
 
           {spec.generators.length > 0 && (
-            <div className="border-t border-rule pt-4 flex flex-wrap gap-2">
-              {spec.generators.map((g) => (
-                <button
-                  key={g.generator}
-                  onClick={() => {
-                    if (onPickGenerator) {
-                      onPickGenerator(g.generator as PreviewGenerator);
-                    } else {
-                      onOpenMatter();
+            <div className="border-t border-rule pt-4 grid gap-2">
+              {!generateGateOpen && (
+                <p className="font-mono text-meta text-graphite-soft">
+                  classify ≥{generateGateThreshold}% of documents before
+                  generating · currently {classifyPercent}%
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2">
+                {spec.generators.map((g) => (
+                  <button
+                    key={g.generator}
+                    disabled={!generateGateOpen}
+                    onClick={() => {
+                      if (!generateGateOpen) return;
+                      if (onPickGenerator) {
+                        onPickGenerator(g.generator as PreviewGenerator);
+                      } else {
+                        onOpenMatter();
+                      }
+                    }}
+                    title={
+                      generateGateOpen
+                        ? 'Opens the preview → approve modal. NO output ships without attorney sign-off.'
+                        : `Locked until ${generateGateThreshold}% of documents are classified (currently ${classifyPercent}%).`
                     }
-                  }}
-                  title="Opens the preview → approve modal. NO output ships without attorney sign-off."
-                  className="text-meta smcp px-3 py-2 border border-ink hover:bg-ink hover:text-paper transition-colors"
-                >
-                  {g.label}
-                </button>
-              ))}
+                    className="text-meta smcp px-3 py-2 border border-ink hover:bg-ink hover:text-paper transition-colors disabled:opacity-40 disabled:hover:bg-paper disabled:hover:text-ink disabled:cursor-not-allowed"
+                  >
+                    {g.label}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -2728,8 +3368,14 @@ function DossierHeader({
   const conf = result.detection_confidence;
   const assessment = result.review?.overall_assessment;
   const clientName = guessClientName(result);
-  const effectiveMatterName = (matterDisplayName ?? '').trim() || result.filename;
-  const matterRenamed = !!matterDisplayName && matterDisplayName !== result.filename;
+  const autoDerivedName = deriveAutoMatterName(result);
+  // Matter title preference: manual override → auto-derived (investor ·
+  // company · E-2) → source-folder basename. Source folder is the last
+  // resort so dossiers never lead with `OneDrive_xyz` garbage.
+  const effectiveMatterName =
+    (matterDisplayName ?? '').trim() || autoDerivedName || result.filename;
+  const matterRenamed =
+    !!matterDisplayName && matterDisplayName !== effectiveMatterName;
 
   const [editingMatterName, setEditingMatterName] = useState(false);
   const [matterNameDraft, setMatterNameDraft] = useState('');
@@ -2935,8 +3581,78 @@ const SUBTYPE_CONF_COLOR: Record<string, string> = {
   LOW: '#B91C1C',
 };
 
+/**
+ * Compose the matter's auto-derived display name from extracted facts:
+ * "<investor> · <company> · <case type>". Falls back to whichever pieces
+ * are available; only returns null if no facts have landed yet.
+ *
+ * Used as the default matter title so the dossier never shows raw
+ * `OneDrive_xyz` source-folder garbage. The user can still override via
+ * the pen icon in the header (matter_display_name in the override store).
+ */
+function deriveAutoMatterName(r: IngestResult | undefined): string | null {
+  if (!r) return null;
+  const facts = r.caseFacts?.facts as Record<string, unknown> | undefined;
+  if (!facts) return null;
+
+  const readScalar = (v: unknown): string | null => {
+    if (isFieldLeaf(v) && typeof v.value === 'string') return v.value.trim() || null;
+    if (typeof v === 'string') return v.trim() || null;
+    return null;
+  };
+
+  let investor: string | null = null;
+  for (const k of ['petitioner_name', 'beneficiary_name', 'investor_name', 'name']) {
+    investor = readScalar(facts[k]);
+    if (investor) break;
+  }
+  if (!investor) {
+    for (const top of ['investor', 'petitioner', 'beneficiary', 'principal']) {
+      const obj = facts[top];
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+        const o = obj as Record<string, unknown>;
+        investor =
+          readScalar(o.full_name) ??
+          readScalar(o.name) ??
+          readScalar(o.full_name_ascii);
+        if (investor) break;
+      }
+    }
+  }
+
+  let company: string | null = null;
+  const ent = facts.enterprise as Record<string, unknown> | undefined;
+  if (ent && typeof ent === 'object') {
+    company =
+      readScalar(ent.legal_name) ??
+      readScalar(ent.dba) ??
+      readScalar(ent.name);
+  }
+  if (!company) {
+    company =
+      readScalar(facts.enterprise_name) ??
+      readScalar(facts.company_name) ??
+      null;
+  }
+
+  const caseTypeRaw = r.caseFacts?.case_type;
+  const caseTypeLabel = (() => {
+    if (!caseTypeRaw) return null;
+    if (caseTypeRaw === 'E2') return 'E-2';
+    if (caseTypeRaw === 'EB1A') return 'EB-1A';
+    if (caseTypeRaw === 'EB1B') return 'EB-1B';
+    if (caseTypeRaw === 'EB1C') return 'EB-1C';
+    return caseTypeRaw;
+  })();
+
+  const parts = [investor, company, caseTypeLabel].filter(
+    (p): p is string => !!p && p.length > 0,
+  );
+  if (parts.length === 0) return null;
+  return parts.join(' · ');
+}
+
 function guessClientName(r: IngestResult): string {
-  // Try common shapes; fall back to filename.
   const facts = r.caseFacts?.facts;
   if (facts) {
     const candidates = [
@@ -2952,13 +3668,16 @@ function guessClientName(r: IngestResult): string {
       if (isFieldLeaf(v) && typeof v.value === 'string') return v.value;
       if (typeof v === 'string') return v;
     }
-    // Try nested: petitioner.name
-    for (const top of ['petitioner', 'beneficiary', 'investor', 'employer']) {
+    // E-2 / EB-1 schemas put the human name under investor.full_name /
+    // beneficiary.full_name, not nested .name. Check both forms.
+    for (const top of ['investor', 'petitioner', 'beneficiary', 'principal', 'employer']) {
       const obj = facts[top];
       if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
-        const inner = (obj as Record<string, unknown>).name;
-        if (isFieldLeaf(inner) && typeof inner.value === 'string') return inner.value;
-        if (typeof inner === 'string') return inner;
+        const o = obj as Record<string, unknown>;
+        for (const inner of [o.full_name, o.name, o.full_name_ascii]) {
+          if (isFieldLeaf(inner) && typeof inner.value === 'string') return inner.value;
+          if (typeof inner === 'string') return inner;
+        }
       }
     }
   }
@@ -4755,20 +5474,7 @@ function FactLine({ field, compact }: { field: FieldProvenance; compact?: boolea
         )}
       </span>
       {field.source_page != null && (
-        <sup className="cite">
-          ¹ p.{field.source_page}
-          {field.confidence != null && (
-            <>
-              {' '}
-              · conf {field.confidence.toFixed(2)}
-            </>
-          )}
-        </sup>
-      )}
-      {field.source_quote && (
-        <span className="block w-full text-meta italic text-ink-2 mt-0.5 pl-3 border-l-2 border-paper-deep">
-          “{field.source_quote}”
-        </span>
+        <sup className="cite">¹ p.{field.source_page}</sup>
       )}
     </div>
   );
@@ -6705,6 +7411,89 @@ function DashboardRow({
 }
 
 /* ---------------------------------------------------------------------- */
+/* Inline doc-type quick picker — reclassify without expanding the row     */
+/* ---------------------------------------------------------------------- */
+
+function DocTypeQuickPicker({
+  filename,
+  currentType,
+  override,
+  onApplyDocOverride,
+  compact = true,
+}: {
+  filename: string;
+  currentType: DocType;
+  override: DocType | null;
+  onApplyDocOverride?: (
+    filename: string,
+    patch: { display_name?: string | null; doc_type_override?: DocType | null },
+  ) => Promise<boolean>;
+  compact?: boolean;
+}) {
+  const [saving, setSaving] = useState(false);
+  if (!onApplyDocOverride) return null;
+  const value = override ?? '';
+
+  const onChange = async (next: string) => {
+    setSaving(true);
+    try {
+      await onApplyDocOverride(filename, {
+        doc_type_override: next.length === 0 ? null : (next as DocType),
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <span
+      className="shrink-0 inline-flex items-center gap-1.5"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <select
+        value={value}
+        disabled={saving}
+        onChange={(e) => void onChange(e.target.value)}
+        title={
+          override
+            ? `Manually classified as ${override}; click Re-aggregate to apply.`
+            : 'Forward to another document type — re-aggregate to apply.'
+        }
+        className={
+          'font-mono text-ink bg-paper border border-rule hover:border-rule-strong focus:border-ink outline-none ' +
+          (compact ? 'text-label px-1.5 py-0.5' : 'text-meta px-2 py-1')
+        }
+      >
+        <option value="">forward to…</option>
+        <optgroup label={`current · ${currentType}`}>
+          {(Object.entries(DOC_TYPE_LABELS) as [DocType, string][])
+            .filter(([k]) => k === currentType)
+            .map(([k, lbl]) => (
+              <option key={k} value={k}>
+                {lbl} · {k}
+              </option>
+            ))}
+        </optgroup>
+        <optgroup label="reclassify as">
+          {(Object.entries(DOC_TYPE_LABELS) as [DocType, string][])
+            .filter(([k]) => k !== currentType)
+            .map(([k, lbl]) => (
+              <option key={k} value={k}>
+                {lbl} · {k}
+              </option>
+            ))}
+        </optgroup>
+      </select>
+      {saving && (
+        <span className="font-mono text-label text-graphite-soft animate-pulse">
+          ⤴
+        </span>
+      )}
+    </span>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
 /* Documents accordion — categories + per-doc inline expand                */
 /* ---------------------------------------------------------------------- */
 
@@ -6779,43 +7568,48 @@ function MatterDocumentsSection({
                 entryLabels[key] ?? persistedLabel ?? getSuggestedDocLabel(entry);
               return (
                 <li key={key} className="border-b border-rule last:border-b-0">
-                  <button
-                    onClick={() => onSelectEntry(expanded ? null : key)}
+                  <div
                     className={
-                      'w-full text-left flex items-baseline gap-3 px-5 py-2.5 transition-colors group ' +
+                      'flex items-baseline gap-3 px-5 py-2.5 transition-colors group ' +
                       (expanded ? 'bg-paper-2/40' : 'hover:bg-paper-2/30')
                     }
                   >
-                    <span
-                      className="font-mono text-label text-graphite-soft shrink-0"
-                      style={{
-                        display: 'inline-block',
-                        transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-                        transformOrigin: '50% 55%',
-                        width: '0.7rem',
-                      }}
+                    <button
+                      type="button"
+                      onClick={() => onSelectEntry(expanded ? null : key)}
+                      className="text-left flex-1 min-w-0 flex items-baseline gap-3"
                     >
-                      ▶
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div
-                        className={
-                          'font-display text-body truncate ' +
-                          (expanded
-                            ? 'text-ink'
-                            : 'text-ink-2 group-hover:text-ink')
-                        }
-                        title={label}
+                      <span
+                        className="font-mono text-label text-graphite-soft shrink-0"
+                        style={{
+                          display: 'inline-block',
+                          transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                          transformOrigin: '50% 55%',
+                          width: '0.7rem',
+                        }}
                       >
-                        {label}
+                        ▶
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div
+                          className={
+                            'font-display text-body truncate ' +
+                            (expanded
+                              ? 'text-ink'
+                              : 'text-ink-2 group-hover:text-ink')
+                          }
+                          title={label}
+                        >
+                          {label}
+                        </div>
+                        <div
+                          className="font-mono text-label text-graphite-soft truncate"
+                          title={entry.filename}
+                        >
+                          {basenameOf(entry.filename)}
+                        </div>
                       </div>
-                      <div
-                        className="font-mono text-label text-graphite-soft truncate"
-                        title={entry.filename}
-                      >
-                        {basenameOf(entry.filename)}
-                      </div>
-                    </div>
+                    </button>
                     {entry.error ? (
                       <span className="shrink-0 font-mono text-label text-ink border border-ink px-1.5 py-0.5 smcp">
                         error · {entry.error.code}
@@ -6825,7 +7619,15 @@ function MatterDocumentsSection({
                         unclassified
                       </span>
                     )}
-                  </button>
+                    <DocTypeQuickPicker
+                      filename={entry.filename}
+                      currentType={docType}
+                      override={
+                        documentOverrides?.[entry.filename]?.doc_type_override ?? null
+                      }
+                      onApplyDocOverride={onApplyDocOverride}
+                    />
+                  </div>
                   {expanded && (
                     <DocumentInlinePreview
                       entry={entry}
@@ -6895,43 +7697,48 @@ function MatterDocumentsSection({
                     const docTypeOverride = docOverride?.doc_type_override ?? null;
                     return (
                       <li key={key} className="border-b border-rule last:border-b-0">
-                        <button
-                          onClick={() => onSelectEntry(expanded ? null : key)}
+                        <div
                           className={
-                            'w-full text-left flex items-baseline gap-3 px-5 py-2.5 transition-colors group ' +
-                            (expanded
-                              ? 'bg-paper-2/40'
-                              : 'hover:bg-paper-2/30')
+                            'flex items-baseline gap-3 px-5 py-2.5 transition-colors group ' +
+                            (expanded ? 'bg-paper-2/40' : 'hover:bg-paper-2/30')
                           }
                         >
-                          <span
-                            className="font-mono text-label text-graphite-soft shrink-0"
-                            style={{
-                              display: 'inline-block',
-                              transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-                              transformOrigin: '50% 55%',
-                              width: '0.7rem',
-                            }}
+                          <button
+                            type="button"
+                            onClick={() => onSelectEntry(expanded ? null : key)}
+                            className="text-left flex-1 min-w-0 flex items-baseline gap-3"
                           >
-                            ▶
-                          </span>
-                          <div className="flex-1 min-w-0">
-                            <div
-                              className={
-                                'font-display text-body truncate ' +
-                                (expanded ? 'text-ink' : 'text-ink-2 group-hover:text-ink')
-                              }
-                              title={label}
+                            <span
+                              className="font-mono text-label text-graphite-soft shrink-0"
+                              style={{
+                                display: 'inline-block',
+                                transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                                transformOrigin: '50% 55%',
+                                width: '0.7rem',
+                              }}
                             >
-                              {label}
+                              ▶
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <div
+                                className={
+                                  'font-display text-body truncate ' +
+                                  (expanded
+                                    ? 'text-ink'
+                                    : 'text-ink-2 group-hover:text-ink')
+                                }
+                                title={label}
+                              >
+                                {label}
+                              </div>
+                              <div
+                                className="font-mono text-label text-graphite-soft truncate"
+                                title={e.filename}
+                              >
+                                {basenameOf(e.filename)}
+                              </div>
                             </div>
-                            <div
-                              className="font-mono text-label text-graphite-soft truncate"
-                              title={e.filename}
-                            >
-                              {basenameOf(e.filename)}
-                            </div>
-                          </div>
+                          </button>
                           {docTypeOverride && (
                             <span
                               className="shrink-0 font-mono text-label text-ink border border-ink px-1.5 py-0.5 smcp"
@@ -6945,7 +7752,13 @@ function MatterDocumentsSection({
                               error
                             </span>
                           )}
-                        </button>
+                          <DocTypeQuickPicker
+                            filename={e.filename}
+                            currentType={docType}
+                            override={docTypeOverride}
+                            onApplyDocOverride={onApplyDocOverride}
+                          />
+                        </div>
                         {expanded && (
                           <DocumentInlinePreview
                             entry={e}
