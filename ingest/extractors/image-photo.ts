@@ -94,10 +94,23 @@ Output: ONE JSON object matching the ImagePhotoFacts schema. No prose, no commen
 const MAX_VISION_PAGES = 4;
 const RENDER_SCALE = 2.0;
 
+export type RawImageMediaType = 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
+
 export interface ImagePhotoExtractInput {
   filename: string;
+  /**
+   * Either a PDF buffer (this extractor will render its pages to PNG via
+   * pdf-parse v2) OR a raw image buffer with `imageMediaType` set.
+   * Distinguished by the presence of `imageMediaType`.
+   */
   buffer: Buffer;
   pageCount: number;
+  /**
+   * Set when `buffer` is a raw image (JPEG/PNG/WEBP/GIF) rather than a
+   * PDF. Skips renderPdfPages and feeds the bytes directly to the vision
+   * model. Used by the JPEG/PNG ingest branch.
+   */
+  imageMediaType?: RawImageMediaType;
 }
 
 export interface ImagePhotoExtractResult {
@@ -110,44 +123,67 @@ export interface ImagePhotoExtractResult {
 export async function extractImagePhoto(
   input: ImagePhotoExtractInput,
 ): Promise<ImagePhotoExtractResult> {
-  let pages;
-  try {
-    pages = await renderPdfPages(input.buffer, {
-      scale: RENDER_SCALE,
-      maxPages: MAX_VISION_PAGES,
-    });
-  } catch (e: unknown) {
-    return {
-      filename: input.filename,
-      pageCount: input.pageCount,
-      error: {
-        code: 'render_failed',
-        message: e instanceof Error ? e.message : String(e),
+  let imageBlocks: {
+    type: 'image';
+    source: { type: 'base64'; media_type: RawImageMediaType; data: string };
+  }[];
+
+  if (input.imageMediaType) {
+    // Raw image input — skip PDF rendering, send the bytes directly.
+    imageBlocks = [
+      {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: input.imageMediaType,
+          data: input.buffer.toString('base64'),
+        },
       },
-    };
+    ];
+  } else {
+    let pages;
+    try {
+      pages = await renderPdfPages(input.buffer, {
+        scale: RENDER_SCALE,
+        maxPages: MAX_VISION_PAGES,
+      });
+    } catch (e: unknown) {
+      return {
+        filename: input.filename,
+        pageCount: input.pageCount,
+        error: {
+          code: 'render_failed',
+          message: e instanceof Error ? e.message : String(e),
+        },
+      };
+    }
+
+    if (pages.length === 0) {
+      return {
+        filename: input.filename,
+        pageCount: input.pageCount,
+        error: {
+          code: 'no_pages_rendered',
+          message: 'pdf-parse rendered zero pages from the buffer',
+        },
+      };
+    }
+
+    imageBlocks = pages.map((p) => ({
+      type: 'image' as const,
+      source: {
+        type: 'base64' as const,
+        media_type: 'image/png' as const,
+        data: p.base64,
+      },
+    }));
   }
 
-  if (pages.length === 0) {
-    return {
-      filename: input.filename,
-      pageCount: input.pageCount,
-      error: {
-        code: 'no_pages_rendered',
-        message: 'pdf-parse rendered zero pages from the buffer',
-      },
-    };
-  }
-
-  const imageBlocks = pages.map((p) => ({
-    type: 'image' as const,
-    source: {
-      type: 'base64' as const,
-      media_type: 'image/png' as const,
-      data: p.base64,
-    },
-  }));
-
-  const userInstruction = `## Filename\n${input.filename}\n\nThe ${pages.length} image${pages.length === 1 ? '' : 's'} above are the rendered pages of this PDF in order (image 1 = page 1). Classify into one image_subtype and extract the flat ImagePhotoFacts schema. Respond with ONLY a single JSON object. No prose, no markdown fences.`;
+  const imageCount = imageBlocks.length;
+  const sourceDescription = input.imageMediaType
+    ? `The image above is the raw ${input.imageMediaType} bytes of this file.`
+    : `The ${imageCount} image${imageCount === 1 ? '' : 's'} above are the rendered pages of this PDF in order (image 1 = page 1).`;
+  const userInstruction = `## Filename\n${input.filename}\n\n${sourceDescription} Classify into one image_subtype and extract the flat ImagePhotoFacts schema. Respond with ONLY a single JSON object. No prose, no markdown fences.`;
 
   let response;
   try {

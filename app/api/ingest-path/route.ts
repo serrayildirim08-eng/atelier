@@ -23,6 +23,8 @@ import { checkDraft } from '@/reason';
 export const runtime = 'nodejs';
 export const maxDuration = 3600;
 
+const INGESTABLE_EXTENSIONS = ['.pdf', '.docx', '.jpg', '.jpeg', '.png', '.webp', '.gif'];
+
 async function walkPdfs(root: string): Promise<string[]> {
   const out: string[] = [];
   async function recur(dir: string) {
@@ -32,8 +34,11 @@ async function walkPdfs(root: string): Promise<string[]> {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         await recur(full);
-      } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.pdf')) {
-        out.push(full);
+      } else if (entry.isFile()) {
+        const lower = entry.name.toLowerCase();
+        if (INGESTABLE_EXTENSIONS.some((ext) => lower.endsWith(ext))) {
+          out.push(full);
+        }
       }
     }
   }

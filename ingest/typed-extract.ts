@@ -18,6 +18,7 @@ import { logAnthropicUsage } from '@/lib/usage-log';
 import { pdfContentHash, readPdfCache, writePdfCache } from '@/lib/pdf-cache';
 import { sampleLongText } from '@/lib/token-count';
 import { extractPdfText } from './pdf';
+import { extractDocxText } from './docx';
 import { classifyByTier0 } from './classify-fallback';
 import {
   PerPdfFactsSchema,
@@ -606,16 +607,83 @@ export async function classifyAndExtractOnePdf(
     return { filename: input.filename, ...cached };
   }
 
+  // File-format dispatch. The ingest pipeline accepts:
+  //   - .pdf   → extractPdfText (existing path)
+  //   - .docx  → extractDocxText (mammoth raw-text → ExtractedPdf shape)
+  //   - .jpg/.jpeg/.png/.webp/.gif → no text path; route directly to
+  //     image-photo vision extraction with the raw bytes.
+  // Anything else is rejected at the route layer; we still defensively
+  // default to PDF here.
+  const lowerName = input.filename.toLowerCase();
+  const isDocx = lowerName.endsWith('.docx');
+  const imageMediaType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' | null =
+    lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')
+      ? 'image/jpeg'
+      : lowerName.endsWith('.png')
+        ? 'image/png'
+        : lowerName.endsWith('.webp')
+          ? 'image/webp'
+          : lowerName.endsWith('.gif')
+            ? 'image/gif'
+            : null;
+
+  // Raw image inputs skip text parsing entirely and go through the
+  // image-photo vision branch (parity with scanned PDFs). We still emit
+  // a thin doc_type='other' placeholder so the dashboard / downstream
+  // aggregator sees a normal PerPdfResult shape.
+  if (imageMediaType) {
+    let scanImagePhoto;
+    const scanImagePhotoResult = await extractImagePhoto({
+      filename: input.filename,
+      buffer: input.buffer,
+      pageCount: 1,
+      imageMediaType,
+    });
+    if (scanImagePhotoResult.facts) {
+      scanImagePhoto = scanImagePhotoResult.facts;
+    } else if (scanImagePhotoResult.error) {
+      console.warn(
+        `[image-photo-extract] ${input.filename}: ${scanImagePhotoResult.error.code} — ${scanImagePhotoResult.error.message}`,
+      );
+    }
+    const nullField = {
+      value: null,
+      source_page: null,
+      source_quote: null,
+      confidence: null,
+    };
+    const imageEntry: Omit<PerPdfResult, 'filename' | 'error'> = {
+      pageCount: 1,
+      facts: {
+        doc_type: 'other',
+        suggested_filename: nullField,
+        display_name: nullField,
+        one_line_summary: {
+          value: `Raw ${imageMediaType} image — image-photo classifier ran in lieu of text extraction.`,
+          source_page: null,
+          source_quote: null,
+          confidence: 0.4,
+        },
+        key_facts: [],
+      },
+      imagePhoto: scanImagePhoto,
+    };
+    writePdfCache(hash, imageEntry);
+    return { filename: input.filename, ...imageEntry };
+  }
+
   let parsed;
   const tParse0 = TIMING_ENABLED ? Date.now() : 0;
   try {
-    parsed = await extractPdfText(input.buffer);
+    parsed = isDocx
+      ? await extractDocxText(input.buffer)
+      : await extractPdfText(input.buffer);
   } catch (e: unknown) {
     return {
       filename: input.filename,
       pageCount: 0,
       error: {
-        code: 'pdf_parse_failed',
+        code: isDocx ? 'docx_parse_failed' : 'pdf_parse_failed',
         message: e instanceof Error ? e.message : String(e),
       },
     };

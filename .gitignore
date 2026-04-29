@@ -57,6 +57,10 @@ db/filename-aliases.json
 db/previews/
 db/audit/
 
+# doctrine RAG snapshot (built locally from manuals/ + ~/akalan-context/
+# via `npm run rag:build`). Re-buildable; not version-controlled.
+db/rag-index.json
+
 # claude code session state — ignore everything in .claude/ except shared, checked-in tooling
 .claude/*
 !.claude/skills

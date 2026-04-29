@@ -172,6 +172,15 @@ Cross-document gates (in addition to the per-element rules above):
 - Manual MANUAL-SUBTYPE-4 §3.8.5 (Real-estate buyer-mismatch gate). When the typed memory contains a real-estate purchase whose buyer_legal_name does NOT match the Petitioner enterprise.legal_name, severity 4 conflict_register entry with conflict_type='real_estate_buyer_mismatch'. Reasoning: a deed in the Beneficiary's personal name (or a sister entity) breaks the at-risk-of-the-enterprise narrative — the property is not owned by the Petitioner. The infrastructure runs this gate deterministically using a normalized legal-name comparison; logging here is preferred so the narrative reflects it.
 - Manual MANUAL-SUBTYPE-4 (Incentive recipient-mismatch gate). When the typed memory contains an incentive document whose recipient_legal_name does NOT match the Petitioner enterprise.legal_name, severity 3 conflict_register entry with conflict_type='incentive_recipient_mismatch'. Reasoning: an incentive awarded to a parent / sister entity / the Beneficiary individually cannot be cited as Petitioner enterprise capacity. The infrastructure runs this gate deterministically.
 
+DETERMINISTIC PRE-COMPUTE BLOCKS (read these BEFORE the typed memory; they exist precisely because cross-section reasoning has been unreliable):
+
+- **INVESTOR ↔ OWNER BINDING** block. The infrastructure has already name-matched the investor (passport / I-129 beneficiary) against every member/shareholder row in every formation document. Read its **Verdict** line:
+  - \`match_found\` → populate ownership_chain entries from the listed matches (one per row), inherit source_page/source_quote from the formation document, and reference the investor's role explicitly in elements_evidence.develop_and_direct_basis. Do NOT re-derive this match from raw JSON; the deterministic block is the source of truth for who owns what.
+  - \`no_match\` → log a severity 4 conflict_register entry with conflict_type='investor_not_listed_as_owner', fact_a_doc set to the formation document filename(s), and DO NOT silently fabricate ownership_chain entries to paper over the gap. The principal applicant must be visible in the chain (8 CFR §214.2(e)(15) / 9 FAM 402.9-4(B)).
+  - \`no_formation_doc\` / \`no_investor_name\` / \`no_member_list_subtype\` → leave ownership_chain=[] and log severity 3-4 conflict per the verdict's stated requirement.
+
+- **SOURCE-OF-FUNDS CHAIN HINTS** block. The infrastructure has assembled candidate chains anchored on every wire confirmation, identifying upstream origin (title deed, multi-installment receipts), sending account (single-event receipts whose from_name matches the investor), the wire spine, and deployment (when receiver name-matches the enterprise). Use these chains to populate \`source_of_funds\` — one chain entry per spine wire. The 5-field SourceOfFundsChainSchema (origin_category, origin_amount_usd, origin_evidence, final_destination, notes) cannot represent the full multi-hop trace; compress the intermediate steps into \`notes\` with file references like "Property sale (tapu.pdf) → multi-installment receipts (receipts.pdf) → international wire with FX (wire.pdf) → Petitioner US account". For every chain whose issues block reports ⚠ markers, also log a severity 3 conflict_register entry with conflict_type='sof_chain_incomplete' (origin/sending unbound) or conflict_type='sof_chain_unbound' (sender ≠ investor or receiver ≠ enterprise), fact_a_doc set to the spine wire's filename. Verdict \`no_chain_evidence\` → leave source_of_funds=[] AND log severity 5 'no_sof_evidence'. Verdict \`receipts_only_no_wire\` → populate source_of_funds with partial origin entries and log severity 4 'sof_chain_incomplete'.
+
 Provenance carry-over:
 - Every leaf field in the output schema carries source_page, source_quote, confidence.
 - Inherit source_page and source_quote from the per-PDF entry that supplied the value, with the filename PREFIXED into source_quote like "[passport.pdf p.2] John Doe, born 1985-03-10".
@@ -948,6 +957,379 @@ function findEnterpriseName(memory: TypedMemory): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Deterministic INVESTOR ↔ OWNER binding pre-compute. Walks every
+ * corporate-formation rich extraction in the typed memory, fuzzy-matches
+ * the listed members/shareholders against the investor's name (passport
+ * → I-129 fallback), and emits a markdown block consumed by the
+ * aggregator system prompt.
+ *
+ * Why deterministic: the LLM aggregator gets the formation JSON and the
+ * passport JSON in separate sections of the prompt and historically
+ * fails to bridge "Salih Kaçar listed as 100% member of LLC X" ↔
+ * "Salih Kaçar is the principal applicant on the passport" — the binding
+ * step is exactly the kind of cross-section reasoning that benefits from
+ * a pre-computed hint table the model can read off of.
+ */
+export function buildInvestorOwnerBindingBlock(memory: TypedMemory): string {
+  const investorName = findInvestorName(memory);
+
+  type MemberRow = {
+    filename: string;
+    entity: string | null;
+    memberName: string;
+    ownershipPercent: number | null;
+    role: string | null;
+    listSource: 'current' | 'prior' | 'new';
+    matchesInvestor: boolean;
+  };
+  const allMembers: MemberRow[] = [];
+  let formationDocCount = 0;
+
+  for (const entry of iterMemoryEntries(memory)) {
+    const cf = entry.corporateFormation;
+    if (!cf) continue;
+    formationDocCount++;
+    const entity = cf.entity_legal_name?.value ?? null;
+    const sub = cf.formation_doc_subtype;
+
+    if (sub === 'articles_of_organization' || sub === 'articles_of_incorporation') {
+      for (const m of cf.members_or_shareholders) {
+        const name = m.name?.value;
+        if (!name) continue;
+        allMembers.push({
+          filename: entry.filename,
+          entity,
+          memberName: name,
+          ownershipPercent: m.ownership_percent?.value ?? null,
+          role: m.role?.value ?? null,
+          listSource: 'current',
+          matchesInvestor: investorName ? nameMatches(name, investorName) : false,
+        });
+      }
+    } else if (sub === 'operating_agreement_amendment') {
+      for (const m of cf.prior_member_list) {
+        const name = m.name?.value;
+        if (!name) continue;
+        allMembers.push({
+          filename: entry.filename,
+          entity,
+          memberName: name,
+          ownershipPercent: m.ownership_percent?.value ?? null,
+          role: null,
+          listSource: 'prior',
+          matchesInvestor: investorName ? nameMatches(name, investorName) : false,
+        });
+      }
+      for (const m of cf.new_member_list) {
+        const name = m.name?.value;
+        if (!name) continue;
+        allMembers.push({
+          filename: entry.filename,
+          entity,
+          memberName: name,
+          ownershipPercent: m.ownership_percent?.value ?? null,
+          role: null,
+          listSource: 'new',
+          matchesInvestor: investorName ? nameMatches(name, investorName) : false,
+        });
+      }
+    }
+  }
+
+  if (formationDocCount === 0) {
+    return (
+      `## INVESTOR ↔ OWNER BINDING (deterministic pre-compute)\n\n` +
+      `**Verdict:** \`no_formation_doc\` — no corporate-formation document was ingested for this matter; ownership chain cannot be deterministically bound.`
+    );
+  }
+
+  if (!investorName) {
+    return (
+      `## INVESTOR ↔ OWNER BINDING (deterministic pre-compute)\n\n` +
+      `**Verdict:** \`no_investor_name\` — no passport / I-129 beneficiary name in the typed memory to match against ${formationDocCount} formation document${formationDocCount === 1 ? '' : 's'}. Populate investor.full_name first; ownership_chain binding is downstream of that.`
+    );
+  }
+
+  if (allMembers.length === 0) {
+    return (
+      `## INVESTOR ↔ OWNER BINDING (deterministic pre-compute)\n\n` +
+      `Investor name: **${investorName}**\nFormation documents: **${formationDocCount}** (none of a subtype that lists members/shareholders — e.g., EIN letter or good-standing certificate only).\n\n` +
+      `**Verdict:** \`no_member_list_subtype\` — formation documents present but none are articles_of_organization / articles_of_incorporation / operating_agreement_amendment. Request articles or operating agreement to bind ownership.`
+    );
+  }
+
+  const matches = allMembers.filter((m) => m.matchesInvestor);
+
+  const tableHeader =
+    '| filename | entity | member_name | ownership % | role | list | matches investor? |\n' +
+    '| --- | --- | --- | --- | --- | --- | --- |';
+  const rows = allMembers
+    .map(
+      (m) =>
+        `| ${m.filename} | ${m.entity ?? '—'} | ${m.memberName} | ${m.ownershipPercent != null ? `${m.ownershipPercent.toFixed(2)}%` : '—'} | ${m.role ?? '—'} | ${m.listSource} | ${m.matchesInvestor ? '✓ MATCH' : '—'} |`,
+    )
+    .join('\n');
+
+  let verdictLine: string;
+  if (matches.length === 0) {
+    verdictLine =
+      `**Verdict:** \`no_match\` — investor "${investorName}" was NOT name-matched against any listed member/shareholder in the ${formationDocCount} formation document${formationDocCount === 1 ? '' : 's'} above. ` +
+      `Per 8 CFR §214.2(e)(15) and 9 FAM 402.9-4(B), the principal applicant must appear in the ownership chain. ` +
+      `Log a severity 4 conflict_register entry with conflict_type='investor_not_listed_as_owner' citing the formation document filename(s) as fact_a_doc.`;
+  } else {
+    const matchSummary = matches
+      .map((m) => {
+        const pctStr = m.ownershipPercent != null ? `${m.ownershipPercent.toFixed(2)}%` : 'unspecified %';
+        const entityStr = m.entity ?? 'unknown entity';
+        return `- "${m.memberName}" → ${entityStr} (${pctStr}, ${m.listSource} list, ${m.filename})`;
+      })
+      .join('\n');
+    verdictLine =
+      `**Verdict:** \`match_found\` — investor "${investorName}" IS listed as a member/shareholder. Bind these into ownership_chain entries (one per match) and reference the role explicitly in elements_evidence.develop_and_direct_basis.\n\n${matchSummary}`;
+  }
+
+  return (
+    `## INVESTOR ↔ OWNER BINDING (deterministic pre-compute)\n\n` +
+    `Investor name (passport / I-129): **${investorName}**\n` +
+    `Formation documents in memory: **${formationDocCount}**\n\n` +
+    `${tableHeader}\n${rows}\n\n${verdictLine}`
+  );
+}
+
+/**
+ * Deterministic SOURCE-OF-FUNDS chain hints pre-compute. Anchors on every
+ * wire-confirmation in the typed memory and walks outward to identify the
+ * candidate origin (real-property sale, investor's bank account) and
+ * deployment (US business bank account) for each chain. Emits a markdown
+ * block consumed by the aggregator system prompt.
+ *
+ * Why deterministic: SourceOfFundsChainSchema is a flat 5-field shape
+ * (origin_category, origin_amount_usd, origin_evidence, final_destination,
+ * notes) with no slot for intermediate steps. Without this pre-compute the
+ * aggregator must reconstruct the chain from raw JSON in three different
+ * sections (BANK RECEIPTS, WIRE CONFIRMATIONS, GOVERNMENT DOCUMENTS) and
+ * compress the steps into prose `notes` — the multi-hop reasoning is
+ * exactly where chains have been silently dropped.
+ */
+export function buildSofChainHintsBlock(memory: TypedMemory): string {
+  const investorName = findInvestorName(memory);
+  const enterpriseName = findEnterpriseName(memory);
+
+  const wireEntries: { filename: string; pageCount: number; wireConfirmation: WireConfirmationFacts }[] = [];
+  const bankReceiptEntries: { filename: string; pageCount: number; bankReceipt: BankReceiptFacts }[] = [];
+  const titleDeedEntries: { filename: string; subtype: string }[] = [];
+
+  for (const entry of iterMemoryEntries(memory)) {
+    if (entry.wireConfirmation) {
+      wireEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        wireConfirmation: entry.wireConfirmation,
+      });
+    }
+    if (entry.bankReceipt) {
+      bankReceiptEntries.push({
+        filename: entry.filename,
+        pageCount: entry.pageCount,
+        bankReceipt: entry.bankReceipt,
+      });
+    }
+    if (entry.governmentDoc?.government_doc_subtype === 'title_deed') {
+      titleDeedEntries.push({
+        filename: entry.filename,
+        subtype: entry.governmentDoc.government_doc_subtype,
+      });
+    }
+  }
+
+  const headerStats =
+    `Investor: **${investorName ?? '(unknown)'}** · Enterprise: **${enterpriseName ?? '(unknown)'}**\n` +
+    `Wires found: **${wireEntries.length}** · Bank receipts: **${bankReceiptEntries.length}** · Title deeds: **${titleDeedEntries.length}**`;
+
+  if (wireEntries.length === 0 && bankReceiptEntries.length === 0) {
+    return (
+      `## SOURCE-OF-FUNDS CHAIN HINTS (deterministic pre-compute)\n\n${headerStats}\n\n` +
+      `**Verdict:** \`no_chain_evidence\` — no wire confirmations or bank receipts in the typed memory. ` +
+      `Per 9 FAM 402.9-6(D)(2) and Manual §5, the SOF chain MUST be documented; if no terminal-deployment evidence is present, log a severity 5 conflict_register entry with conflict_type='no_sof_evidence' and leave source_of_funds=[].`
+    );
+  }
+
+  type ChainStep = {
+    role: 'origin' | 'sending_account' | 'wire' | 'deployment';
+    filename: string;
+    summary: string;
+  };
+  type Chain = {
+    spineFilename: string;
+    spineLabel: string;
+    senderName: string | null;
+    receiverName: string | null;
+    amount: number | null;
+    currency: string | null;
+    steps: ChainStep[];
+    issues: string[];
+    investorBound: boolean;
+    enterpriseBound: boolean;
+  };
+
+  const chains: Chain[] = [];
+  for (const w of wireEntries) {
+    const wc = w.wireConfirmation;
+    let senderName: string | null = null;
+    let receiverName: string | null = null;
+    let amount: number | null = null;
+    let currency: string | null = null;
+    let fxLeg: string | null = null;
+    const valueDate = wc.value_date?.value ?? null;
+
+    if (wc.wire_subtype === 'international_wire_with_fx') {
+      senderName = wc.sender.holder_name?.value ?? null;
+      receiverName = wc.receiver.holder_name?.value ?? null;
+      amount = wc.target_amount?.value ?? null;
+      currency = wc.target_currency?.value ?? null;
+      const sa = wc.source_amount?.value ?? null;
+      const sc = wc.source_currency?.value ?? null;
+      const ta = wc.target_amount?.value ?? null;
+      const tc = wc.target_currency?.value ?? null;
+      const fx = wc.exchange_rate?.value ?? null;
+      fxLeg = `${sa ?? '?'} ${sc ?? '?'} → ${ta ?? '?'} ${tc ?? '?'} @ ${fx ?? '?'}`;
+    } else if (wc.wire_subtype === 'usd_only_wire') {
+      senderName = wc.sender.holder_name?.value ?? null;
+      receiverName = wc.receiver.holder_name?.value ?? null;
+      amount = wc.amount?.value ?? null;
+      currency = wc.currency?.value ?? null;
+    } else if (wc.wire_subtype === 'corporate_funding') {
+      senderName = wc.parent_entity.holder_name?.value ?? null;
+      receiverName = wc.subsidiary_entity.holder_name?.value ?? null;
+      amount = wc.amount?.value ?? null;
+      currency = wc.currency?.value ?? null;
+    }
+
+    const investorBound = investorName ? nameMatches(senderName, investorName) : false;
+    const enterpriseBound = enterpriseName ? nameMatches(receiverName, enterpriseName) : false;
+
+    const steps: ChainStep[] = [];
+
+    // Origin candidates: title deed + multi-installment property-sale receipts
+    for (const td of titleDeedEntries) {
+      steps.push({
+        role: 'origin',
+        filename: td.filename,
+        summary: `Asset evidenced by title deed (government_doc_subtype='${td.subtype}') — likely sale-of-property origin.`,
+      });
+    }
+    for (const br of bankReceiptEntries) {
+      const r = br.bankReceipt;
+      if (r.receipt_subtype === 'multi_installment') {
+        const counterparty = r.consistent_counterparty_name?.value ?? null;
+        const proceedsKind = r.proceeds_kind?.value ?? null;
+        const total = r.total_received_amount?.value ?? null;
+        const totalCcy = r.total_received_currency?.value ?? null;
+        steps.push({
+          role: 'origin',
+          filename: br.filename,
+          summary: `Multi-installment receipts (${proceedsKind ?? 'unspecified kind'}) — counterparty "${counterparty ?? 'unspecified'}", total ${total ?? '?'} ${totalCcy ?? '?'}.`,
+        });
+      }
+    }
+
+    // Sending account candidate: single-event deposits where from_name name-matches investor
+    for (const br of bankReceiptEntries) {
+      const r = br.bankReceipt;
+      if (r.receipt_subtype !== 'single_event') continue;
+      const fromName = r.receipt.from_name?.value ?? null;
+      const ek = r.event_kind?.value ?? null;
+      if (investorName && nameMatches(fromName, investorName)) {
+        steps.push({
+          role: 'sending_account',
+          filename: br.filename,
+          summary: `Investor's bank movement — ${fromName ?? '?'} → ${r.receipt.to_name?.value ?? '?'}, ${r.receipt.amount?.value ?? '?'} ${r.receipt.currency?.value ?? '?'} (${ek ?? '?'}, ${r.receipt.date?.value ?? '?'}).`,
+        });
+      }
+    }
+
+    // Wire spine itself
+    steps.push({
+      role: 'wire',
+      filename: w.filename,
+      summary: `${WIRE_CONFIRMATION_SUBTYPE_LABELS[wc.wire_subtype]} — ${senderName ?? '?'} → ${receiverName ?? '?'}, ${amount ?? '?'} ${currency ?? '?'}${fxLeg ? ` (${fxLeg})` : ''}, value_date ${valueDate ?? '?'}.`,
+    });
+
+    // Deployment leg: receiver name-matched against the enterprise IS the deployment (the wire itself
+    // closes the chain). Surface explicitly so the aggregator does not have to re-derive.
+    if (enterpriseBound && receiverName) {
+      steps.push({
+        role: 'deployment',
+        filename: w.filename,
+        summary: `Funds delivered to Petitioner enterprise account ("${receiverName}").`,
+      });
+    }
+
+    const issues: string[] = [];
+    if (!senderName) issues.push('wire missing sender holder_name');
+    if (!receiverName) issues.push('wire missing receiver holder_name');
+    if (investorName && !investorBound && wc.wire_subtype !== 'corporate_funding') {
+      issues.push(`wire sender ("${senderName ?? '?'}") does not name-match investor ("${investorName}") — origin leg unbound`);
+    }
+    if (enterpriseName && !enterpriseBound) {
+      issues.push(`wire receiver ("${receiverName ?? '?'}") does not name-match enterprise ("${enterpriseName}") — deployment leg unbound`);
+    }
+    const hasUpstream = steps.some((s) => s.role === 'origin' || s.role === 'sending_account');
+    if (!hasUpstream) {
+      issues.push('no upstream origin or sending-account evidence found — origin leg of chain is undocumented');
+    }
+
+    chains.push({
+      spineFilename: w.filename,
+      spineLabel: WIRE_CONFIRMATION_SUBTYPE_LABELS[wc.wire_subtype],
+      senderName,
+      receiverName,
+      amount,
+      currency,
+      steps,
+      issues,
+      investorBound,
+      enterpriseBound,
+    });
+  }
+
+  if (chains.length === 0) {
+    // Receipts-only fallback. Useful when the case has bank evidence but
+    // no wire slip yet (filing-prep stage).
+    const lines = bankReceiptEntries.map((br) => {
+      const r = br.bankReceipt;
+      if (r.receipt_subtype === 'multi_installment') {
+        return `- ${br.filename}: multi-installment, total ${r.total_received_amount?.value ?? '?'} ${r.total_received_currency?.value ?? '?'} (${r.proceeds_kind?.value ?? '?'}, counterparty "${r.consistent_counterparty_name?.value ?? '?'}")`;
+      }
+      return `- ${br.filename}: single-event ${r.event_kind?.value ?? '?'}, ${r.receipt.amount?.value ?? '?'} ${r.receipt.currency?.value ?? '?'} (${r.receipt.from_name?.value ?? '?'} → ${r.receipt.to_name?.value ?? '?'})`;
+    });
+    return (
+      `## SOURCE-OF-FUNDS CHAIN HINTS (deterministic pre-compute)\n\n${headerStats}\n\n` +
+      `**Verdict:** \`receipts_only_no_wire\` — bank receipts present but no wire confirmation closing the chain into the Petitioner enterprise. Log a severity 4 conflict_register entry with conflict_type='sof_chain_incomplete' citing the receipt filenames; populate source_of_funds with the partial origin evidence.\n\n${lines.join('\n')}`
+    );
+  }
+
+  const chainBlocks = chains
+    .map((c, i) => {
+      const stepLines = c.steps
+        .map((s) => `  - **[${s.role}]** ${s.summary} _(evidence: ${s.filename})_`)
+        .join('\n');
+      const issuesLine =
+        c.issues.length === 0
+          ? `  ✓ All structural links present.`
+          : c.issues.map((iss) => `  ⚠ ${iss}`).join('\n');
+      const bindings = `  • investor ↔ sender: ${c.investorBound ? '✓ matched' : '⚠ not matched'} · enterprise ↔ receiver: ${c.enterpriseBound ? '✓ matched' : '⚠ not matched'}`;
+      return `### Chain ${i + 1} — anchored on ${c.spineLabel} (${c.spineFilename})\n${stepLines}\n${bindings}\n${issuesLine}`;
+    })
+    .join('\n\n');
+
+  return (
+    `## SOURCE-OF-FUNDS CHAIN HINTS (deterministic pre-compute)\n\n${headerStats}\n\n` +
+    `Use these candidate chains to populate \`source_of_funds\` (one chain entry per spine wire). When a chain has issues marked ⚠, also log a corresponding severity-3 conflict_register entry with conflict_type='sof_chain_incomplete' or 'sof_chain_unbound', citing the wire filename as fact_a_doc. The 5-field SourceOfFundsChainSchema cannot represent the full multi-hop chain; compress the intermediate steps into the \`notes\` field with file references.\n\n${chainBlocks}`
+  );
 }
 
 /**
@@ -2145,7 +2527,9 @@ export async function aggregateTypedMemoryToE2(
   const memoryBlock = memoryToPromptText(memory);
   const inventoryBlock = buildDocInventoryWithAliases(memory, options?.aliases);
   const inventorySection = inventoryBlock ? `\n\n${inventoryBlock}` : '';
-  const userMessage = `${USER_INSTRUCTION}${inventorySection}\n\n# Typed memory\n\n${memoryBlock}\n\nRespond with ONLY a single JSON object matching the E2FactsSchema. No prose, no markdown fences, no commentary.`;
+  const investorOwnerBlock = buildInvestorOwnerBindingBlock(memory);
+  const sofChainBlock = buildSofChainHintsBlock(memory);
+  const userMessage = `${USER_INSTRUCTION}${inventorySection}\n\n${investorOwnerBlock}\n\n${sofChainBlock}\n\n# Typed memory\n\n${memoryBlock}\n\nRespond with ONLY a single JSON object matching the E2FactsSchema. No prose, no markdown fences, no commentary.`;
 
   // Pre-flight token count (free; observability only). Surfaces growth in
   // typed memory before it lands as a request the API truncates or

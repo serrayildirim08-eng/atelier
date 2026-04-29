@@ -1,6 +1,8 @@
 import { getAnthropic } from '@/lib/anthropic';
 import { logAnthropicUsage } from '@/lib/usage-log';
 import type { CaseFacts, CaseType } from '@/ingest/schema';
+import { retrieveDoctrine, renderHitsAsMarkdown } from '@/lib/rag/retrieve';
+import { buildDoctrineQuery } from '@/lib/rag/query-builder';
 
 const SHARED_DRAFTING_RULES = `Drafting rules — strict (a real attorney will sign and file this; hallucinated citations or invented facts cost the firm sanctions):
 
@@ -276,23 +278,59 @@ export async function* draftCoverLetterStream(
   const factsBlock = `## Extracted facts (each value carries source_page, source_quote, confidence)\n\n\`\`\`json\n${factsJson}\n\`\`\``;
   const userMessage = `Draft the cover letter using the facts in the system context.`;
 
+  // Doctrine RAG retrieval. Failure-tolerant: a missing index (no
+  // VOYAGE_API_KEY in dev, or the firm hasn't run rag:build yet) must
+  // not block drafting — degrade silently to no-doctrine mode.
+  let doctrineBlock = '';
+  try {
+    const query = buildDoctrineQuery(caseFacts);
+    const hits = await retrieveDoctrine(query, { k: 8 });
+    if (hits.length > 0) {
+      doctrineBlock = renderHitsAsMarkdown(hits);
+    }
+  } catch (e: unknown) {
+    console.warn(
+      '[draft] doctrine RAG retrieval failed; drafting without doctrine context:',
+      e instanceof Error ? e.message : String(e),
+    );
+  }
+
+  type SystemBlock = {
+    type: 'text';
+    text: string;
+    cache_control: { type: 'ephemeral'; ttl: '1h' | '5m' };
+  };
+  const systemBlocks: SystemBlock[] = [
+    {
+      type: 'text',
+      text: SYSTEM_PROMPTS[caseFacts.case_type],
+      cache_control: { type: 'ephemeral', ttl: '1h' },
+    },
+  ];
+  if (doctrineBlock) {
+    // Doctrine block sits on its own cache breakpoint with a 1h TTL.
+    // The retrieved set is stable across drafts of similar cases (same
+    // subtype + industry hits the same top-K), so a warm cache here
+    // pays off — the doctrine string is identical even when facts JSON
+    // differs across cases.
+    systemBlocks.push({
+      type: 'text',
+      text: doctrineBlock,
+      cache_control: { type: 'ephemeral', ttl: '1h' },
+    });
+  }
+  systemBlocks.push({
+    type: 'text',
+    text: factsBlock,
+    cache_control: { type: 'ephemeral', ttl: '5m' },
+  });
+
   const stream = getAnthropic().messages.stream({
     model,
     max_tokens: 16000,
     thinking: { type: 'adaptive' },
     output_config: { effort: 'high' },
-    system: [
-      {
-        type: 'text',
-        text: SYSTEM_PROMPTS[caseFacts.case_type],
-        cache_control: { type: 'ephemeral', ttl: '1h' },
-      },
-      {
-        type: 'text',
-        text: factsBlock,
-        cache_control: { type: 'ephemeral', ttl: '5m' },
-      },
-    ],
+    system: systemBlocks,
     messages: [{ role: 'user', content: userMessage }],
   });
 

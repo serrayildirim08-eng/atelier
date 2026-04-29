@@ -10,6 +10,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "rag:build": "tsx scripts/build-rag-index.ts",
     "electron": "electron .",
     "electron:dev": "concurrently -k -n NEXT,ELECTRON -c blue,magenta \"next dev\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "next build && electron-builder",
@@ -19,7 +20,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.91.1",
+    "@huggingface/transformers": "^4.2.0",
     "docx": "^9.6.1",
+    "mammoth": "^1.12.0",
     "next": "16.2.4",
     "pdf-lib": "^1.17.1",
     "pdf-parse": "^2.4.5",
@@ -39,6 +42,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^3.2.0",
     "wait-on": "^8.0.1"
