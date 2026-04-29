@@ -1,0 +1,17 @@
+{
+  "tasks": {
+    "B1": { "pod": "backend", "status": "todo", "owner": "backend-junior-1" },
+    "B2": { "pod": "backend", "status": "todo", "owner": "backend-senior", "depends_on": ["B1"] },
+    "B3": { "pod": "backend", "status": "todo", "owner": "backend-junior-2" },
+    "B4": { "pod": "backend", "status": "todo", "owner": "backend-junior-2" },
+    "B5": { "pod": "backend", "status": "todo", "owner": "backend-senior" },
+    "F1": { "pod": "frontend", "status": "blocked", "owner": "frontend-senior", "blocker": "D1" },
+    "F2": { "pod": "frontend", "status": "blocked", "owner": "frontend-junior-1", "blocker": "D2" },
+    "F3": { "pod": "frontend", "status": "todo", "owner": "frontend-junior-2", "depends_on": ["D1"] },
+    "D1": { "pod": "design", "status": "todo", "owner": "ui-designer" },
+    "D2": { "pod": "design", "status": "blocked", "owner": "ui-designer", "blocker": "D1" }
+  },
+  "last_session": null,
+  "open_questions": [],
+  "version": 1
+}
