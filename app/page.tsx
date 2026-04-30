@@ -1473,6 +1473,7 @@ export default function Page() {
           progress={progress}
           perPdfCount={perPdfCount}
           isElectron={isElectron}
+          matterMemories={matterMemories}
           onPickFolder={onPickFolder}
           onPickFolderElectron={onPickFolderElectron}
         />
@@ -1602,7 +1603,7 @@ export default function Page() {
         <MatterOverlay
           matterName={
             matterOverride?.matter_display_name ??
-            deriveAutoMatterName(selected) ??
+            deriveAutoMatterName(selected, typedMemory) ??
             selected?.filename ??
             matterRoot ??
             'Matter'
@@ -1704,6 +1705,7 @@ function Binder({
   isElectron,
   onPickFolder,
   onPickFolderElectron,
+  matterMemories,
 }: {
   results: IngestResult[];
   selectedIdx: number;
@@ -1715,6 +1717,10 @@ function Binder({
   isElectron: boolean;
   onPickFolder: (e: ChangeEvent<HTMLInputElement>, caseType?: CaseType) => void;
   onPickFolderElectron: (caseType?: CaseType) => void;
+  /** Per-matter typedMemory snapshot keyed by result.filename, so the
+   *  binder rail can fall back to raw rich extractions when caseFacts is
+   *  missing — keeps OneDrive_xyz folder names off the rail. */
+  matterMemories?: Record<string, TypedMemory>;
 }) {
   // Group matters by detected case type. Matters that haven't classified
   // yet (no caseFacts) hide in a "pending" group at the top so the user
@@ -1762,6 +1768,7 @@ function Binder({
                 selected={i === selectedIdx}
                 onSelect={() => onSelect(i)}
                 onDelete={() => onDelete(i)}
+                typedMemory={matterMemories?.[r.filename]}
               />
             ))}
           </div>
@@ -1778,6 +1785,7 @@ function Binder({
           onPickFolder={onPickFolder}
           onPickFolderElectron={onPickFolderElectron}
           caseType="E2"
+          matterMemories={matterMemories}
         />
 
         <BinderSection
@@ -1791,6 +1799,7 @@ function Binder({
           onPickFolder={onPickFolder}
           onPickFolderElectron={onPickFolderElectron}
           caseType="EB1A"
+          matterMemories={matterMemories}
         />
 
         {otherMatters.length > 0 && (
@@ -1803,6 +1812,7 @@ function Binder({
                 selected={i === selectedIdx}
                 onSelect={() => onSelect(i)}
                 onDelete={() => onDelete(i)}
+                typedMemory={matterMemories?.[r.filename]}
               />
             ))}
           </div>
@@ -1833,6 +1843,7 @@ function BinderSection({
   onPickFolder,
   onPickFolderElectron,
   caseType,
+  matterMemories,
 }: {
   label: string;
   subtitle: string;
@@ -1844,6 +1855,7 @@ function BinderSection({
   onPickFolder: (e: ChangeEvent<HTMLInputElement>, caseType?: CaseType) => void;
   onPickFolderElectron: (caseType?: CaseType) => void;
   caseType: CaseType;
+  matterMemories?: Record<string, TypedMemory>;
 }) {
   return (
     <div className="border-t border-rule">
@@ -1866,6 +1878,7 @@ function BinderSection({
               selected={i === selectedIdx}
               onSelect={() => onSelect(i)}
               onDelete={() => onDelete(i)}
+              typedMemory={matterMemories?.[r.filename]}
             />
           ))}
         </div>
@@ -2014,11 +2027,13 @@ function BinderRow({
   selected,
   onSelect,
   onDelete,
+  typedMemory,
 }: {
   result: IngestResult;
   selected: boolean;
   onSelect: () => void;
   onDelete: () => void;
+  typedMemory?: TypedMemory;
 }) {
   const caseType = result.caseFacts?.case_type;
   const isError = !!result.error;
@@ -2039,7 +2054,7 @@ function BinderRow({
             className="text-body leading-snug truncate"
             title={result.filename}
           >
-            {deriveAutoMatterName(result) ?? trimFilename(result.filename)}
+            {deriveAutoMatterName(result, typedMemory) ?? trimFilename(result.filename)}
           </div>
           {caseType && (
             <span className="font-mono text-meta text-graphite shrink-0">
@@ -4057,10 +4072,12 @@ const SUBTYPE_CONF_COLOR: Record<string, string> = {
  * `OneDrive_xyz` source-folder garbage. The user can still override via
  * the pen icon in the header (matter_display_name in the override store).
  */
-function deriveAutoMatterName(r: IngestResult | undefined): string | null {
+function deriveAutoMatterName(
+  r: IngestResult | undefined,
+  typedMemory?: TypedMemory,
+): string | null {
   if (!r) return null;
   const facts = r.caseFacts?.facts as Record<string, unknown> | undefined;
-  if (!facts) return null;
 
   const readScalar = (v: unknown): string | null => {
     if (isFieldLeaf(v) && typeof v.value === 'string') return v.value.trim() || null;
@@ -4069,37 +4086,80 @@ function deriveAutoMatterName(r: IngestResult | undefined): string | null {
   };
 
   let investor: string | null = null;
-  for (const k of ['petitioner_name', 'beneficiary_name', 'investor_name', 'name']) {
-    investor = readScalar(facts[k]);
-    if (investor) break;
-  }
-  if (!investor) {
-    for (const top of ['investor', 'petitioner', 'beneficiary', 'principal']) {
-      const obj = facts[top];
-      if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
-        const o = obj as Record<string, unknown>;
-        investor =
-          readScalar(o.full_name) ??
-          readScalar(o.name) ??
-          readScalar(o.full_name_ascii);
-        if (investor) break;
+  let company: string | null = null;
+
+  // 1. Aggregated caseFacts is the cleanest source — already canonicalized.
+  if (facts) {
+    for (const k of ['petitioner_name', 'beneficiary_name', 'investor_name', 'name']) {
+      investor = readScalar(facts[k]);
+      if (investor) break;
+    }
+    if (!investor) {
+      for (const top of ['investor', 'petitioner', 'beneficiary', 'principal']) {
+        const obj = facts[top];
+        if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+          const o = obj as Record<string, unknown>;
+          investor =
+            readScalar(o.full_name) ??
+            readScalar(o.name) ??
+            readScalar(o.full_name_ascii);
+          if (investor) break;
+        }
       }
+    }
+    const ent = facts.enterprise as Record<string, unknown> | undefined;
+    if (ent && typeof ent === 'object') {
+      company =
+        readScalar(ent.legal_name) ??
+        readScalar(ent.dba) ??
+        readScalar(ent.name);
+    }
+    if (!company) {
+      company =
+        readScalar(facts.enterprise_name) ??
+        readScalar(facts.company_name) ??
+        null;
     }
   }
 
-  let company: string | null = null;
-  const ent = facts.enterprise as Record<string, unknown> | undefined;
-  if (ent && typeof ent === 'object') {
-    company =
-      readScalar(ent.legal_name) ??
-      readScalar(ent.dba) ??
-      readScalar(ent.name);
-  }
-  if (!company) {
-    company =
-      readScalar(facts.enterprise_name) ??
-      readScalar(facts.company_name) ??
-      null;
+  // 2. Aggregator failed or facts are partial — fall back to peeking at the
+  //    raw rich extractions in typedMemory. Formation docs carry the entity
+  //    legal name; passport rich carries the investor full name. This keeps
+  //    the binder rail useful even when matters are stuck mid-pipeline.
+  if (typedMemory) {
+    if (!company) {
+      const formationList = typedMemory.formation_doc ?? [];
+      for (const entry of formationList) {
+        const rich = entry.rich as
+          | { corporateFormation?: { entity_legal_name?: { value?: string | null } } }
+          | null;
+        const v = rich?.corporateFormation?.entity_legal_name?.value;
+        if (v && typeof v === 'string' && v.trim().length > 0) {
+          company = v.trim();
+          break;
+        }
+      }
+    }
+    if (!investor) {
+      const passportList = typedMemory.passport ?? [];
+      for (const entry of passportList) {
+        const rich = entry.rich as
+          | {
+              passport?: {
+                full_name_ascii?: { value?: string | null };
+                full_name_native?: { value?: string | null };
+              };
+            }
+          | null;
+        const v =
+          rich?.passport?.full_name_ascii?.value ??
+          rich?.passport?.full_name_native?.value;
+        if (v && typeof v === 'string' && v.trim().length > 0) {
+          investor = v.trim();
+          break;
+        }
+      }
+    }
   }
 
   const caseTypeRaw = r.caseFacts?.case_type;
