@@ -1594,7 +1594,7 @@ export default function Page() {
           drafter / reviewer are still running, show a small fixed chip
           so the user knows work is continuing in the background. */}
       {!loading && progress && (progress.stage === 'drafting' || progress.stage === 'reviewing') && (
-        <div className="fixed bottom-12 right-6 z-30 border border-rule-strong bg-paper px-4 py-2.5 paper-recess flex items-center gap-3 shadow-md">
+        <div className="fixed bottom-12 right-6 z-30 border border-rule-strong bg-paper px-4 py-2.5 paper-recess flex items-center gap-3 shadow-md fade-in">
           <span className="pulse-dot-bg" aria-hidden />
           <div className="grid">
             <span className="font-mono text-[0.65rem] smcp text-graphite-soft tracking-wider">
@@ -1604,6 +1604,31 @@ export default function Page() {
               {progress.stage === 'drafting' ? 'Drafting cover letter…' : 'Reviewing draft…'}
             </span>
           </div>
+        </div>
+      )}
+
+      {/* Reload-from-cache chip: when the matter switch / auto-trigger
+          is busy refetching the per-PDF cache + Sonnet aggregator, show
+          a global indicator so the user knows the buckets are being
+          rebuilt in the background regardless of which tab they're on. */}
+      {reloadingDocs && (
+        <div className="fixed bottom-12 left-6 z-30 border border-rule-strong bg-paper paper-recess shadow-md fade-in min-w-[18rem]">
+          <div className="px-4 py-2.5 flex items-center gap-3">
+            <span
+              className="ring-spin shrink-0"
+              style={{ width: '1.1rem', height: '1.1rem' }}
+              aria-hidden
+            />
+            <div className="grid leading-tight">
+              <span className="font-mono text-[0.65rem] smcp text-graphite-soft tracking-wider">
+                background
+              </span>
+              <span className="text-meta text-ink truncate max-w-[16rem]">
+                {reloadingDocsLabel ?? 'Reading documents from cache…'}
+              </span>
+            </div>
+          </div>
+          <div className="sweep-bar" />
         </div>
       )}
 
@@ -2840,6 +2865,68 @@ function DocumentPreviewFrame({
 }
 
 /**
+ * "Open the matter" button with click-press feedback. The matter overlay
+ * mounts heavy components (full bucket list + per-doc inline previews)
+ * so first paint can be 200-600ms on large matters; we render a brief
+ * "opening…" state so the click feels responsive instead of dead.
+ */
+function OpenMatterButton({
+  populatedCount,
+  totalEntries,
+  onOpenMatter,
+}: {
+  populatedCount: number;
+  totalEntries: number;
+  onOpenMatter: () => void;
+}) {
+  const [opening, setOpening] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        if (opening) return;
+        setOpening(true);
+        // Yield to the next frame so the press state paints before the
+        // synchronous overlay mount blocks the main thread.
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            onOpenMatter();
+            // Snap back so a second open from a re-render still shows
+            // press feedback. Fade the indicator out shortly after.
+            setTimeout(() => setOpening(false), 480);
+          });
+        });
+      }}
+      disabled={opening}
+      className={
+        'w-full flex items-baseline justify-between border border-ink bg-paper px-5 py-3 transition-all group ' +
+        (opening
+          ? 'bg-ink text-paper scale-[0.997] shadow-inner cursor-progress'
+          : 'hover:bg-ink hover:text-paper active:scale-[0.997]')
+      }
+    >
+      <span
+        className={
+          'text-body font-semibold transition-colors ' +
+          (opening ? 'text-paper' : 'text-ink group-hover:text-paper')
+        }
+      >
+        {opening ? 'Opening matter…' : 'Open the matter'}
+      </span>
+      <span
+        className={
+          'font-mono text-meta transition-colors ' +
+          (opening ? 'text-paper-2 animate-pulse' : 'text-graphite group-hover:text-paper-2')
+        }
+      >
+        {opening
+          ? '· · ·'
+          : `${populatedCount} sections · ${totalEntries} documents →`}
+      </span>
+    </button>
+  );
+}
+
+/**
  * Time-based estimated progress — ticks from 0 to ~94% over an expected
  * duration (default 35s, the rough Sonnet aggregator wall-clock for a
  * mid-sized matter), then holds. The actual completion is driven by the
@@ -3119,17 +3206,11 @@ function MemoryPane({
 
   return (
     <div className="px-9 py-7 grid gap-7">
-      <button
-        onClick={onOpenMatter}
-        className="w-full flex items-baseline justify-between border border-ink bg-paper px-5 py-3 hover:bg-ink hover:text-paper transition-colors group"
-      >
-        <span className="text-body text-ink font-semibold group-hover:text-paper">
-          Open the matter
-        </span>
-        <span className="font-mono text-meta text-graphite group-hover:text-paper-2">
-          {populated.length} sections · {totalEntries} documents →
-        </span>
-      </button>
+      <OpenMatterButton
+        populatedCount={populated.length}
+        totalEntries={totalEntries}
+        onOpenMatter={onOpenMatter}
+      />
 
       {reloadingDocs && <ReloadingBanner label={reloadingDocsLabel ?? null} />}
 
