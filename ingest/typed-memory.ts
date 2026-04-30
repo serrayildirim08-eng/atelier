@@ -42,6 +42,7 @@ import type { CoverLetterRichFacts } from './extractors/cover-letter.schema';
 import type { RfeNoticeFacts } from './extractors/rfe-notice.schema';
 import type { I129ESupplementFacts } from './extractors/i129e-supplement.schema';
 import type { BusinessPlanRichFacts } from './extractors/business-plan.schema';
+import type { BankStatementRichFacts } from './extractors/bank-statement.schema';
 
 const Field = <T extends z.ZodTypeAny>(value: T) =>
   z.preprocess(
@@ -796,6 +797,16 @@ export interface PerPdfResult {
    * the cover-letter narrative claim.
    */
   businessPlan?: BusinessPlanRichFacts;
+  /**
+   * Rich bank-statement extraction. Routes when the thin classifier returns
+   * doc_type='bank_statement'. Adds bank_short_name (normalized — Chase /
+   * BofA / WF / Citi / etc.), full account_holder_name, account_number_last4
+   * (PII-safe), period bounds + derived YYYY-MM, and optional balances.
+   * Drives the deterministic display-name derivation
+   * (lib/e2/bank-statement-rename.ts) used as a low-priority fallback when
+   * the matter-overrides store has no manual display_name set.
+   */
+  bankStatement?: BankStatementRichFacts;
   error?: { code: string; message: string };
 }
 

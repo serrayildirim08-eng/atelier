@@ -52,6 +52,7 @@ import { extractCoverLetter } from './extractors/cover-letter';
 import { extractRfeNotice } from './extractors/rfe-notice';
 import { extractI129ESupplement } from './extractors/i129e-supplement';
 import { extractBusinessPlan } from './extractors/business-plan';
+import { extractBankStatement } from './extractors/bank-statement';
 
 /**
  * Doc types that route through the rich contract extractor as a second
@@ -309,6 +310,15 @@ const COVER_LETTER_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
  */
 const BUSINESS_PLAN_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
   new Set<DocType>(['business_plan']);
+
+/**
+ * Bank-statement rich extractor. Routes when the thin classifier returns
+ * doc_type='bank_statement'. Extracts bank short-name + holder + last4 +
+ * period — feeds the client-side display-name derivation
+ * (lib/e2/bank-statement-rename.ts).
+ */
+const BANK_STATEMENT_FLAVORED_DOC_TYPES: ReadonlySet<DocType> =
+  new Set<DocType>(['bank_statement']);
 
 /**
  * RFE / NOID rich extractor. Filename + content pattern OR thin status_doc
@@ -1128,6 +1138,7 @@ export async function classifyAndExtractOnePdf(
     rfeNoticeResult,
     i129eSupplementResult,
     businessPlanResult,
+    bankStatementResult,
   ] = await Promise.all([
     CONTRACT_FLAVORED_DOC_TYPES.has(facts.doc_type)
       ? extractContract(richInput)
@@ -1210,6 +1221,9 @@ export async function classifyAndExtractOnePdf(
     i129eSupplementMatch ? extractI129ESupplement(richInput) : Promise.resolve(null),
     BUSINESS_PLAN_FLAVORED_DOC_TYPES.has(facts.doc_type)
       ? extractBusinessPlan(richInput)
+      : Promise.resolve(null),
+    BANK_STATEMENT_FLAVORED_DOC_TYPES.has(facts.doc_type)
+      ? extractBankStatement(richInput)
       : Promise.resolve(null),
   ]);
 
@@ -1447,6 +1461,15 @@ export async function classifyAndExtractOnePdf(
     );
   }
 
+  let bankStatement;
+  if (bankStatementResult?.facts) {
+    bankStatement = bankStatementResult.facts;
+  } else if (bankStatementResult?.error) {
+    console.warn(
+      `[bank-statement-extract] ${input.filename}: ${bankStatementResult.error.code} — ${bankStatementResult.error.message}`,
+    );
+  }
+
   const entry = {
     pageCount: parsed.pageCount,
     facts,
@@ -1476,6 +1499,7 @@ export async function classifyAndExtractOnePdf(
     rfeNotice,
     i129eSupplement,
     businessPlan,
+    bankStatement,
   };
   if (!input.forcedDocType) writePdfCache(hash, entry);
 

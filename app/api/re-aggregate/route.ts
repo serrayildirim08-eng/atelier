@@ -256,6 +256,8 @@ export async function POST(request: Request): Promise<Response> {
       wire_subtype: r.wireConfirmation?.wire_subtype ?? null,
       vital_record_subtype: r.vitalRecords?.vital_record_subtype ?? null,
       foreign_doc_subtype: r.foreignCorporate?.foreign_doc_subtype ?? null,
+      bank_statement_subtype:
+        r.bankStatement?.bank_statement_subtype?.value ?? null,
     },
     rich: {
       passport: r.passport ?? null,
@@ -280,6 +282,7 @@ export async function POST(request: Request): Promise<Response> {
       governmentDoc: r.governmentDoc ?? null,
       imagePhoto: r.imagePhoto ?? null,
       incentiveDocument: r.incentiveDocument ?? null,
+      bankStatement: r.bankStatement ?? null,
     },
   }));
 

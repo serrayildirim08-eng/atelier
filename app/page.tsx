@@ -45,6 +45,7 @@ import {
   passedGatesSummary,
 } from '@/lib/gates-ui';
 import { routeServiceCenter } from '@/lib/e2/service-center-routing';
+import { deriveBankStatementDisplayName } from '@/lib/e2/bank-statement-rename';
 
 /* ---------------------------------------------------------------------- */
 /* Types                                                                   */
@@ -3258,6 +3259,19 @@ function getSuggestedDocLabel(entry: PerPdfMemoryEntry): string {
       return [name, cls].filter(Boolean).join(' · ') || fallback;
     }
     case 'bank_statement': {
+      // Prefer the rich bank-statement extraction when present — it
+      // exposes a normalized short bank name + holder + statement
+      // year/month + last-4 in a deterministic format that the
+      // bank-statement-rename helper composes into "Chase · Deborah
+      // Walther · ****7192 · 2025-03". Falls back to the thin facts
+      // shape when rich extraction didn't run.
+      const rich = (entry.rich as { bankStatement?: unknown } | null)?.bankStatement;
+      if (rich) {
+        const derived = deriveBankStatementDisplayName(
+          rich as Parameters<typeof deriveBankStatementDisplayName>[0],
+        );
+        if (derived) return derived;
+      }
       const bank = get('bank_name');
       const last4 = get('account_last4');
       const period = get('statement_period');
