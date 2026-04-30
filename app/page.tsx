@@ -390,16 +390,10 @@ export default function Page() {
   const [results, setResults] = useState<IngestResult[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
   const [tab, setTab] = useState<DossierTab>('facts');
-  const [loading, setLoading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [now, setNow] = useState<Date>(() => new Date());
-  const [progress, setProgress] = useState<IngestProgress | null>(null);
   const [isElectron, setIsElectron] = useState(false);
   const [typedMemory, setTypedMemory] = useState<TypedMemory>({});
-  const [perPdfCount, setPerPdfCount] = useState<{ done: number; total: number }>({
-    done: 0,
-    total: 0,
-  });
   const [matterRoot, setMatterRoot] = useState<string | null>(null);
   // Per-matter root map (filename → absolute folder). Persisted to
   // localStorage so HMR / page reloads can restore matterRoot from the
@@ -431,32 +425,43 @@ export default function Page() {
   // when the closing `result` event lands (which carries the server-
   // authoritative final draft). DraftPane reads result.draft ?? this.
   const [streamingDraft, setStreamingDraft] = useState<string>('');
-  // Full event stream accumulator powering <LoadingProgress/>: every NDJSON
-  // line received from /api/ingest-path is pushed in order; the component
-  // reduces it into rows + stage-strip state. Reset on each new ingest.
-  const [streamEvents, setStreamEvents] = useState<LoadingStreamEvent[]>([]);
-  const [streamStartedAt, setStreamStartedAt] = useState<number | null>(null);
-  // When true, the full-screen loading overlay is hidden and a small
-  // floating pill in the bottom-right shows progress instead. Lets the
-  // user navigate other matters while an ingest runs in the background.
-  // Resets on each new ingest.
-  const [loadingMinimized, setLoadingMinimized] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
+  // Per-matter ingest state. Each key is the matter basename (folder name).
+  // `loading` is derived: Object.keys(activeIngests).length > 0.
+  type IngestState = {
+    startedAt: number;
+    progress: IngestProgress | null;
+    streamEvents: LoadingStreamEvent[];
+    perPdfCount: { done: number; total: number };
+  };
+  const [activeIngests, setActiveIngests] = useState<Record<string, IngestState>>({});
+  // Which matter's overlay is currently expanded (null → all minimised to pills).
+  const [expandedIngestId, setExpandedIngestId] = useState<string | null>(null);
+  const abortRefs = useRef<Map<string, AbortController>>(new Map());
   const router = useRouter();
 
-  const cancelIngest = useCallback(() => {
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setLoading(false);
-    setProgress(null);
-    setResults([]);
-    setTypedMemory({});
-    setPerPdfCount({ done: 0, total: 0 });
-    setMatterRoot(null);
-    setStreamingDraft('');
-    setStreamEvents([]);
-    setStreamStartedAt(null);
-    setMatterOverride(null);
+  // Derived convenience: true when any ingest is running.
+  const loading = Object.keys(activeIngests).length > 0;
+  // Convenience picks for Binder / Dossier: prefer the expanded matter, else the first active one.
+  const _activeEntries = Object.entries(activeIngests);
+  const _activeEntry =
+    expandedIngestId != null && activeIngests[expandedIngestId] != null
+      ? ([expandedIngestId, activeIngests[expandedIngestId]] as [string, IngestState])
+      : _activeEntries[0] ?? null;
+  const progress: IngestProgress | null = _activeEntry?.[1].progress ?? null;
+  const perPdfCount: { done: number; total: number } = _activeEntry?.[1].perPdfCount ?? { done: 0, total: 0 };
+
+  const cancelIngest = useCallback((matterId: string) => {
+    const ctrl = abortRefs.current.get(matterId);
+    if (ctrl) {
+      ctrl.abort();
+      abortRefs.current.delete(matterId);
+    }
+    setActiveIngests((prev) => {
+      const next = { ...prev };
+      delete next[matterId];
+      return next;
+    });
+    setExpandedIngestId((prev) => (prev === matterId ? null : prev));
   }, []);
 
   // Hydrate entryLabels from a server-side override map. Each persisted
@@ -956,8 +961,24 @@ export default function Page() {
       return;
     }
 
-    setLoading(true);
-    setLoadingMinimized(false);
+    // Synthesise a stable matter id for the file-upload path (no folder).
+    const firstParent = pdfs[0]?.webkitRelativePath?.split('/')[0] ?? '';
+    const matterId = firstParent || `(deposit)-${Date.now()}`;
+
+    // Abort any prior ingest for this synthetic id.
+    const oldCtrl = abortRefs.current.get(matterId);
+    if (oldCtrl) { oldCtrl.abort(); abortRefs.current.delete(matterId); }
+
+    setActiveIngests((prev) => ({
+      ...prev,
+      [matterId]: {
+        startedAt: Date.now(),
+        progress: null,
+        streamEvents: [],
+        perPdfCount: { done: 0, total: 0 },
+      },
+    }));
+    setExpandedIngestId(matterId);
     setResults([]);
 
     const formData = new FormData();
@@ -988,7 +1009,13 @@ export default function Page() {
         },
       ]);
     } finally {
-      setLoading(false);
+      abortRefs.current.delete(matterId);
+      setActiveIngests((prev) => {
+        const next = { ...prev };
+        delete next[matterId];
+        return next;
+      });
+      setExpandedIngestId((prev) => (prev === matterId ? null : prev));
     }
   }, []);
 
@@ -1049,21 +1076,30 @@ export default function Page() {
     // matter basename (`filename`) so re-running the same folder
     // updates that matter in-place rather than dropping every other
     // matter on the binder.
-    setLoading(true);
-    setLoadingMinimized(false);
-    setProgress(null);
+    const matterId = rootPath.split('/').pop() ?? rootPath;
+
+    // If this matter is already ingesting, abort the prior run first.
+    const oldCtrl = abortRefs.current.get(matterId);
+    if (oldCtrl) { oldCtrl.abort(); abortRefs.current.delete(matterId); }
+
+    const controller = new AbortController();
+    abortRefs.current.set(matterId, controller);
+
     setTypedMemory({});
-    setPerPdfCount({ done: 0, total: 0 });
     setMatterRoot(rootPath);
-    setMatterRoots((prev) => ({ ...prev, [rootPath.split('/').pop() ?? rootPath]: rootPath }));
+    setMatterRoots((prev) => ({ ...prev, [matterId]: rootPath }));
     setMatterOverride(null);
     setStreamingDraft('');
-    setStreamEvents([]);
-    setStreamStartedAt(Date.now());
-
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
+    setActiveIngests((prev) => ({
+      ...prev,
+      [matterId]: {
+        startedAt: Date.now(),
+        progress: null,
+        streamEvents: [],
+        perPdfCount: { done: 0, total: 0 },
+      },
+    }));
+    setExpandedIngestId(matterId);
 
     try {
       const res = await fetch('/api/ingest-path', {
@@ -1079,7 +1115,7 @@ export default function Page() {
       if (!res.ok || !res.body) {
         const data = (await res.json().catch(() => ({}))) as { error?: string };
         const errorResult: IngestResult = {
-          filename: rootPath.split('/').pop() ?? rootPath,
+          filename: matterId,
           pageCount: 0,
           error: {
             code: 'http_' + res.status,
@@ -1095,7 +1131,6 @@ export default function Page() {
       let buffer = '';
       const collected: IngestResult[] = [];
       let pdfCount = 0;
-      let matterId: string | null = null;
 
       for (;;) {
         const { value, done } = await reader.read();
@@ -1111,24 +1146,47 @@ export default function Page() {
           } catch {
             continue;
           }
-          // Mirror every event into the LoadingProgress accumulator before
-          // dispatching to the legacy reducers. The component reduces the
-          // full sequence into the typewriter rows + stage strip.
-          setStreamEvents((prev) => [...prev, evt as unknown as LoadingStreamEvent]);
+          // Mirror every event into the per-matter stream accumulator.
+          setActiveIngests((prev) => {
+            const slot = prev[matterId];
+            if (!slot) return prev;
+            return {
+              ...prev,
+              [matterId]: {
+                ...slot,
+                streamEvents: [...slot.streamEvents, evt as unknown as LoadingStreamEvent],
+              },
+            };
+          });
           if (evt.type === 'start') {
             pdfCount = (evt.total as number) ?? 0;
-            matterId = (evt.matter as string) ?? null;
-            setPerPdfCount({ done: 0, total: pdfCount });
-            setProgress({
-              stage: 'starting',
-              label: `Found ${pdfCount} PDFs`,
-              pdfCount,
+            setActiveIngests((prev) => {
+              const slot = prev[matterId];
+              if (!slot) return prev;
+              return {
+                ...prev,
+                [matterId]: {
+                  ...slot,
+                  perPdfCount: { done: 0, total: pdfCount },
+                  progress: { stage: 'starting', label: `Found ${pdfCount} PDFs`, pdfCount },
+                },
+              };
             });
           } else if (evt.type === 'progress') {
-            setProgress({
-              stage: (evt.stage as string) ?? 'working',
-              label: (evt.label as string) ?? 'Working',
-              pdfCount,
+            setActiveIngests((prev) => {
+              const slot = prev[matterId];
+              if (!slot) return prev;
+              return {
+                ...prev,
+                [matterId]: {
+                  ...slot,
+                  progress: {
+                    stage: (evt.stage as string) ?? 'working',
+                    label: (evt.label as string) ?? 'Working',
+                    pdfCount,
+                  },
+                },
+              };
             });
           } else if (evt.type === 'pdf_result') {
             const entry: PerPdfMemoryEntry = {
@@ -1146,7 +1204,17 @@ export default function Page() {
               const list = prev[bucket] ?? [];
               return { ...prev, [bucket]: [...list, entry] };
             });
-            setPerPdfCount((prev) => ({ done: prev.done + 1, total: prev.total }));
+            setActiveIngests((prev) => {
+              const slot = prev[matterId];
+              if (!slot) return prev;
+              return {
+                ...prev,
+                [matterId]: {
+                  ...slot,
+                  perPdfCount: { done: slot.perPdfCount.done + 1, total: slot.perPdfCount.total },
+                },
+              };
+            });
           } else if (evt.type === 'draft_delta') {
             // Streaming draft: accumulate into a sidecar state. The
             // closing `result` event lands with the server-authoritative
@@ -1199,7 +1267,15 @@ export default function Page() {
               if (idx >= 0) setSelectedIdx(idx);
               return merged;
             });
-            setLoading(false);
+            // Remove from activeIngests so the overlay closes; the background
+            // chip will NOT show because there's no more active ingest slot.
+            // Keep `progress` accessible via the derived var for the inline chip.
+            setActiveIngests((prev) => {
+              const next = { ...prev };
+              delete next[matterId];
+              return next;
+            });
+            setExpandedIngestId((prev) => (prev === matterId ? null : prev));
             // Keep `progress` set so the inline background-chip on the
             // header can show "drafting…" / "reviewing…".
           } else if (evt.type === 'result') {
@@ -1232,7 +1308,13 @@ export default function Page() {
             });
             setStreamingDraft('');
           } else if (evt.type === 'done') {
-            setProgress(null);
+            setActiveIngests((prev) => {
+              const next = { ...prev };
+              if (next[matterId]) {
+                next[matterId] = { ...next[matterId], progress: null };
+              }
+              return next;
+            });
             // Auto-navigation to /matter/<id> disabled: that route reads
             // the hardcoded mock from getMockMatter() and would clobber
             // the real ingest result sitting in client state. Stay on
@@ -1247,7 +1329,7 @@ export default function Page() {
         (e instanceof Error && e.name === 'AbortError');
       if (!isAbort) {
         const errorResult: IngestResult = {
-          filename: rootPath.split('/').pop() ?? rootPath,
+          filename: matterId,
           pageCount: 0,
           error: {
             code: 'network',
@@ -1257,9 +1339,13 @@ export default function Page() {
         setResults((prev) => mergeResultsByFilename(prev, errorResult));
       }
     } finally {
-      setLoading(false);
-      setProgress(null);
-      if (abortRef.current === controller) abortRef.current = null;
+      abortRefs.current.delete(matterId);
+      setActiveIngests((prev) => {
+        const next = { ...prev };
+        delete next[matterId];
+        return next;
+      });
+      setExpandedIngestId((prev) => (prev === matterId ? null : prev));
     }
   }, [router]);
 
@@ -1461,11 +1547,11 @@ export default function Page() {
 
       {dragActive && <DragOverlay />}
 
-      {loading && streamStartedAt !== null && !loadingMinimized && (
+      {expandedIngestId !== null && activeIngests[expandedIngestId] != null && (
         <div className="fixed inset-0 z-40 paper-grain overflow-y-auto">
           <div className="fixed top-5 right-6 z-50 flex gap-2">
             <button
-              onClick={() => setLoadingMinimized(true)}
+              onClick={() => setExpandedIngestId(null)}
               className="px-3 py-1.5 border border-rule-strong bg-paper-2 hover:bg-ink hover:text-paper text-meta smcp tracking-wider transition-colors"
               aria-label="Send loading screen to the background"
               title="Keep ingesting in the background while you work elsewhere"
@@ -1475,7 +1561,7 @@ export default function Page() {
             <button
               onClick={() => {
                 if (window.confirm('Cancel ingestion and clear the matter?')) {
-                  cancelIngest();
+                  cancelIngest(expandedIngestId);
                 }
               }}
               className="px-3 py-1.5 border border-rule-strong bg-paper-2 hover:bg-ink hover:text-paper text-meta smcp tracking-wider transition-colors"
@@ -1486,27 +1572,31 @@ export default function Page() {
           </div>
           <div className="max-w-[80rem] mx-auto px-10 py-12">
             <LoadingProgress
-              events={streamEvents}
-              startedAt={streamStartedAt}
+              events={activeIngests[expandedIngestId].streamEvents}
+              startedAt={activeIngests[expandedIngestId].startedAt}
             />
           </div>
         </div>
       )}
 
-      {loading && streamStartedAt !== null && loadingMinimized && (
-        <BackgroundIngestPill
-          stage={progress?.stage ?? 'working'}
-          label={progress?.label ?? 'Working…'}
-          perPdfCount={perPdfCount}
-          startedAt={streamStartedAt}
-          onExpand={() => setLoadingMinimized(false)}
-          onCancel={() => {
-            if (window.confirm('Cancel ingestion and clear the matter?')) {
-              cancelIngest();
-            }
-          }}
-        />
-      )}
+      <div className="fixed bottom-5 right-6 z-40 flex flex-col-reverse gap-2 items-end">
+        {Object.entries(activeIngests)
+          .filter(([id]) => id !== expandedIngestId)
+          .map(([id, st]) => (
+            <BackgroundIngestPill
+              key={id}
+              matterName={id}
+              stage={st.progress?.stage ?? 'working'}
+              label={st.progress?.label ?? 'Working…'}
+              perPdfCount={st.perPdfCount}
+              startedAt={st.startedAt}
+              onExpand={() => setExpandedIngestId(id)}
+              onCancel={() => {
+                if (window.confirm(`Cancel ${id}?`)) cancelIngest(id);
+              }}
+            />
+          ))}
+      </div>
 
       {matterOverlayOpen && (
         <MatterOverlay
@@ -1815,6 +1905,7 @@ function BinderSection({
 }
 
 function BackgroundIngestPill({
+  matterName,
   stage,
   label,
   perPdfCount,
@@ -1822,6 +1913,7 @@ function BackgroundIngestPill({
   onExpand,
   onCancel,
 }: {
+  matterName: string;
   stage: string;
   label: string;
   perPdfCount: { done: number; total: number };
@@ -1843,7 +1935,7 @@ function BackgroundIngestPill({
 
   return (
     <div
-      className="fixed bottom-5 right-6 z-40 max-w-sm border border-rule-strong bg-paper-2 paper-grain shadow-md"
+      className="max-w-sm border border-rule-strong bg-paper-2 paper-grain shadow-md"
       role="status"
       aria-live="polite"
     >
@@ -1853,6 +1945,9 @@ function BackgroundIngestPill({
           aria-hidden
         />
         <div className="flex-1 min-w-0">
+          <div className="font-mono text-[0.6rem] smcp text-graphite-soft tracking-wider uppercase mb-0.5 truncate" title={matterName}>
+            {matterName}
+          </div>
           <div className="smcp text-graphite-soft tracking-wider mb-0.5">
             {stage} · {elapsedSec}s
           </div>
