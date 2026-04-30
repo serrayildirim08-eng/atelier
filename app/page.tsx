@@ -435,6 +435,11 @@ export default function Page() {
   // reduces it into rows + stage-strip state. Reset on each new ingest.
   const [streamEvents, setStreamEvents] = useState<LoadingStreamEvent[]>([]);
   const [streamStartedAt, setStreamStartedAt] = useState<number | null>(null);
+  // When true, the full-screen loading overlay is hidden and a small
+  // floating pill in the bottom-right shows progress instead. Lets the
+  // user navigate other matters while an ingest runs in the background.
+  // Resets on each new ingest.
+  const [loadingMinimized, setLoadingMinimized] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const router = useRouter();
 
@@ -584,6 +589,23 @@ export default function Page() {
           return false;
         }
         setMatterOverride(data.matter_override ?? null);
+        // When a doc_type override changes, fire-and-forget a re-aggregate
+        // so the new classification flows through the per-PDF rich
+        // extractor + applicant/dependent inference + UI buckets without
+        // forcing the user to click the header button. The runReaggregate
+        // helper already drives the loading state, so the user sees the
+        // sweep bar while the deterministic gates re-resolve.
+        if (
+          patch.document &&
+          patch.document.doc_type_override !== undefined
+        ) {
+          void runReaggregate().catch((e) =>
+            console.warn(
+              '[matter-overrides] auto re-aggregate after reclassify failed:',
+              e instanceof Error ? e.message : String(e),
+            ),
+          );
+        }
         return true;
       } catch (e: unknown) {
         console.warn(
@@ -593,7 +615,7 @@ export default function Page() {
         return false;
       }
     },
-    [matterRoot],
+    [matterRoot, runReaggregate],
   );
 
   useEffect(() => {
@@ -911,7 +933,15 @@ export default function Page() {
 
   const selected = results[selectedIdx];
 
-  const handleFiles = useCallback(async (files: File[]) => {
+  const handleFiles = useCallback(async (
+    files: File[],
+    // Reserved for the per-file ingest path. /api/ingest is a legacy
+    // endpoint without case_type_override support yet; recorded here so
+    // the UI button wiring stays consistent and we can plumb it through
+    // when /api/ingest grows the same dispatcher /api/ingest-path has.
+    _caseTypeOverride?: CaseType,
+  ) => {
+    void _caseTypeOverride;
     const pdfs = files.filter((f) => PDF_EXT.test(f.name));
     if (pdfs.length === 0) {
       setResults([
@@ -926,6 +956,7 @@ export default function Page() {
     }
 
     setLoading(true);
+    setLoadingMinimized(false);
     setResults([]);
 
     const formData = new FormData();
@@ -1000,11 +1031,17 @@ export default function Page() {
     [handleFiles],
   );
 
-  const onPickFolder = (e: ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) handleFiles(Array.from(e.target.files));
+  const onPickFolder = (
+    e: ChangeEvent<HTMLInputElement>,
+    caseTypeOverride?: CaseType,
+  ) => {
+    if (e.target.files) handleFiles(Array.from(e.target.files), caseTypeOverride);
   };
 
-  const handleFolderPath = useCallback(async (rootPath: string) => {
+  const handleFolderPath = useCallback(async (
+    rootPath: string,
+    caseTypeOverride?: CaseType,
+  ) => {
     // Phase 11 — do NOT wipe `results` on re-run. Prior matters (and the
     // current matter's prior extracts) stay in place until the new
     // streamed result lands. The collected[] array below merges by
@@ -1012,6 +1049,7 @@ export default function Page() {
     // updates that matter in-place rather than dropping every other
     // matter on the binder.
     setLoading(true);
+    setLoadingMinimized(false);
     setProgress(null);
     setTypedMemory({});
     setPerPdfCount({ done: 0, total: 0 });
@@ -1030,7 +1068,10 @@ export default function Page() {
       const res = await fetch('/api/ingest-path', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: rootPath }),
+        body: JSON.stringify({
+          path: rootPath,
+          ...(caseTypeOverride ? { case_type_override: caseTypeOverride } : {}),
+        }),
         signal: controller.signal,
       });
 
@@ -1226,11 +1267,13 @@ export default function Page() {
   // assign here, after handleFolderPath exists.
   handleFolderPathRef.current = handleFolderPath;
 
-  const onPickFolderElectron = useCallback(async () => {
+  const onPickFolderElectron = useCallback(async (
+    caseTypeOverride?: CaseType,
+  ) => {
     if (!window.akalan?.pickFolder) return;
     const picked = await window.akalan.pickFolder();
     if (!picked) return;
-    handleFolderPath(picked);
+    handleFolderPath(picked, caseTypeOverride);
   }, [handleFolderPath]);
 
   // Re-link the currently-selected matter to a folder on disk and reload
@@ -1417,19 +1460,29 @@ export default function Page() {
 
       {dragActive && <DragOverlay />}
 
-      {loading && streamStartedAt !== null && (
+      {loading && streamStartedAt !== null && !loadingMinimized && (
         <div className="fixed inset-0 z-40 paper-grain overflow-y-auto">
-          <button
-            onClick={() => {
-              if (window.confirm('Cancel ingestion and clear the matter?')) {
-                cancelIngest();
-              }
-            }}
-            className="fixed top-5 right-6 z-50 px-3 py-1.5 border border-rule-strong bg-paper-2 hover:bg-ink hover:text-paper text-meta smcp tracking-wider transition-colors"
-            aria-label="Cancel ingestion"
-          >
-            cancel ingestion ✕
-          </button>
+          <div className="fixed top-5 right-6 z-50 flex gap-2">
+            <button
+              onClick={() => setLoadingMinimized(true)}
+              className="px-3 py-1.5 border border-rule-strong bg-paper-2 hover:bg-ink hover:text-paper text-meta smcp tracking-wider transition-colors"
+              aria-label="Send loading screen to the background"
+              title="Keep ingesting in the background while you work elsewhere"
+            >
+              run in background ↘
+            </button>
+            <button
+              onClick={() => {
+                if (window.confirm('Cancel ingestion and clear the matter?')) {
+                  cancelIngest();
+                }
+              }}
+              className="px-3 py-1.5 border border-rule-strong bg-paper-2 hover:bg-ink hover:text-paper text-meta smcp tracking-wider transition-colors"
+              aria-label="Cancel ingestion"
+            >
+              cancel ingestion ✕
+            </button>
+          </div>
           <div className="max-w-[80rem] mx-auto px-10 py-12">
             <LoadingProgress
               events={streamEvents}
@@ -1437,6 +1490,21 @@ export default function Page() {
             />
           </div>
         </div>
+      )}
+
+      {loading && streamStartedAt !== null && loadingMinimized && (
+        <BackgroundIngestPill
+          stage={progress?.stage ?? 'working'}
+          label={progress?.label ?? 'Working…'}
+          perPdfCount={perPdfCount}
+          startedAt={streamStartedAt}
+          onExpand={() => setLoadingMinimized(false)}
+          onCancel={() => {
+            if (window.confirm('Cancel ingestion and clear the matter?')) {
+              cancelIngest();
+            }
+          }}
+        />
       )}
 
       {matterOverlayOpen && (
@@ -1554,9 +1622,26 @@ function Binder({
   progress: IngestProgress | null;
   perPdfCount: { done: number; total: number };
   isElectron: boolean;
-  onPickFolder: (e: ChangeEvent<HTMLInputElement>) => void;
-  onPickFolderElectron: () => void;
+  onPickFolder: (e: ChangeEvent<HTMLInputElement>, caseType?: CaseType) => void;
+  onPickFolderElectron: (caseType?: CaseType) => void;
 }) {
+  // Group matters by detected case type. Matters that haven't classified
+  // yet (no caseFacts) hide in a "pending" group at the top so the user
+  // can still see them while the pipeline runs. Each section below the
+  // pending group has its own create-new button so the E-2 and EB-1A
+  // pipelines kick off explicitly rather than being inferred from samples.
+  const indexedResults = results.map((r, i) => ({ r, i }));
+  const pendingMatters = indexedResults.filter(({ r }) => !r.caseFacts && !r.error);
+  const e2Matters = indexedResults.filter(({ r }) => r.caseFacts?.case_type === 'E2');
+  const eb1aMatters = indexedResults.filter(({ r }) => r.caseFacts?.case_type === 'EB1A');
+  const otherMatters = indexedResults.filter(
+    ({ r }) =>
+      !!r.error ||
+      (r.caseFacts &&
+        r.caseFacts.case_type !== 'E2' &&
+        r.caseFacts.case_type !== 'EB1A'),
+  );
+
   return (
     <aside className="border-r border-rule paper-grain min-h-0 flex flex-col">
       <div className="px-5 pt-6 pb-4">
@@ -1570,31 +1655,138 @@ function Binder({
 
       <div className="border-t border-rule" />
 
-      <div className="flex-1 overflow-y-auto px-2 py-2 min-h-0">
-        {loading && <BinderLoadingRow progress={progress} perPdfCount={perPdfCount} />}
-        {!loading && results.length === 0 && (
-          <div className="px-3 py-6 text-body text-graphite leading-relaxed">
-            Drop a dossier into the dossier pane to begin.
+      <div className="flex-1 overflow-y-auto min-h-0">
+        {loading && (
+          <div className="px-2 py-2">
+            <BinderLoadingRow progress={progress} perPdfCount={perPdfCount} />
           </div>
         )}
-        {results.map((r, i) => (
-          <BinderRow
-            key={i}
-            result={r}
-            selected={i === selectedIdx}
-            onSelect={() => onSelect(i)}
-            onDelete={() => onDelete(i)}
-          />
-        ))}
+
+        {pendingMatters.length > 0 && (
+          <div className="px-2 py-2">
+            {pendingMatters.map(({ r, i }) => (
+              <BinderRow
+                key={i}
+                result={r}
+                selected={i === selectedIdx}
+                onSelect={() => onSelect(i)}
+                onDelete={() => onDelete(i)}
+              />
+            ))}
+          </div>
+        )}
+
+        <BinderSection
+          label="E-2"
+          subtitle="Treaty Investor"
+          matters={e2Matters}
+          selectedIdx={selectedIdx}
+          onSelect={onSelect}
+          onDelete={onDelete}
+          isElectron={isElectron}
+          onPickFolder={onPickFolder}
+          onPickFolderElectron={onPickFolderElectron}
+          caseType="E2"
+        />
+
+        <BinderSection
+          label="EB-1A"
+          subtitle="Extraordinary Ability"
+          matters={eb1aMatters}
+          selectedIdx={selectedIdx}
+          onSelect={onSelect}
+          onDelete={onDelete}
+          isElectron={isElectron}
+          onPickFolder={onPickFolder}
+          onPickFolderElectron={onPickFolderElectron}
+          caseType="EB1A"
+        />
+
+        {otherMatters.length > 0 && (
+          <div className="px-2 py-2 border-t border-rule">
+            <div className="px-3 pt-2 pb-1 smcp text-graphite-soft">other</div>
+            {otherMatters.map(({ r, i }) => (
+              <BinderRow
+                key={i}
+                result={r}
+                selected={i === selectedIdx}
+                onSelect={() => onSelect(i)}
+                onDelete={() => onDelete(i)}
+              />
+            ))}
+          </div>
+        )}
+
+        {!loading && results.length === 0 && (
+          <div className="px-3 py-6 text-body text-graphite leading-relaxed">
+            Drop a dossier into the dossier pane, or use the buttons below to start a new E-2 or EB-1A matter.
+          </div>
+        )}
       </div>
 
-      <div className="border-t border-rule px-3 py-3 flex flex-col gap-2">
+      <div className="border-t border-rule px-3 py-2 label-quiet text-graphite-soft text-center">
+        {isElectron ? 'native picker · streamed from disk' : 'PDFs · case files · exhibits'}
+      </div>
+    </aside>
+  );
+}
+
+function BinderSection({
+  label,
+  subtitle,
+  matters,
+  selectedIdx,
+  onSelect,
+  onDelete,
+  isElectron,
+  onPickFolder,
+  onPickFolderElectron,
+  caseType,
+}: {
+  label: string;
+  subtitle: string;
+  matters: Array<{ r: IngestResult; i: number }>;
+  selectedIdx: number;
+  onSelect: (i: number) => void;
+  onDelete: (i: number) => void;
+  isElectron: boolean;
+  onPickFolder: (e: ChangeEvent<HTMLInputElement>, caseType?: CaseType) => void;
+  onPickFolderElectron: (caseType?: CaseType) => void;
+  caseType: CaseType;
+}) {
+  return (
+    <div className="border-t border-rule">
+      <div className="px-3 pt-3 pb-1 flex items-baseline justify-between">
+        <div className="smcp text-graphite">{label}</div>
+        <div className="text-meta text-graphite-soft tabular-nums">{matters.length}</div>
+      </div>
+      <div className="px-3 pb-2 text-meta text-graphite-soft">{subtitle}</div>
+
+      {matters.length === 0 ? (
+        <div className="px-3 pb-3 text-meta text-graphite-soft italic">
+          No {label} matters yet.
+        </div>
+      ) : (
+        <div className="pb-2">
+          {matters.map(({ r, i }) => (
+            <BinderRow
+              key={i}
+              result={r}
+              selected={i === selectedIdx}
+              onSelect={() => onSelect(i)}
+              onDelete={() => onDelete(i)}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className="px-3 pb-3">
         {isElectron ? (
           <button
-            onClick={onPickFolderElectron}
-            className="block text-center px-3 py-2 border border-ink-2 cursor-pointer hover:bg-ink hover:text-paper transition-colors smcp"
+            onClick={() => onPickFolderElectron(caseType)}
+            className="block w-full text-center px-3 py-1.5 border border-ink-2 cursor-pointer hover:bg-ink hover:text-paper transition-colors smcp"
           >
-            create new matter
+            add {label} matter
           </button>
         ) : (
           <label className="block">
@@ -1609,18 +1801,85 @@ function Binder({
                 }
               }}
               className="hidden"
-              onChange={onPickFolder}
+              onChange={(e) => onPickFolder(e, caseType)}
             />
-            <span className="block text-center px-3 py-2 border border-ink-2 cursor-pointer hover:bg-ink hover:text-paper transition-colors smcp">
-              create new matter
+            <span className="block w-full text-center px-3 py-1.5 border border-ink-2 cursor-pointer hover:bg-ink hover:text-paper transition-colors smcp">
+              add {label} matter
             </span>
           </label>
         )}
-        <div className="label-quiet text-graphite-soft text-center">
-          {isElectron ? 'native picker · streamed from disk' : 'PDFs · case files · exhibits'}
+      </div>
+    </div>
+  );
+}
+
+function BackgroundIngestPill({
+  stage,
+  label,
+  perPdfCount,
+  startedAt,
+  onExpand,
+  onCancel,
+}: {
+  stage: string;
+  label: string;
+  perPdfCount: { done: number; total: number };
+  startedAt: number;
+  onExpand: () => void;
+  onCancel: () => void;
+}) {
+  const [elapsedSec, setElapsedSec] = useState(0);
+  useEffect(() => {
+    setElapsedSec(Math.floor((Date.now() - startedAt) / 1000));
+    const t = setInterval(
+      () => setElapsedSec(Math.floor((Date.now() - startedAt) / 1000)),
+      1000,
+    );
+    return () => clearInterval(t);
+  }, [startedAt]);
+
+  const showCount = perPdfCount.total > 0 && stage === 'classifying';
+
+  return (
+    <div
+      className="fixed bottom-5 right-6 z-40 max-w-sm border border-rule-strong bg-paper-2 paper-grain shadow-md"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="px-4 py-3 flex items-start gap-3">
+        <span
+          className="mt-1 inline-block w-2 h-2 rounded-full bg-ink animate-pulse"
+          aria-hidden
+        />
+        <div className="flex-1 min-w-0">
+          <div className="smcp text-graphite-soft tracking-wider mb-0.5">
+            {stage} · {elapsedSec}s
+          </div>
+          <div className="text-body text-ink leading-snug truncate" title={label}>
+            {label}
+          </div>
+          {showCount && (
+            <div className="mt-1 font-mono text-meta text-graphite tabular-nums">
+              {perPdfCount.done} / {perPdfCount.total}
+            </div>
+          )}
         </div>
       </div>
-    </aside>
+      <div className="border-t border-rule grid grid-cols-2 text-meta smcp tracking-wider">
+        <button
+          onClick={onExpand}
+          className="px-3 py-2 text-graphite hover:bg-ink hover:text-paper transition-colors border-r border-rule"
+        >
+          expand ↗
+        </button>
+        <button
+          onClick={onCancel}
+          className="px-3 py-2 text-graphite hover:bg-ink hover:text-paper transition-colors"
+        >
+          cancel ✕
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -2695,9 +2954,10 @@ function MemoryPane({
 
       {reloadingDocs && <ReloadingBanner label={reloadingDocsLabel ?? null} />}
 
-      {onSelectEntry && onSetLabel && (
+      {onSelectEntry && onSetLabel ? (
         <MatterDocumentsSection
-          buckets={docTypeBuckets}
+          categoryGroups={categoryEntries}
+          docTypeBuckets={docTypeBuckets}
           matterRoot={matterRoot}
           selectedEntryKey={selectedEntryKey ?? null}
           onSelectEntry={onSelectEntry}
@@ -2706,29 +2966,26 @@ function MemoryPane({
           documentOverrides={documentOverrides ?? null}
           onApplyDocOverride={onApplyDocOverride}
         />
+      ) : (
+        categoryEntries.map(({ spec, entries }) => (
+          <ExhibitCategoryCard
+            key={spec.key}
+            spec={spec}
+            entries={entries}
+            collapsed={!!collapsed[spec.key]}
+            onToggle={() => setCollapsed((s) => ({ ...s, [spec.key]: !s[spec.key] }))}
+            entryLabels={entryLabels}
+            onPickDocument={
+              matterRoot
+                ? (filename) => {
+                    const sep = matterRoot.endsWith('/') ? '' : '/';
+                    setPreviewPath(`${matterRoot}${sep}${filename}`);
+                  }
+                : undefined
+            }
+          />
+        ))
       )}
-
-      {categoryEntries.map(({ spec, entries }) => (
-        <ExhibitCategoryCard
-          key={spec.key}
-          spec={spec}
-          entries={entries}
-          collapsed={!!collapsed[spec.key]}
-          onToggle={() => setCollapsed((s) => ({ ...s, [spec.key]: !s[spec.key] }))}
-          entryLabels={entryLabels}
-          onPickDocument={
-            matterRoot
-              ? (filename) => {
-                  // matterRoot is the absolute folder path; entry.filename
-                  // is relative inside it. Concat to get the absolute PDF
-                  // path the /api/file proxy expects.
-                  const sep = matterRoot.endsWith('/') ? '' : '/';
-                  setPreviewPath(`${matterRoot}${sep}${filename}`);
-                }
-              : undefined
-          }
-        />
-      ))}
 
       {previewPath && (
         <DocumentPreviewModal path={previewPath} onClose={() => setPreviewPath(null)} />
@@ -7312,6 +7569,15 @@ function MatterOverlay({
   onClose: () => void;
 }) {
   const buckets = buildOverrideAwareBuckets(typedMemory, documentOverrides);
+  const categoryGroups = EXHIBIT_CATEGORIES.map((spec) => {
+    const flat: { docType: DocType; entry: PerPdfMemoryEntry }[] = [];
+    for (const dt of spec.doc_types) {
+      const list = typedMemory[dt];
+      if (!list) continue;
+      for (const e of list) flat.push({ docType: dt, entry: e });
+    }
+    return { spec, entries: flat };
+  });
 
   const totalEntries = buckets.reduce((acc, [, list]) => acc + list.length, 0);
   const e2Facts =
@@ -7343,7 +7609,8 @@ function MatterOverlay({
             onSet={onSetDashboardOverride}
           />
           <MatterDocumentsSection
-            buckets={buckets}
+            categoryGroups={categoryGroups}
+            docTypeBuckets={buckets}
             matterRoot={matterRoot}
             selectedEntryKey={selectedEntryKey}
             onSelectEntry={onSelectEntry}
@@ -7795,7 +8062,8 @@ function DocTypeQuickPicker({
 /* ---------------------------------------------------------------------- */
 
 function MatterDocumentsSection({
-  buckets,
+  categoryGroups,
+  docTypeBuckets,
   matterRoot,
   selectedEntryKey,
   onSelectEntry,
@@ -7804,7 +8072,8 @@ function MatterDocumentsSection({
   documentOverrides,
   onApplyDocOverride,
 }: {
-  buckets: [DocType, PerPdfMemoryEntry[]][];
+  categoryGroups: { spec: ExhibitCategorySpec; entries: { docType: DocType; entry: PerPdfMemoryEntry }[] }[];
+  docTypeBuckets: [DocType, PerPdfMemoryEntry[]][];
   matterRoot: string | null;
   selectedEntryKey: string | null;
   onSelectEntry: (key: string | null) => void;
@@ -7818,17 +8087,14 @@ function MatterDocumentsSection({
     patch: { display_name?: string | null; doc_type_override?: DocType | null },
   ) => Promise<boolean>;
 }) {
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => {
-    const init: Record<string, boolean> = {};
-    for (const [t] of buckets) init[t] = false;
-    return init;
-  });
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(categoryGroups.map((g) => [g.spec.key, true])),
+  );
 
-  // Compute the "needs review" pile: extraction errors, plus docs the
-  // classifier dropped into 'other' that haven't been manually reclassified
-  // yet. These are the docs the attorney most likely wants to triage first.
+  // Needs-review pile is computed across the raw doc_type buckets so it
+  // catches every error / unclassified doc regardless of category mapping.
   const needsReview: { docType: DocType; entry: PerPdfMemoryEntry }[] = [];
-  for (const [docType, entries] of buckets) {
+  for (const [docType, entries] of docTypeBuckets) {
     for (const entry of entries) {
       const ovr = documentOverrides?.[entry.filename] ?? null;
       const hasOverride = !!ovr?.doc_type_override;
@@ -7951,13 +8217,13 @@ function MatterDocumentsSection({
     <section>
       <SectionTitle marker="·" label="documents · click to preview" />
       <div className="space-y-5">
-        {buckets.map(([docType, entries]) => {
-          const isCollapsed = !!collapsed[docType];
+        {categoryGroups.map(({ spec, entries }) => {
+          const isCollapsed = !!collapsed[spec.key];
           return (
-            <div key={docType} className="border border-rule paper-recess">
+            <div key={spec.key} className="border border-rule paper-recess">
               <button
                 onClick={() =>
-                  setCollapsed((s) => ({ ...s, [docType]: !s[docType] }))
+                  setCollapsed((s) => ({ ...s, [spec.key]: !s[spec.key] }))
                 }
                 className="w-full flex items-baseline justify-between px-5 py-3 group hover:bg-paper-2/50 transition-colors text-left"
               >
@@ -7974,19 +8240,24 @@ function MatterDocumentsSection({
                     ▶
                   </span>
                   <span className="font-display text-title group-hover:text-ink transition-colors">
-                    {DOC_TYPE_LABEL[docType]}
+                    {spec.label}
                   </span>
                   <span className="font-mono text-label text-graphite ">
                     {entries.length}
                   </span>
                 </div>
                 <span className="font-mono text-label text-graphite-soft ">
-                  {docType}
+                  {entries.length === 0 ? '—' : `${entries.length} doc${entries.length === 1 ? '' : 's'}`}
                 </span>
               </button>
-              {!isCollapsed && (
+              {!isCollapsed && entries.length === 0 && (
+                <div className="px-5 py-3 border-t border-rule text-meta text-graphite-soft italic">
+                  No documents in this category yet.
+                </div>
+              )}
+              {!isCollapsed && entries.length > 0 && (
                 <ul className="border-t border-rule">
-                  {entries.map((e) => {
+                  {entries.map(({ docType, entry: e }) => {
                     const key = entryKey(docType, e.filename);
                     const expanded = selectedEntryKey === key;
                     const persistedLabel = documentOverrides?.[e.filename]?.display_name ?? null;

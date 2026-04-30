@@ -11,11 +11,14 @@ import {
   type PerPdfResult,
 } from '@/ingest/typed-memory';
 import { aggregateTypedMemoryToE2 } from '@/ingest/typed-aggregate';
+import { aggregateTypedMemoryToEb1a } from '@/ingest/typed-aggregate-eb1a';
 import {
   detectE2Subtype,
   pickRawDocSamplePaths,
 } from '@/ingest/extractors/subtype-detect';
 import type { E2CaseSubtype } from '@/ingest/extractors/subtype-detect.schema';
+import { detectCaseType } from '@/ingest/detect';
+import type { CaseType } from '@/ingest/schema';
 import { extractPdfText } from '@/ingest/pdf';
 import { getMatterOverride } from '@/lib/matter-overrides';
 
@@ -46,9 +49,9 @@ async function walkIngestableFiles(root: string): Promise<string[]> {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  let body: { path?: string };
+  let body: { path?: string; case_type_override?: CaseType };
   try {
-    body = (await request.json()) as { path?: string };
+    body = (await request.json()) as { path?: string; case_type_override?: CaseType };
   } catch {
     return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
@@ -57,6 +60,15 @@ export async function POST(request: Request): Promise<Response> {
   if (!rootPath || !path.isAbsolute(rootPath)) {
     return Response.json(
       { error: 'Provide an absolute folder path under "path".' },
+      { status: 400 },
+    );
+  }
+
+  const caseTypeOverride: CaseType | undefined = body.case_type_override;
+  const VALID_OVERRIDES: ReadonlySet<CaseType> = new Set<CaseType>(['E2', 'EB1A', 'EB1B', 'EB1C']);
+  if (caseTypeOverride !== undefined && !VALID_OVERRIDES.has(caseTypeOverride)) {
+    return Response.json(
+      { error: `case_type_override must be one of E2, EB1A, EB1B, EB1C` },
       { status: 400 },
     );
   }
@@ -139,6 +151,76 @@ export async function POST(request: Request): Promise<Response> {
         return;
       }
 
+      // Phase 0 — case-type detection. Sample up to 3 raw-doc PDFs and
+      // run the Haiku 4.5 case-type classifier (E2 / EB1A / EB1B / EB1C).
+      // Runs in parallel with Phase 1 below; the verdict is awaited
+      // before the aggregator picks its branch.
+      send(controller, {
+        type: 'progress',
+        stage: 'case_type_detecting',
+        label: 'Detecting case type (E-2 vs EB-1A/B/C) from raw documents',
+        total: pdfPaths.length,
+      });
+
+      // When the UI explicitly picks a case type (E-2 vs EB-1A button in the
+      // sidebar), skip Phase-0 detection entirely and trust the override.
+      // Without an override, sample up to 3 raw-doc PDFs and run the
+      // Haiku 4.5 case-type classifier in parallel with Phase 1.
+      const caseTypePromise: Promise<{
+        case_type: CaseType;
+        confidence: number;
+        reasoning: string;
+      }> = caseTypeOverride
+        ? Promise.resolve({
+            case_type: caseTypeOverride,
+            confidence: 1,
+            reasoning: `case_type forced to ${caseTypeOverride} by the UI sidebar`,
+          })
+        : (async () => {
+            try {
+              const samplePathsForDetect = pickRawDocSamplePaths(pdfPaths);
+              const samples = await Promise.all(
+                samplePathsForDetect.slice(0, 3).map(async (p) => {
+                  const buf = await fs.readFile(p);
+                  const parsed = await extractPdfText(buf);
+                  return { filename: path.relative(rootPath, p), text: parsed.text };
+                }),
+              );
+              if (samples.length === 0) {
+                return { case_type: 'E2' as CaseType, confidence: 0, reasoning: 'no samples available; defaulted to E-2' };
+              }
+              const detection = await detectCaseType(samples);
+              send(controller, {
+                type: 'case_type_result',
+                case_type: detection.case_type,
+                confidence: detection.confidence,
+                reasoning: detection.reasoning,
+              });
+              return {
+                case_type: detection.case_type,
+                confidence: detection.confidence,
+                reasoning: detection.reasoning,
+              };
+            } catch (e: unknown) {
+              send(controller, {
+                type: 'case_type_error',
+                message: e instanceof Error ? e.message : String(e),
+              });
+              return { case_type: 'E2' as CaseType, confidence: 0, reasoning: 'detection failed; defaulted to E-2' };
+            }
+          })();
+
+      // Surface the forced case_type to the client so the loading overlay
+      // can label what's happening accurately.
+      if (caseTypeOverride) {
+        send(controller, {
+          type: 'case_type_result',
+          case_type: caseTypeOverride,
+          confidence: 1,
+          reasoning: `forced by UI: ${caseTypeOverride}`,
+        });
+      }
+
       // Phase 0.6 — case-subtype detection (manuals/_E2-SUBTYPE-TAXONOMY.md
       // §12). Production: raw_docs mode. The bot reads ONLY raw client
       // documents (passports, contracts, CVs, bank statements, etc.) — no
@@ -148,9 +230,9 @@ export async function POST(request: Request): Promise<Response> {
       // CV, passport, bank statement. The first three alphabetically are
       // a fallback if no filename matches.
       //
-      // Runs in parallel with Phase 1 (per-PDF classify + extract): the
-      // subtype result is only consumed when the final IngestSuccess is
-      // assembled, so its model call overlaps the per-PDF wave entirely.
+      // Runs in parallel with Phase 1 (per-PDF classify + extract). Only
+      // fires when Phase 0 returns case_type='E2' — for EB-1A/B/C the
+      // subtype concept doesn't apply and the call would be wasted.
       // Frees the 3-8 s detect critical-path cost.
       send(controller, {
         type: 'progress',
@@ -161,6 +243,8 @@ export async function POST(request: Request): Promise<Response> {
 
       const e2SubtypePromise: Promise<E2CaseSubtype | null> = (async () => {
         try {
+          const detected = await caseTypePromise;
+          if (detected.case_type !== 'E2') return null;
           const samplePaths = pickRawDocSamplePaths(pdfPaths);
           const samples = await Promise.all(
             samplePaths.map(async (p) => {
@@ -241,6 +325,8 @@ export async function POST(request: Request): Promise<Response> {
               wire_subtype: r.wireConfirmation?.wire_subtype ?? null,
               vital_record_subtype: r.vitalRecords?.vital_record_subtype ?? null,
               foreign_doc_subtype: r.foreignCorporate?.foreign_doc_subtype ?? null,
+              bank_statement_subtype:
+                r.bankStatement?.bank_statement_subtype?.value ?? null,
             },
             // Full rich extraction content — used by the PDF detail modal
             // to show structured per-document facts (CV current title,
@@ -270,6 +356,7 @@ export async function POST(request: Request): Promise<Response> {
               governmentDoc: r.governmentDoc ?? null,
               imagePhoto: r.imagePhoto ?? null,
               incentiveDocument: r.incentiveDocument ?? null,
+              bankStatement: r.bankStatement ?? null,
             },
           });
         },
@@ -351,42 +438,68 @@ export async function POST(request: Request): Promise<Response> {
         'aggregating',
         `Reconciling ${successCount} per-document extractions into unified case facts`,
       );
+      const detected = await caseTypePromise;
       try {
-        const aggregate = await aggregateTypedMemoryToE2(memory, {
-          aliases,
-        });
-        const { caseFacts, ...gates } = aggregate;
-        result = {
-          filename: matterName,
-          pageCount: totalPages,
-          detection_confidence: 1,
-          detection_reasoning:
-            'Case-type fixed to E-2 in v1 of typed-memory pipeline; per-document classifier feeds the aggregator directly. Sub-type from Phase-0.6 classifier.',
-          caseFacts: { case_type: 'E2', facts: caseFacts },
-          e2_subtype: e2Subtype,
-          source_pdfs: sourcePdfs,
-          // Forward all 15 deterministic-gate row arrays + derived flags so
-          // the client audit can fold them into the unified conflict
-          // register without re-running gate logic.
-          aggregate_audit: {
-            defensive_paragraphs_required: gates.defensive_paragraphs_required,
-            marginality_evidence_present: gates.marginality_evidence_present,
-            fx_gate_results: gates.fx_gate_results,
-            passport_validity_results: gates.passport_validity_results,
-            i94_status_results: gates.i94_status_results,
-            translation_gate_results: gates.translation_gate_results,
-            salary_benchmark_results: gates.salary_benchmark_results,
-            cv_title_drift_results: gates.cv_title_drift_results,
-            personal_reference_results: gates.personal_reference_results,
-            credential_verifiability_results: gates.credential_verifiability_results,
-            tax_balance_sheet_results: gates.tax_balance_sheet_results,
-            pl_tax_net_income_results: gates.pl_tax_net_income_results,
-            real_estate_buyer_mismatch_results: gates.real_estate_buyer_mismatch_results,
-            incentive_recipient_mismatch_results: gates.incentive_recipient_mismatch_results,
-            substantiality_recon_results: gates.substantiality_recon_results,
-            entity_coherence_results: gates.entity_coherence_results,
-          },
-        } satisfies IngestSuccess;
+        if (detected.case_type === 'E2') {
+          const aggregate = await aggregateTypedMemoryToE2(memory, {
+            aliases,
+          });
+          const { caseFacts, ...gates } = aggregate;
+          result = {
+            filename: matterName,
+            pageCount: totalPages,
+            detection_confidence: detected.confidence,
+            detection_reasoning:
+              detected.reasoning ||
+              'Case-type detected as E-2; per-document classifier feeds the aggregator directly. Sub-type from Phase-0.6 classifier.',
+            caseFacts: { case_type: 'E2', facts: caseFacts },
+            e2_subtype: e2Subtype,
+            source_pdfs: sourcePdfs,
+            // Forward all 15 deterministic-gate row arrays + derived flags so
+            // the client audit can fold them into the unified conflict
+            // register without re-running gate logic.
+            aggregate_audit: {
+              defensive_paragraphs_required: gates.defensive_paragraphs_required,
+              marginality_evidence_present: gates.marginality_evidence_present,
+              fx_gate_results: gates.fx_gate_results,
+              passport_validity_results: gates.passport_validity_results,
+              i94_status_results: gates.i94_status_results,
+              translation_gate_results: gates.translation_gate_results,
+              salary_benchmark_results: gates.salary_benchmark_results,
+              cv_title_drift_results: gates.cv_title_drift_results,
+              personal_reference_results: gates.personal_reference_results,
+              credential_verifiability_results: gates.credential_verifiability_results,
+              tax_balance_sheet_results: gates.tax_balance_sheet_results,
+              pl_tax_net_income_results: gates.pl_tax_net_income_results,
+              real_estate_buyer_mismatch_results: gates.real_estate_buyer_mismatch_results,
+              incentive_recipient_mismatch_results: gates.incentive_recipient_mismatch_results,
+              substantiality_recon_results: gates.substantiality_recon_results,
+              entity_coherence_results: gates.entity_coherence_results,
+            },
+          } satisfies IngestSuccess;
+        } else if (detected.case_type === 'EB1A') {
+          const facts = await aggregateTypedMemoryToEb1a(memory);
+          result = {
+            filename: matterName,
+            pageCount: totalPages,
+            detection_confidence: detected.confidence,
+            detection_reasoning: detected.reasoning,
+            caseFacts: { case_type: 'EB1A', facts },
+            source_pdfs: sourcePdfs,
+          } satisfies IngestSuccess;
+        } else {
+          // EB-1B / EB-1C aggregator paths are not yet implemented. Surface
+          // a clean error rather than running the wrong aggregator.
+          result = {
+            filename: matterName,
+            pageCount: totalPages,
+            source_pdfs: sourcePdfs,
+            error: {
+              code: 'unsupported_case_type',
+              message: `Case type ${detected.case_type} is not yet supported by the typed-memory aggregator. Detection reasoning: ${detected.reasoning}`,
+            },
+          };
+        }
       } catch (e: unknown) {
         result = {
           filename: matterName,
