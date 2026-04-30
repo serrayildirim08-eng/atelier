@@ -2282,6 +2282,41 @@ const EXHIBIT_CATEGORIES: ExhibitCategorySpec[] = [
 ];
 
 /**
+ * Group typed-memory entries into doc_type buckets, honoring any manual
+ * doc_type_override on a per-filename basis. The persisted override map
+ * is keyed by relative filename so the same entry can appear under a
+ * different bucket the moment the user reclassifies it via the forward
+ * picker — no re-aggregate cycle required for the bucket list to update.
+ *
+ * Returns `[DocType, entries][]` sorted by descending bucket size so the
+ * heaviest categories surface first.
+ */
+function buildOverrideAwareBuckets(
+  memory: TypedMemory,
+  overrides:
+    | Record<string, { display_name?: string | null; doc_type_override?: DocType | null }>
+    | null,
+): [DocType, PerPdfMemoryEntry[]][] {
+  const out: Partial<Record<DocType, PerPdfMemoryEntry[]>> = {};
+  for (const [bucket, list] of Object.entries(memory) as [
+    DocType,
+    PerPdfMemoryEntry[] | undefined,
+  ][]) {
+    if (!Array.isArray(list) || list.length === 0) continue;
+    for (const entry of list) {
+      const override = overrides?.[entry.filename]?.doc_type_override ?? null;
+      const effective = override ?? bucket;
+      const target = (out[effective] ?? []) as PerPdfMemoryEntry[];
+      target.push(entry);
+      out[effective] = target;
+    }
+  }
+  return (Object.entries(out) as [DocType, PerPdfMemoryEntry[]][])
+    .filter(([, list]) => list.length > 0)
+    .sort((a, b) => b[1].length - a[1].length);
+}
+
+/**
  * Document preview shim — picks the right render for the file's extension:
  *   - .pdf       → <iframe>           (browser native PDF viewer)
  *   - images     → <img>              (.jpg/.jpeg/.png/.gif/.webp)
@@ -2629,14 +2664,11 @@ function MemoryPane({
     );
   }
 
-  // Doc-type bucket list (same shape MatterOverlay uses) so the Exhibits
-  // pane can host the Needs Review pile + per-doc inline preview +
-  // reclassify directly, without forcing the user into the full overlay.
-  const docTypeBuckets = (
-    Object.entries(typedMemory) as [DocType, PerPdfMemoryEntry[]][]
-  )
-    .filter(([, list]) => Array.isArray(list) && list.length > 0)
-    .sort((a, b) => b[1].length - a[1].length);
+  // Override-aware bucket list — when the user reclassifies a doc via the
+  // forward-to picker, this rebuilds groups using the override doc_type
+  // so the row visually moves into the new bucket immediately. No
+  // re-aggregate needed; the persistent override is already saved.
+  const docTypeBuckets = buildOverrideAwareBuckets(typedMemory, documentOverrides ?? null);
 
   return (
     <div className="px-9 py-7 grid gap-7">
@@ -7153,9 +7185,7 @@ function MatterOverlay({
   ) => Promise<boolean>;
   onClose: () => void;
 }) {
-  const buckets = (Object.entries(typedMemory) as [DocType, PerPdfMemoryEntry[]][])
-    .filter(([, list]) => Array.isArray(list) && list.length > 0)
-    .sort((a, b) => b[1].length - a[1].length);
+  const buckets = buildOverrideAwareBuckets(typedMemory, documentOverrides);
 
   const totalEntries = buckets.reduce((acc, [, list]) => acc + list.length, 0);
   const e2Facts =
