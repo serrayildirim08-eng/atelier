@@ -172,6 +172,7 @@ export function coarseFromFineDocTypeId(
     birth_certificate: 'vital_record',
     marriage_certificate: 'vital_record',
     adoption_decree: 'vital_record',
+    nufus_kayit_ornegi: 'vital_record',
     // USCIS / DOS / consular forms
     i129: 'uscis_or_dos_form',
     i129_e_supplement: 'uscis_or_dos_form',

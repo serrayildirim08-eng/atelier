@@ -247,6 +247,40 @@ const CoPetitionerSchema = z.object({
   role_in_petitioner_entity: Field(z.string()).optional(),
 });
 
+/**
+ * Phase-10 — derivative-dependent slot. Populated by
+ * `lib/e2/dependent-inference.ts` after the principal applicant is
+ * identified (applicant-inference.ts) and the family documents
+ * (marriage_certificate, birth_certificate, nufus_kayit_ornegi) have been
+ * extracted. One row per dependent passport that the deterministic ladder
+ * (or the env-gated Haiku 4.5 fallback) was able to bind to a specific
+ * relationship. Unmatched passports are surfaced via
+ * conflict_register entries (conflict_type='unmatched_passport',
+ * severity 2) rather than a row here, so the dossier UI can show the
+ * attorney "we saw this passport but couldn't tie it to a family doc".
+ *
+ * `dependent_doc_basis` records WHICH family doc carried the binding fact
+ * (e.g., "marriage_certificate.pdf" or "nufus_kayit_ornegi.pdf"); the
+ * drafter prints this verbatim in the cover-letter dependent paragraph.
+ */
+const E2DependentRelationshipEnum = z.enum([
+  'spouse',
+  'child',
+  'other_dependent',
+]);
+
+const E2DependentSchema = z.object({
+  full_name: Field(z.string()),
+  relationship: Field(E2DependentRelationshipEnum),
+  dob: Field(z.string()),
+  nationality: Field(z.string()),
+  passport_filename: Field(z.string()),
+  dependent_doc_basis: Field(z.string()),
+});
+
+export type E2Dependent = z.infer<typeof E2DependentSchema>;
+export type E2DependentRelationship = z.infer<typeof E2DependentRelationshipEnum>;
+
 const MatterMetaSchema = z.object({
   co_petitioners: z.array(CoPetitionerSchema).optional(),
   // Phase-7 Task B — attorney-supplied per-matter sub-application alias
@@ -385,6 +419,15 @@ export const E2FactsSchema = z.object({
   // against `cover_letter_phase7.five_year_horizon` for credibility under
   // Matter of Ho.
   business_plan_phase9: BusinessPlanPhase9Schema.optional(),
+  // Phase-10 — derivative-dependent identification. One row per passport
+  // the deterministic dependent-inference ladder (or the env-gated Haiku
+  // 4.5 fallback) was able to bind to a family document. Unmatched
+  // passports are surfaced as `unmatched_passport` (severity 2)
+  // conflict_register entries instead, so the attorney can see which
+  // people the firm has passport-level evidence for that didn't match a
+  // marriage / birth / Nüfus record. Optional — pre-Phase-10 matters
+  // continue to validate.
+  dependents: z.array(E2DependentSchema).optional(),
 });
 
 export type E2Facts = z.infer<typeof E2FactsSchema>;
@@ -423,8 +466,97 @@ const CitationCountsSchema = z.object({
   h_index_claimed: Field(z.number()),
 });
 
+/**
+ * Tier-1 filing metadata. filing_route + consulate_post are MANUAL inputs
+ * (the bot never auto-detects these — see earlier design discussion).
+ * Address fields are auto-filled from passport / visa / I-797 mailing
+ * blocks where available, but always editable.
+ */
+const EB1AFilingMetadataSchema = z.object({
+  filing_route: Field(z.enum(['consular', 'change_of_status', 'unknown'])),
+  consulate_post: Field(z.string()),
+  i140_receipt_number: Field(z.string()),
+  i140_filed_date: Field(z.string()),
+  residential_address: Field(z.string()),
+  mailing_address: Field(z.string()),
+  mailing_address_same_as_residential: Field(z.boolean()),
+  manual_overrides_applied: z.array(Field(z.string())),
+});
+
+/**
+ * Tier-2 — academic record. One row per qualifying credential, oldest
+ * first. is_terminal=true marks the highest degree the beneficiary holds
+ * in the field (used by tenure-table classifier to split phd / postdoc
+ * vs employment).
+ */
+const EB1AEducationEntrySchema = z.object({
+  degree: Field(z.string()),
+  field_of_study: Field(z.string()),
+  institution: Field(z.string()),
+  country: Field(z.string()),
+  start_date: Field(z.string()),
+  end_date: Field(z.string()),
+  is_terminal: Field(z.boolean()),
+  evidence_doc: Field(z.string()),
+});
+
+/**
+ * Tier-2 — master tenure table. Backbone for the future leading/critical-
+ * role criterion gate (8 CFR 204.5(h)(3)(viii)). One row per role.
+ * Sources: CV roles[], service-record extractor, employer letters,
+ * recommendation letters with prior-employer relationship. Academic
+ * positions (PhD program, postdoc, visiting appointments) are first-
+ * class rows — tenure_type discriminates.
+ */
+const EB1ATenureEntrySchema = z.object({
+  employer: Field(z.string()),
+  title: Field(z.string()),
+  tenure_type: Field(
+    z.enum([
+      'employment',
+      'phd_program',
+      'postdoc',
+      'fellowship',
+      'visiting_appointment',
+      'consulting',
+      'board_or_advisory',
+      'other',
+    ]),
+  ),
+  start_date: Field(z.string()),
+  end_date: Field(z.string()),
+  is_current: Field(z.boolean()),
+  country: Field(z.string()),
+  scope_of_role: Field(z.string()),
+  headcount_under: Field(z.number()),
+  evidence_docs: z.array(Field(z.string())),
+});
+
+/**
+ * Tier-3 — field of endeavor classification (Haiku 4.5 pass with manual
+ * override). Goldilocks rule applies:
+ *   too_broad → peer comparison meaningless ("computer science")
+ *   goldilocks → specific enough to compare, broad enough to have peers
+ *   too_narrow → no defined peer set ("React 19 server-component memory profiling")
+ * Always manually editable. peer_set_description is a 1-sentence
+ * description of "others in the field" that the criteria gates use to
+ * frame benchmarking.
+ */
+const EB1AFieldClassificationSchema = z.object({
+  label: Field(z.string()),
+  peer_set_description: Field(z.string()),
+  specificity: Field(z.enum(['too_broad', 'goldilocks', 'too_narrow'])),
+  confidence: Field(z.enum(['HIGH', 'MED', 'LOW'])),
+  reasoning: Field(z.string()),
+  manual_override_used: Field(z.boolean()),
+});
+
 export const EB1AFactsSchema = z.object({
   beneficiary: BeneficiarySchema,
+  filing_metadata: EB1AFilingMetadataSchema,
+  education_history: z.array(EB1AEducationEntrySchema),
+  tenure_table: z.array(EB1ATenureEntrySchema),
+  field_classification: EB1AFieldClassificationSchema,
   claimed_criteria: z.array(ClaimedCriterionSchema),
   expert_letters: z.array(ExpertLetterSchema),
   kazarian_step_two: KazarianStepTwoSchema,

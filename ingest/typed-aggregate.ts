@@ -22,7 +22,17 @@ import {
   type OwnershipEntryT,
   type ConflictEntryT as InferenceConflictEntryT,
 } from '@/lib/e2/applicant-inference';
-import { E2FactsSchema, type E2Facts } from './schema';
+import {
+  inferDependentsFromFamilyDocs,
+  inferDependentsWithLlmFallback,
+  type DependentInferenceInput,
+  type DependentRow,
+  type PassportCandidate,
+  type MarriageBinding,
+  type BirthBinding,
+  type NufusBinding,
+} from '@/lib/e2/dependent-inference';
+import { E2FactsSchema, type E2Facts, type E2Dependent } from './schema';
 import {
   DOC_TYPE_LABELS,
   type PerPdfResult,
@@ -3960,6 +3970,201 @@ export async function enrichInvestorFromOwnershipChainAsync(
   return facts;
 }
 
+/* ---------------------------------------------------------------------- */
+/* Dependent identification (Phase-10 sub-step)                           */
+/*                                                                        */
+/* Runs AFTER applicant identification has settled. Walks the typed       */
+/* memory for passport / marriage / birth / Nüfus entries, asks           */
+/* lib/e2/dependent-inference.ts to bind each non-principal passport to   */
+/* a relationship, and writes the resulting rows onto facts.dependents.   */
+/* Idempotent — never duplicates a dependent or conflict.                 */
+/* ---------------------------------------------------------------------- */
+
+const NUFUS_FILENAME_REGEX =
+  /(nufus.*kayit.*orne|nufus.*ornek|aile.*kayit|vukuatli.*nufus|nufus.*muduru)/i;
+
+function collectPassportCandidates(memory: TypedMemory): PassportCandidate[] {
+  const out: PassportCandidate[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    const facts = entry.facts;
+    if (!facts || facts.doc_type !== 'passport') continue;
+    const rich = entry.passport;
+    out.push({
+      filename: entry.filename,
+      full_name:
+        rich?.full_name_ascii?.value ??
+        rich?.full_name_native?.value ??
+        facts.full_name?.value ??
+        null,
+      dob: rich?.date_of_birth?.value ?? facts.dob?.value ?? null,
+      nationality: rich?.nationality?.value ?? facts.nationality?.value ?? null,
+    });
+  }
+  return out;
+}
+
+function collectMarriageBindings(memory: TypedMemory): MarriageBinding[] {
+  const out: MarriageBinding[] = [];
+  const seen = new Set<string>();
+  for (const entry of iterMemoryEntries(memory)) {
+    // Rich vital_records extractor (preferred — has explicit
+    // marriage_certificate variant).
+    const vr = entry.vitalRecords;
+    if (vr?.vital_record_subtype === 'marriage_certificate' && !seen.has(entry.filename)) {
+      out.push({
+        filename: entry.filename,
+        spouse_a_name: vr.spouse1_name?.value ?? null,
+        spouse_b_name: vr.spouse2_name?.value ?? null,
+      });
+      seen.add(entry.filename);
+      continue;
+    }
+    // Government-doc fallback (vital_record_marriage variant).
+    const gd = entry.governmentDoc;
+    if (gd?.government_doc_subtype === 'vital_record_marriage' && !seen.has(entry.filename)) {
+      out.push({
+        filename: entry.filename,
+        spouse_a_name: gd.spouse_a_name_ascii?.value ?? gd.spouse_a_name_native?.value ?? null,
+        spouse_b_name: gd.spouse_b_name_ascii?.value ?? gd.spouse_b_name_native?.value ?? null,
+      });
+      seen.add(entry.filename);
+    }
+  }
+  return out;
+}
+
+function collectBirthBindings(memory: TypedMemory): BirthBinding[] {
+  const out: BirthBinding[] = [];
+  const seen = new Set<string>();
+  for (const entry of iterMemoryEntries(memory)) {
+    const vr = entry.vitalRecords;
+    if (vr?.vital_record_subtype === 'birth_certificate' && !seen.has(entry.filename)) {
+      out.push({
+        filename: entry.filename,
+        child_name: vr.child_name_ascii?.value ?? vr.child_name_native?.value ?? null,
+        child_dob: vr.dob?.value ?? null,
+        parent1_name: vr.parent1_name?.value ?? null,
+        parent2_name: vr.parent2_name?.value ?? null,
+      });
+      seen.add(entry.filename);
+      continue;
+    }
+    const gd = entry.governmentDoc;
+    if (gd?.government_doc_subtype === 'vital_record_birth' && !seen.has(entry.filename)) {
+      out.push({
+        filename: entry.filename,
+        child_name: gd.child_name_ascii?.value ?? gd.child_name_native?.value ?? null,
+        child_dob: gd.date_of_birth?.value ?? null,
+        parent1_name: gd.father_name_ascii?.value ?? gd.father_name_native?.value ?? null,
+        parent2_name: gd.mother_name_ascii?.value ?? gd.mother_name_native?.value ?? null,
+      });
+      seen.add(entry.filename);
+    }
+  }
+  return out;
+}
+
+function collectNufusBindings(memory: TypedMemory): NufusBinding[] {
+  const out: NufusBinding[] = [];
+  for (const entry of iterMemoryEntries(memory)) {
+    const facts = entry.facts;
+    if (!facts) continue;
+    // Detect Nüfus by filename pattern OR by thin VitalRecordFactsSchema
+    // with record_kind='other' carrying the same hint. The thin schema
+    // doesn't surface household members; we capture an empty array, which
+    // makes the deterministic ladder treat the doc as a soft binder
+    // (only effective when an extractor later adds structured names).
+    const filenameMatch = NUFUS_FILENAME_REGEX.test(entry.filename);
+    const isVitalOther =
+      facts.doc_type === 'vital_record' && facts.record_kind?.value === 'other';
+    if (!filenameMatch && !isVitalOther) continue;
+    out.push({ filename: entry.filename, household_member_names: [] });
+  }
+  return out;
+}
+
+function buildDependentInferenceInput(
+  facts: E2Facts,
+  memory: TypedMemory,
+): DependentInferenceInput {
+  const principalName = facts.investor.full_name?.value ?? null;
+  const principalNationality = facts.investor.nationality?.value ?? null;
+  const passports = collectPassportCandidates(memory);
+  // The principal's passport filename is the entry whose name (rich ASCII
+  // or thin) matches investor.full_name. We don't have a canonical link,
+  // so we walk and pick the first plausible match. The dependent-inference
+  // module also de-dupes by name, so worst case is a no-op.
+  let principalPassportFilename: string | null = null;
+  if (principalName) {
+    for (const p of passports) {
+      if (p.full_name && p.full_name.trim() === principalName.trim()) {
+        principalPassportFilename = p.filename;
+        break;
+      }
+    }
+  }
+  return {
+    passports,
+    principal_name: principalName,
+    principal_nationality: principalNationality,
+    principal_passport_filename: principalPassportFilename,
+    marriages: collectMarriageBindings(memory),
+    births: collectBirthBindings(memory),
+    nufus: collectNufusBindings(memory),
+  };
+}
+
+function dependentRowsEqual(a: E2Dependent, b: DependentRow | E2Dependent): boolean {
+  return (
+    a.passport_filename?.value === b.passport_filename?.value &&
+    a.full_name?.value === b.full_name?.value &&
+    a.relationship?.value === b.relationship?.value
+  );
+}
+
+function applyDependentRows(facts: E2Facts, rows: readonly DependentRow[]): void {
+  if (rows.length === 0) return;
+  const existing = facts.dependents ?? [];
+  const merged: E2Dependent[] = [...existing];
+  for (const row of rows) {
+    if (merged.some((d) => dependentRowsEqual(d, row))) continue;
+    merged.push(row as E2Dependent);
+  }
+  facts.dependents = merged;
+}
+
+/**
+ * Synchronous deterministic dependent-identification pass. Idempotent —
+ * never duplicates a dependent or conflict_register entry.
+ */
+export function enrichDependentsFromFamilyDocs(
+  facts: E2Facts,
+  memory: TypedMemory,
+): E2Facts {
+  const input = buildDependentInferenceInput(facts, memory);
+  const result = inferDependentsFromFamilyDocs(input);
+  applyDependentRows(facts, result.dependents);
+  applyInferenceConflicts(facts, result.conflicts);
+  return facts;
+}
+
+/**
+ * Async opt-in dependent-identification pass. When the deterministic
+ * ladder leaves passports unmatched AND DEPENDENT_HAIKU_FALLBACK_ENABLED
+ * is truthy, fires one Haiku call. Default-disabled keeps tests
+ * deterministic. Errors swallowed → deterministic decision stands.
+ */
+export async function enrichDependentsFromFamilyDocsAsync(
+  facts: E2Facts,
+  memory: TypedMemory,
+): Promise<E2Facts> {
+  const input = buildDependentInferenceInput(facts, memory);
+  const result = await inferDependentsWithLlmFallback(input);
+  applyDependentRows(facts, result.dependents);
+  applyInferenceConflicts(facts, result.conflicts);
+  return facts;
+}
+
 /**
  * Phase-3 orchestrator. Mutates `facts` in place to populate any of the
  * Phase-1 / Phase-2 optional gate inputs that the LLM aggregator left
@@ -4052,6 +4257,12 @@ export function enrichPhase3Fields(facts: E2Facts, memory: TypedMemory): E2Facts
   // optional Haiku fallback runs in aggregateTypedMemoryToE2 once the
   // full enrichment chain has settled (see enrichInvestorFromOwnershipChainAsync).
   enrichInvestorFromOwnershipChain(facts);
+
+  // facts.dependents — deterministic only. Runs AFTER applicant
+  // identification so the principal's passport can be excluded from the
+  // dependent candidate pool. The Haiku fallback fires later in
+  // aggregateTypedMemoryToE2 (see enrichDependentsFromFamilyDocsAsync).
+  enrichDependentsFromFamilyDocs(facts, memory);
 
   return facts;
 }
@@ -4266,6 +4477,13 @@ export async function aggregateTypedMemoryToE2(
   // so a missing API key never breaks the aggregator. Default-disabled
   // keeps tests deterministic and CI free of spurious API charges.
   await enrichInvestorFromOwnershipChainAsync(parsed.data);
+
+  // Optional Haiku-fallback pass for dependent identification. Mirrors the
+  // applicant flow: deterministic ladder ran inside enrichPhase3Fields;
+  // this async pass only fires when the env flag
+  // DEPENDENT_HAIKU_FALLBACK_ENABLED is truthy AND there are unmatched
+  // passports. Errors swallowed; deterministic output stands.
+  await enrichDependentsFromFamilyDocsAsync(parsed.data, memory);
 
   // Manual §4.5 quality gate: deterministic backstop for the Sonnet
   // reasoning. If the membership_interest_transfer total_consideration

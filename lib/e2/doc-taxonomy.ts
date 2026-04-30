@@ -240,6 +240,48 @@ const VITAL_RECORDS: DocType[] = [
     filing_bound: 'always',
   },
   {
+    id: 'nufus_kayit_ornegi',
+    name: 'Turkish family registry (Nüfus Kayıt Örneği)',
+    category: 'vital_record',
+    definition:
+      'Turkish family registry record (Nüfus Kayıt Örneği) — official document from Nüfus Müdürlüğü listing the head of household, spouse, and children with DOB, nationality, and family member registration numbers. Establishes multiple family relationships in a single document for E-2 dependent applications.',
+    identifying_signals: {
+      filename_regex: [
+        // ı (U+0131, dotless-i) does not fold to ASCII i, so match kay.t
+        /nufus.*kay.t.*orn|nufus.*ornek|aile.*kay.t/i,
+        /vukuatli.*nufus|nufus.*muduru/i,
+      ],
+      keyword_phrases: [
+        'Nüfus Kayıt Örneği',
+        'Nüfus Müdürlüğü',
+        'Vukuatlı Nüfus',
+        'Aile Kayıt',
+        'T.C. Kimlik No',
+        'Anne Adı',
+        'Baba Adı',
+        'Eş Adı',
+      ],
+    },
+    foreign_language_equivalents: {
+      tr: { native_name: 'Nüfus Kayıt Örneği' },
+    },
+    // Covers both child (birth) and spousal (marriage) relationship proof in one doc.
+    fills_proof_slots: [
+      'E1.principal_nationality_path',
+      'DEP.child_birth_certificates',
+      'DEP.marriage_certificate',
+    ],
+    extractor_skill: null,
+    adequacy_criteria: [
+      'Issued by Nüfus Müdürlüğü (government, not notarial)',
+      'Recent (issued within 6 months of filing)',
+      'Certified English translation attached for non-English filings',
+    ],
+    primary_authority: '8 CFR 214.2(e)(4)(i) (definition of accompanying spouse + child); 22 CFR 41.51(b)(1)(iv) (E-2 dependent eligibility)',
+    typical_aps: 4,
+    filing_bound: 'optional',
+  },
+  {
     id: 'adoption_decree',
     name: 'Adoption decree',
     category: 'vital_record',

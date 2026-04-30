@@ -2192,13 +2192,13 @@ function DossierLoadingHeader({
 type ExhibitCategoryKey =
   | 'applicant'
   | 'company'
-  | 'business_plan'
-  | 'cover_letter'
   | 'source_of_funds'
-  | 'operational'
-  | 'forms_letters'
+  | 'bank_statements'
+  | 'operational_contracts'
   | 'employees'
-  | 'unassigned';
+  | 'tax_returns'
+  | 'invoices_receipts'
+  | 'others';
 
 interface ExhibitCategorySpec {
   key: ExhibitCategoryKey;
@@ -2228,38 +2228,56 @@ const EXHIBIT_CATEGORIES: ExhibitCategorySpec[] = [
     ],
   },
   {
-    key: 'business_plan',
-    label: '3 · Business Plan',
-    doc_types: ['business_plan'],
+    key: 'source_of_funds',
+    label: '3 · Source of Funds',
+    doc_types: ['source_of_funds', 'title_deed', 'money_movement'],
+    generators: [],
+  },
+  {
+    key: 'bank_statements',
+    label: '4 · Company Bank Statements',
+    doc_types: ['bank_statement'],
+    generators: [],
+  },
+  {
+    key: 'operational_contracts',
+    label: '5 · Operational Contracts',
+    doc_types: ['lease_or_property', 'business_contract'],
+    generators: [],
+  },
+  {
+    key: 'employees',
+    label: '6 · Employee Documents',
+    doc_types: ['payroll_doc', 'employer_letter'],
+    generators: [],
+  },
+  {
+    key: 'tax_returns',
+    label: '7 · Tax Returns',
+    doc_types: ['tax_doc'],
+    generators: [],
+  },
+  {
+    key: 'invoices_receipts',
+    label: '8 · Invoices & Receipts',
+    doc_types: ['invoice_or_receipt'],
+    generators: [],
+  },
+  {
+    key: 'others',
+    label: '9 · Others',
+    doc_types: [
+      'business_plan',
+      'cover_letter',
+      'uscis_or_dos_form',
+      'expert_letter',
+      'financial_statement',
+      'translation_certification',
+      'other',
+    ],
     generators: [
       { generator: 'business_plan', label: 'Generate · Business plan (E-2)' },
-    ],
-  },
-  {
-    key: 'cover_letter',
-    label: '4 · Cover Letter',
-    doc_types: ['cover_letter'],
-    generators: [
       { generator: 'cover_letter', label: 'Generate · Cover letter' },
-    ],
-  },
-  {
-    key: 'source_of_funds',
-    label: '5 · Source of Funds',
-    doc_types: ['source_of_funds', 'title_deed', 'money_movement', 'bank_statement'],
-    generators: [],
-  },
-  {
-    key: 'operational',
-    label: '6 · Operational Documents',
-    doc_types: ['lease_or_property', 'invoice_or_receipt', 'financial_statement', 'business_contract', 'tax_doc'],
-    generators: [],
-  },
-  {
-    key: 'forms_letters',
-    label: '7 · Forms and Letters',
-    doc_types: ['uscis_or_dos_form', 'expert_letter'],
-    generators: [
       { generator: 'forms_i129', label: 'Fill · I-129' },
       { generator: 'forms_i129e', label: 'Fill · I-129E' },
       { generator: 'forms_g28', label: 'Fill · G-28' },
@@ -2267,18 +2285,6 @@ const EXHIBIT_CATEGORIES: ExhibitCategorySpec[] = [
       { generator: 'forms_i539a', label: 'Fill · I-539A (child)' },
       { generator: 'exhibit_list', label: 'Generate · Exhibit list' },
     ],
-  },
-  {
-    key: 'employees',
-    label: '8 · Employee Documents',
-    doc_types: ['payroll_doc', 'employer_letter'],
-    generators: [],
-  },
-  {
-    key: 'unassigned',
-    label: 'Unassigned · Attorney sort',
-    doc_types: ['translation_certification', 'other'],
-    generators: [],
   },
 ];
 
@@ -2604,7 +2610,9 @@ function MemoryPane({
   const populated = categoryEntries.filter((c) => c.entries.length > 0);
   const totalEntries = populated.reduce((acc, c) => acc + c.entries.length, 0);
 
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(EXHIBIT_CATEGORIES.map((c) => [c.key, true])),
+  );
   const [previewPath, setPreviewPath] = useState<string | null>(null);
 
   if (totalEntries === 0) {
@@ -3300,6 +3308,10 @@ function ReAggregateButton({
   );
 }
 
+type AdmitUntilChip =
+  | { kind: 'ds' }
+  | { kind: 'date'; iso: string; days: number; ok: boolean };
+
 function DossierHeader({
   result,
   matterRoot,
@@ -3341,6 +3353,49 @@ function DossierHeader({
   const serviceCenter = formationState
     ? routeServiceCenter(formationState)
     : null;
+
+  // I-94 admit-until chip — pulls the principal applicant's I-94 row from
+  // the deterministic gate output. We surface it prominently because the
+  // attorney needs the filing window at a glance: 30 days out → caution,
+  // ≤0 → status violation. Multiple I-94s pick the soonest admit_until.
+  const admitUntilInfo: AdmitUntilChip | null = (() => {
+    const rows = result.aggregate_audit?.i94_status_results;
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    let earliest: { iso: string; ok: boolean } | null = null;
+    let anyDs = false;
+    for (const raw of rows) {
+      const r = raw as { admit_until_iso?: string | null; ok?: boolean; duration_of_status?: boolean };
+      if (r.duration_of_status) {
+        anyDs = true;
+        continue;
+      }
+      const iso = r.admit_until_iso;
+      if (!iso) continue;
+      if (!earliest || iso < earliest.iso) {
+        earliest = { iso, ok: r.ok ?? true };
+      }
+    }
+    if (!earliest) {
+      return anyDs ? { kind: 'ds' } : null;
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const target = new Date(earliest.iso + 'T00:00:00Z');
+    const days = Math.round(
+      (target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
+    );
+    return { kind: 'date', iso: earliest.iso, days, ok: earliest.ok };
+  })();
+
+  // Dependent count — populated by lib/e2/dependent-inference.ts when
+  // family docs cross-reference passports against the principal.
+  const dependentCount = (() => {
+    const facts = result.caseFacts?.facts as
+      | { dependents?: Array<unknown> }
+      | undefined;
+    return Array.isArray(facts?.dependents) ? facts!.dependents.length : 0;
+  })();
+
   // Matter title preference: manual override → auto-derived (investor ·
   // company · E-2) → source-folder basename. Source folder is the last
   // resort so dossiers never lead with `OneDrive_xyz` garbage.
@@ -3480,6 +3535,44 @@ function DossierHeader({
               title={`E-2 / I-129 jurisdiction for ${formationState}: ${serviceCenter.service_center_label}. Verify against uscis.gov before filing.`}
             >
               {serviceCenter.service_center_label.replace(/\sService Center.*$/, '')}
+            </span>
+          </>
+        )}
+        {admitUntilInfo && (
+          <>
+            <span className="text-rule-strong">·</span>
+            {admitUntilInfo.kind === 'ds' ? (
+              <span title="I-94 admit-until is D/S (Duration of Status). No fixed filing window.">
+                I-94 D/S
+              </span>
+            ) : admitUntilInfo.days < 0 ? (
+              <span
+                className="border border-ink px-1.5 py-0.5 smcp text-ink"
+                title={`I-94 admit-until ${admitUntilInfo.iso} has passed by ${Math.abs(admitUntilInfo.days)} days. Status violation at filing.`}
+              >
+                out of status · {Math.abs(admitUntilInfo.days)}d past
+              </span>
+            ) : admitUntilInfo.days <= 30 ? (
+              <span
+                className="border border-ink px-1.5 py-0.5 smcp text-ink"
+                title={`I-94 admit-until ${admitUntilInfo.iso}. Filing window is tight — file before this date.`}
+              >
+                file by {admitUntilInfo.iso} · {admitUntilInfo.days}d
+              </span>
+            ) : (
+              <span
+                title={`I-94 admit-until ${admitUntilInfo.iso}. ${admitUntilInfo.days} days remaining.`}
+              >
+                until {admitUntilInfo.iso} · {admitUntilInfo.days}d
+              </span>
+            )}
+          </>
+        )}
+        {dependentCount > 0 && (
+          <>
+            <span className="text-rule-strong">·</span>
+            <span title={`${dependentCount} dependent${dependentCount === 1 ? '' : 's'} detected from family documents.`}>
+              + {dependentCount} dep{dependentCount === 1 ? '' : 's'}
             </span>
           </>
         )}

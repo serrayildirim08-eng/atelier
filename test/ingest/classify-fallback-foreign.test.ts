@@ -142,6 +142,27 @@ describe('coarseFromFineDocTypeId — SS-4 and membership certificate', () => {
   });
 });
 
+describe('Tier-0 — Nüfus Kayıt Örneği (Turkish family registry)', () => {
+  it('"Nüfus Kayıt Örneği.pdf" → fine nufus_kayit_ornegi', () => {
+    const r = classifyFilename('Nüfus Kayıt Örneği.pdf');
+    expect(r.candidates[0]?.doc_type_id).toBe('nufus_kayit_ornegi');
+  });
+
+  it('"vukuatli nufus kayit ornegi.pdf" → fine nufus_kayit_ornegi', () => {
+    const r = classifyFilename('vukuatli nufus kayit ornegi.pdf');
+    expect(r.candidates[0]?.doc_type_id).toBe('nufus_kayit_ornegi');
+  });
+
+  it('"Aile Kayıt Örneği.pdf" → fine nufus_kayit_ornegi', () => {
+    const r = classifyFilename('Aile Kayıt Örneği.pdf');
+    expect(r.candidates[0]?.doc_type_id).toBe('nufus_kayit_ornegi');
+  });
+
+  it('coarse map: nufus_kayit_ornegi → vital_record', () => {
+    expect(coarseFromFineDocTypeId('nufus_kayit_ornegi')).toBe('vital_record');
+  });
+});
+
 describe('coarseFromFineDocTypeId', () => {
   it('maps foreign-language hits to coarse buckets', () => {
     expect(coarseFromFineDocTypeId('diploma')).toBe('credential');
