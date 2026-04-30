@@ -4048,7 +4048,12 @@ function DossierHeader({
           </span>
         )}
         <span className="text-rule-strong">·</span>
-        <span className="tabular-nums">{result.pageCount} pp</span>
+        <span className="tabular-nums">
+          <span key={result.pageCount} className="counter-pulse tabular-nums">
+            {result.pageCount}
+          </span>{' '}
+          pp
+        </span>
         {caseType && (
           <>
             <span className="text-rule-strong">·</span>
@@ -4106,7 +4111,8 @@ function DossierHeader({
           <>
             <span className="text-rule-strong">·</span>
             <span title={`${dependentCount} dependent${dependentCount === 1 ? '' : 's'} detected from family documents.`}>
-              + {dependentCount} dep{dependentCount === 1 ? '' : 's'}
+              + <span key={dependentCount} className="counter-pulse">{dependentCount}</span>{' '}
+              dep{dependentCount === 1 ? '' : 's'}
             </span>
           </>
         )}
@@ -4142,18 +4148,36 @@ function DossierHeader({
       </div>
 
       <div className="flex items-baseline justify-between gap-6">
-        <h1 className="text-display leading-[1.1] tracking-[-0.012em] text-ink">
-          {clientName}
-        </h1>
+        <div className="min-w-0">
+          <h1 className="text-display leading-[1.1] tracking-[-0.012em] text-ink cascade-in">
+            {clientName}
+          </h1>
+          {/* Hairline brass reveal under the title — signals that the
+              name was computed from extracted facts (not typed). The
+              key on clientName forces a re-run when the inferred name
+              changes (e.g. after the user reclassifies a passport). */}
+          <div className="h-px mt-1.5 w-[12rem] max-w-full">
+            <span
+              key={clientName}
+              className="brass-reveal"
+              style={{ width: '100%' }}
+            />
+          </div>
+        </div>
         {assessment && (
-          <div className="text-right shrink-0">
+          <div className="text-right shrink-0 cascade-in" style={{ animationDelay: '120ms' }}>
             <div className="smcp text-graphite mb-1.5">assessment</div>
             <StatusPill assessment={assessment} size="full" />
           </div>
         )}
       </div>
       {caseType && (
-        <div className="mt-2 text-meta text-graphite">{CASE_LABEL[caseType]}</div>
+        <div
+          className="mt-2 text-meta text-graphite cascade-in"
+          style={{ animationDelay: '180ms' }}
+        >
+          {CASE_LABEL[caseType]}
+        </div>
       )}
       {result.e2_subtype && (
         <div className="mt-2 flex items-center gap-2 flex-wrap">
@@ -4397,25 +4421,59 @@ function DossierTabs({
     { key: 'context', label: 'Context' },
     { key: 'log', label: 'Log' },
   ];
+  // Tab-glide: track the active tab's offset + width and feed into a
+  // CSS underline that translates between positions instead of flipping
+  // border colors. The track is the <ul> wrapper; the indicator is the
+  // ::after pseudo, positioned via custom properties.
+  const trackRef = useRef<HTMLUListElement>(null);
+  const tabRefs = useRef<Record<string, HTMLLIElement | null>>({});
+  const [indicator, setIndicator] = useState<{ x: number; w: number }>({
+    x: 0,
+    w: 0,
+  });
+  useEffect(() => {
+    const el = tabRefs.current[tab];
+    const track = trackRef.current;
+    if (!el || !track) return;
+    const elRect = el.getBoundingClientRect();
+    const trackRect = track.getBoundingClientRect();
+    setIndicator({ x: elRect.left - trackRect.left, w: elRect.width });
+  }, [tab, result.review, result.draft]);
+
   return (
     <nav className="px-9 border-b border-rule">
-      <ul className="flex items-baseline gap-7 -mb-px">
+      <ul
+        ref={trackRef}
+        className="flex items-baseline gap-7 -mb-px tab-glide-track"
+        style={{
+          ['--tab-x' as string]: `${indicator.x}px`,
+          ['--tab-w' as string]: `${indicator.w}px`,
+        }}
+      >
         {tabs.map((t) => {
           const active = tab === t.key;
           return (
-            <li key={t.key}>
+            <li
+              key={t.key}
+              ref={(el) => {
+                tabRefs.current[t.key] = el;
+              }}
+            >
               <button
                 onClick={() => onTab(t.key)}
                 className={
-                  'pb-3 pt-0.5 border-b-2 transition-colors flex items-baseline gap-1.5 ' +
+                  'pb-3 pt-0.5 transition-colors flex items-baseline gap-1.5 ' +
                   (active
-                    ? 'border-ink text-ink'
-                    : 'border-transparent text-graphite hover:text-ink-2')
+                    ? 'text-ink'
+                    : 'text-graphite hover:text-ink-2')
                 }
               >
                 <span className="text-body">{t.label}</span>
                 {t.suffix && (
-                  <span className="font-mono text-meta text-graphite-soft tabular-nums">
+                  <span
+                    key={t.suffix}
+                    className="font-mono text-meta text-graphite-soft tabular-nums counter-pulse"
+                  >
                     {t.suffix}
                   </span>
                 )}
@@ -8518,7 +8576,7 @@ function MatterDocumentsSection({
                 <li key={key} className="border-b border-rule last:border-b-0">
                   <div
                     className={
-                      'flex items-baseline gap-3 px-5 py-2.5 transition-colors group ' +
+                      'flex items-baseline gap-3 px-5 py-2.5 transition-colors group lift-hover ' +
                       (expanded ? 'bg-paper-2/40' : 'hover:bg-paper-2/30')
                     }
                   >
@@ -8604,10 +8662,14 @@ function MatterDocumentsSection({
     <section>
       <SectionTitle marker="·" label="documents · click to preview" />
       <div className="space-y-5">
-        {categoryGroups.map(({ spec, entries }) => {
+        {categoryGroups.map(({ spec, entries }, idx) => {
           const isCollapsed = !!collapsed[spec.key];
           return (
-            <div key={spec.key} className="border border-rule paper-recess">
+            <div
+              key={spec.key}
+              className="border border-rule paper-recess cascade-in"
+              style={{ animationDelay: `${idx * 55}ms` }}
+            >
               <button
                 onClick={() =>
                   setCollapsed((s) => ({ ...s, [spec.key]: !s[spec.key] }))
@@ -8655,7 +8717,7 @@ function MatterDocumentsSection({
                       <li key={key} className="border-b border-rule last:border-b-0">
                         <div
                           className={
-                            'flex items-baseline gap-3 px-5 py-2.5 transition-colors group ' +
+                            'flex items-baseline gap-3 px-5 py-2.5 transition-colors group lift-hover ' +
                             (expanded ? 'bg-paper-2/40' : 'hover:bg-paper-2/30')
                           }
                         >

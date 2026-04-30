@@ -181,6 +181,108 @@ html, body {
 }
 .fade-in { animation: fadeIn 200ms ease-out both; }
 
+/* Editorial cascade — layered fade-up + diagonal drift, used when a
+   group of cards or list rows lands so the eye reads down the column
+   instead of being hit by everything at once. Pair with --stagger
+   inline (e.g. style={{ animationDelay: 'calc(var(--stagger,0) * 55ms)' }}). */
+@keyframes cascadeIn {
+  from {
+    opacity: 0;
+    transform: translate3d(-2px, 8px, 0);
+    letter-spacing: 0.01em;
+  }
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    letter-spacing: 0;
+  }
+}
+.cascade-in {
+  animation: cascadeIn 420ms cubic-bezier(0.22, 0.86, 0.32, 1) both;
+}
+
+/* Hover lift — paper rises a hair off the sheet, with a faint shadow
+   bloom. Restrained on purpose: 1px translate, slow easing, no scale. */
+.lift-hover {
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    box-shadow 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background-color 200ms ease;
+  will-change: transform;
+}
+.lift-hover:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 1px 0 rgba(10, 10, 10, 0.04), 0 6px 12px -8px rgba(10, 10, 10, 0.18);
+}
+
+/* Tab indicator — slow glide of the active underline. Use on a wrapper
+   with `position: relative` and a single ::after pseudo that the
+   component positions via custom property `--tab-x` / `--tab-w`. */
+.tab-glide-track {
+  position: relative;
+}
+.tab-glide-track::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  width: var(--tab-w, 0px);
+  transform: translateX(var(--tab-x, 0px));
+  background: var(--color-ink, #0a0a0a);
+  transition:
+    transform 380ms cubic-bezier(0.45, 0.05, 0.2, 1),
+    width 380ms cubic-bezier(0.45, 0.05, 0.2, 1);
+  pointer-events: none;
+}
+
+/* Counter pulse — the digit jumps a hair on each round-up tick so the
+   eye catches that the number is moving even when the increment is
+   small. Pair with the React useTickCounter hook. */
+@keyframes counterPulse {
+  0% { transform: translateY(0); }
+  35% { transform: translateY(-2px); }
+  70% { transform: translateY(0.5px); }
+  100% { transform: translateY(0); }
+}
+.counter-pulse {
+  display: inline-block;
+  animation: counterPulse 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Brass underscore — for the matter title's auto-derived chip. Slow
+   left-to-right reveal of a hairline rule, signaling that a value was
+   computed (not typed). 1.2s once on mount. */
+@keyframes brassReveal {
+  from { transform: scaleX(0); transform-origin: left; }
+  to { transform: scaleX(1); transform-origin: left; }
+}
+.brass-reveal {
+  display: inline-block;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    rgba(110,135,118,0) 0%,
+    rgba(165,135,90,0.55) 50%,
+    rgba(120,145,170,0) 100%
+  );
+  animation: brassReveal 1200ms cubic-bezier(0.22, 0.86, 0.32, 1) 200ms both;
+}
+
+/* Diagonal grain drift — the paper-grain texture imperceptibly drifts
+   diagonally over the dossier so static screens don't read as frozen.
+   Used selectively on the dossier shell, not everywhere. */
+@keyframes grainDrift {
+  from { background-position: 0 0; }
+  to { background-position: 60px 60px; }
+}
+.grain-drift {
+  animation: grainDrift 18s linear infinite;
+}
+
 /* Sweep progress bar — indeterminate horizontal gradient that travels
    left-to-right under the loading banner. Subtle sage→sky→ochre tint
    on a paper base so it reads as polite movement, not a Windows98 bar. */
