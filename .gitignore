@@ -55,6 +55,9 @@ db/filename-aliases.json
 # manual matter / document overrides (display names + doc_type overrides)
 db/matter-overrides.json
 
+# per-matter typedMemory snapshot (disk-backed cache for reload survival)
+db/matter-snapshot/
+
 # pre-generation approval flow (lib/preview-store.ts) — per-matter
 # preview JSON sidecars + append-only attorney-approval audit log.
 db/previews/

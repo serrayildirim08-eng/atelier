@@ -707,7 +707,12 @@ export default function Page() {
     }
   }, [matterRoots]);
 
-  // Persist matter-memories map. Heavy on disk; quota errors are swallowed.
+  // Persist matter-memories map. localStorage stays as a best-effort
+  // warm cache — small / fast reload — but the canonical store is now
+  // the server-side disk snapshot at db/matter-snapshot/<hash>.json.
+  // Large matters routinely blow past localStorage's ~5MB quota and
+  // the silent-fail behaviour was making it look like Atelier was
+  // "deleting" matters on reload.
   useEffect(() => {
     try {
       if (Object.keys(matterMemories).length === 0) {
@@ -719,9 +724,39 @@ export default function Page() {
         );
       }
     } catch {
-      /* QuotaExceededError or similar — silently degrade to session-only */
+      /* QuotaExceededError or similar — server-side snapshot covers us */
     }
   }, [matterMemories]);
+
+  // Per-matter server-side snapshot writes — fire whenever the
+  // currently-selected matter's typedMemory changes and we know its
+  // matter_root. The server stores under db/matter-snapshot/<hash>.json
+  // and tolerates concurrent writes via tmp+rename.
+  useEffect(() => {
+    const sel = results[selectedIdx]?.filename;
+    if (!sel) return;
+    const root = matterRoots[sel];
+    const mem = matterMemories[sel];
+    if (!root || !mem) return;
+    const hasAny = Object.values(mem).some(
+      (l) => Array.isArray(l) && l.length > 0,
+    );
+    if (!hasAny) return;
+    const t = setTimeout(() => {
+      void fetch('/api/matter-snapshot', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          matter_root: root,
+          typed_memory: mem,
+          matter_filename: sel,
+        }),
+      }).catch(() => {
+        /* offline / disk full — best-effort, skip */
+      });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [matterMemories, matterRoots, results, selectedIdx]);
 
   // Track which matter we've already auto-loaded this session, so a
   // matter-select effect doesn't trigger /api/re-aggregate every time the
@@ -759,6 +794,38 @@ export default function Page() {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setTypedMemory(persistedMem);
       }
+    } else if (persistedRoot) {
+      // No in-memory snapshot — try the server-side disk store. This
+      // is the path that catches matters silently nuked by
+      // localStorage quota: the disk snapshot survives anything short
+      // of a `db/matter-snapshot` rm.
+      void fetch(
+        `/api/matter-snapshot?matter_root=${encodeURIComponent(persistedRoot)}`,
+      )
+        .then((r) => (r.ok ? r.json() : null))
+        .then(
+          (data: { snapshot?: { typed_memory?: TypedMemory } } | null) => {
+            const tm = data?.snapshot?.typed_memory;
+            if (!tm || typeof tm !== 'object') return;
+            const hasAny = Object.values(tm).some(
+              (l) => Array.isArray(l) && l.length > 0,
+            );
+            if (!hasAny) return;
+            setMatterMemories((prev) => ({
+              ...prev,
+              [selectedFilename]: tm,
+            }));
+            setTypedMemory((current) => {
+              const empty = Object.values(current).every(
+                (l) => !Array.isArray(l) || l.length === 0,
+              );
+              return empty ? tm : current;
+            });
+          },
+        )
+        .catch(() => {
+          /* network / disk error — fall through to auto-reaggregate */
+        });
     }
     // Refresh persisted overrides for this matter so the rename + override
     // badges show without forcing a re-ingest.
