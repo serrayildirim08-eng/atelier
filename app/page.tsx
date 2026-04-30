@@ -44,6 +44,7 @@ import {
   gateDefaultOpen,
   passedGatesSummary,
 } from '@/lib/gates-ui';
+import { routeServiceCenter } from '@/lib/e2/service-center-routing';
 
 /* ---------------------------------------------------------------------- */
 /* Types                                                                   */
@@ -3319,6 +3320,27 @@ function DossierHeader({
   const assessment = result.review?.overall_assessment;
   const clientName = guessClientName(result);
   const autoDerivedName = deriveAutoMatterName(result);
+  // Pull the formation state from caseFacts.enterprise to surface the
+  // USCIS service center jurisdiction. Read defensively — pre-Phase-9
+  // matters or facts that the aggregator left null both shape this as
+  // a missing field, which the helper renders as 'unknown'.
+  const formationState = (() => {
+    const facts = result.caseFacts?.facts as
+      | { enterprise?: { state_of_formation?: { value?: string | null } | string | null } }
+      | undefined;
+    const ent = facts?.enterprise;
+    if (!ent) return null;
+    const sof = (ent as Record<string, unknown>).state_of_formation;
+    if (!sof) return null;
+    if (typeof sof === 'string') return sof;
+    if (typeof sof === 'object' && 'value' in sof && typeof sof.value === 'string') {
+      return sof.value;
+    }
+    return null;
+  })();
+  const serviceCenter = formationState
+    ? routeServiceCenter(formationState)
+    : null;
   // Matter title preference: manual override → auto-derived (investor ·
   // company · E-2) → source-folder basename. Source folder is the last
   // resort so dossiers never lead with `OneDrive_xyz` garbage.
@@ -3448,6 +3470,17 @@ function DossierHeader({
           <>
             <span className="text-rule-strong">·</span>
             <span className="tabular-nums">conf {conf.toFixed(2)}</span>
+          </>
+        )}
+        {serviceCenter && serviceCenter.service_center !== 'unknown' && (
+          <>
+            <span className="text-rule-strong">·</span>
+            <span
+              className="truncate"
+              title={`E-2 / I-129 jurisdiction for ${formationState}: ${serviceCenter.service_center_label}. Verify against uscis.gov before filing.`}
+            >
+              {serviceCenter.service_center_label.replace(/\sService Center.*$/, '')}
+            </span>
           </>
         )}
         {matterRoot && onResultUpdate && (
