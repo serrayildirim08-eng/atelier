@@ -2177,6 +2177,7 @@ function Dossier({
         matterDisplayName={matterDisplayName}
         onSetMatterDisplayName={onSetMatterDisplayName}
         onReaggregate={onReaggregate}
+        onTab={onTab}
       />
       <DossierTabs tab={tab} onTab={onTab} result={result} />
       <div className="flex-1 overflow-y-auto min-h-0">
@@ -3685,6 +3686,7 @@ function DossierHeader({
   matterDisplayName,
   onSetMatterDisplayName,
   onReaggregate,
+  onTab,
 }: {
   result: IngestResult;
   matterRoot?: string | null;
@@ -3692,6 +3694,7 @@ function DossierHeader({
   matterDisplayName?: string | null;
   onSetMatterDisplayName?: (value: string | null) => Promise<boolean> | boolean;
   onReaggregate?: () => Promise<void>;
+  onTab?: (t: DossierTab) => void;
 }) {
   const caseType = result.caseFacts?.case_type;
   const conf = result.detection_confidence;
@@ -3761,6 +3764,8 @@ function DossierHeader({
       | undefined;
     return Array.isArray(facts?.dependents) ? facts!.dependents.length : 0;
   })();
+
+  const inconsistencyCounts = countInconsistencies(result);
 
   // Matter title preference: manual override → auto-derived (investor ·
   // company · E-2) → source-folder basename. Source folder is the last
@@ -3940,6 +3945,26 @@ function DossierHeader({
             <span title={`${dependentCount} dependent${dependentCount === 1 ? '' : 's'} detected from family documents.`}>
               + {dependentCount} dep{dependentCount === 1 ? '' : 's'}
             </span>
+          </>
+        )}
+        {inconsistencyCounts.total > 0 && onTab && (
+          <>
+            <span className="text-rule-strong">·</span>
+            <button
+              type="button"
+              onClick={() => onTab('audit')}
+              title={`${inconsistencyCounts.total} cross-document inconsistenc${inconsistencyCounts.total === 1 ? 'y' : 'ies'} detected. Click to open Audit pane.`}
+              className={
+                'border px-1.5 py-0.5 smcp transition-colors ' +
+                (inconsistencyCounts.critical > 0
+                  ? 'border-ink text-ink hover:bg-paper-2'
+                  : inconsistencyCounts.high > 0
+                    ? 'border-ink/60 text-ink hover:bg-paper-2'
+                    : 'border-graphite text-graphite hover:text-ink hover:border-ink')
+              }
+            >
+              {inconsistencyCounts.total} inconsistenc{inconsistencyCounts.total === 1 ? 'y' : 'ies'}
+            </button>
           </>
         )}
         {matterRoot && onResultUpdate && (
@@ -4152,7 +4177,14 @@ function DossierTabs({
           ? '!'
           : '…',
     },
-    { key: 'audit', label: 'Audit' },
+    {
+      key: 'audit',
+      label: 'Audit',
+      suffix: (() => {
+        const n = countInconsistencies(result).total;
+        return n > 0 ? `${n}` : undefined;
+      })(),
+    },
     { key: 'binder', label: 'Binder' },
     { key: 'context', label: 'Context' },
     { key: 'log', label: 'Log' },
@@ -4493,6 +4525,41 @@ function readConflictRegister(
       };
     })
     .filter((x): x is ConflictRegisterEntry => x !== null);
+}
+
+const INCONSISTENCY_CONFLICT_TYPES = new Set([
+  'beneficiary_name_drift',
+  'beneficiary_dob_drift',
+  'passport_number_drift',
+  'ein_drift',
+  'enterprise_address_drift',
+  'formation_date_drift',
+  'i94_number_drift',
+]);
+
+function countInconsistencies(result: IngestResult): {
+  total: number;
+  critical: number;
+  high: number;
+  medium: number;
+} {
+  const facts = result.caseFacts?.facts;
+  const entries = readConflictRegister(facts).filter((e) => {
+    // Extract conflict_type from the id: format is `${conflictType}_${idx}`
+    // We match by checking if any of the 7 new types appears as prefix.
+    return Array.from(INCONSISTENCY_CONFLICT_TYPES).some((ct) =>
+      e.id.startsWith(ct + '_'),
+    );
+  });
+  let critical = 0;
+  let high = 0;
+  let medium = 0;
+  for (const e of entries) {
+    if (e.severity === 5) critical++;
+    else if (e.severity === 4) high++;
+    else medium++;
+  }
+  return { total: entries.length, critical, high, medium };
 }
 
 function buildEntriesFromMemory(typedMemory: TypedMemory): MemoryPdfEntry[] {
@@ -4939,7 +5006,10 @@ function AuditPane({
         <section>
           <h3 className="text-body font-medium mb-2">Cross-document conflicts</h3>
           <ul className="grid gap-2">
-            {report.conflicts.map((c) => (
+            {report.conflicts
+              .slice()
+              .sort((a, b) => b.severity - a.severity)
+              .map((c) => (
               <li
                 key={c.id}
                 className={

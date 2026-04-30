@@ -22,6 +22,7 @@ import {
   type OwnershipEntryT,
   type ConflictEntryT as InferenceConflictEntryT,
 } from '@/lib/e2/applicant-inference';
+import { checkCrossDocumentInconsistencies } from '@/lib/e2/inconsistency-checker';
 import {
   inferDependentsFromFamilyDocs,
   inferDependentsWithLlmFallback,
@@ -5572,6 +5573,28 @@ export async function aggregateTypedMemoryToE2(
         confidence: 1,
       },
     });
+  }
+
+  // Cross-document identity inconsistency checks (beneficiary name / DOB /
+  // passport-no / EIN / enterprise address / formation date / I-94 #).
+  // Pure deterministic, idempotent dedupe by (conflict_type, fact_a_doc,
+  // fact_b_doc) — same shape as the existing gate appenders. These run
+  // last so the financial / amount drift gates above have already populated
+  // the register; the dedupe key intentionally only touches the new types
+  // and never collides with the pre-existing conflict_types.
+  const inconsistencyResult = checkCrossDocumentInconsistencies(memory, parsed.data);
+  for (const c of inconsistencyResult.conflicts) {
+    const ct = c.conflict_type.value;
+    const fa = c.fact_a_doc.value;
+    const fb = c.fact_b_doc.value;
+    const alreadyLogged = parsed.data.conflict_register.some(
+      (existing) =>
+        existing.conflict_type.value === ct &&
+        existing.fact_a_doc.value === fa &&
+        existing.fact_b_doc.value === fb,
+    );
+    if (alreadyLogged) continue;
+    parsed.data.conflict_register.push(c);
   }
 
   return {
