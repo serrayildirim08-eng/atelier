@@ -25,6 +25,29 @@ const Field = <T extends z.ZodTypeAny>(value: T) =>
     confidence: z.number().min(0).max(1).nullable(),
   });
 
+/**
+ * Currency-tolerant number — accepts a number or a numeric string with
+ * currency symbols / thousands separators. Bank-statement balances often
+ * come back from the LLM as "$1,234.56" or "1.234,56" (EU comma). Without
+ * this preprocess, the schema rejects → retry → 12-minute ingests.
+ */
+const CurrencyNumber = z.preprocess((v) => {
+  if (typeof v === 'number') return v;
+  if (typeof v !== 'string') return v;
+  const cleaned = v
+    .replace(/[$€£₺¥₪]/g, '')
+    .replace(/\s/g, '')
+    // EU style "1.234,56" → "1234.56"; US/UK style "1,234.56" → "1234.56".
+    // Heuristic: if the last separator is a comma AND there are exactly 2
+    // digits after it, treat comma as decimal. Otherwise commas are
+    // thousands separators.
+    .replace(/(\d),(\d{2})$/, '$1.$2')
+    .replace(/,/g, '');
+  if (cleaned === '' || cleaned === '-' || cleaned === '—') return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : v;
+}, z.number());
+
 /* ---------------------------------------------------------------------- */
 /* Subtype enum                                                           */
 /* ---------------------------------------------------------------------- */
@@ -90,11 +113,12 @@ export const BankStatementRichFactsSchema = z.object({
   /** "YYYY-MM" derived from statement_period_end (or _start when end missing). */
   statement_year_month: Field(z.string()),
 
-  // Balances (optional — many statements are SOF-evidence-only)
-  beginning_balance_usd: Field(z.number()).optional(),
-  ending_balance_usd: Field(z.number()).optional(),
-  total_deposits_usd: Field(z.number()).optional(),
-  total_withdrawals_usd: Field(z.number()).optional(),
+  // Balances (optional — many statements are SOF-evidence-only).
+  // Currency-tolerant: accepts number OR "$1,234.56" / "1.234,56" strings.
+  beginning_balance_usd: Field(CurrencyNumber).optional(),
+  ending_balance_usd: Field(CurrencyNumber).optional(),
+  total_deposits_usd: Field(CurrencyNumber).optional(),
+  total_withdrawals_usd: Field(CurrencyNumber).optional(),
 });
 
 export type BankStatementRichFacts = z.infer<typeof BankStatementRichFactsSchema>;

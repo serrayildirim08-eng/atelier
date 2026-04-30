@@ -235,8 +235,10 @@ export function coarseFromFineDocTypeId(
     // Real estate / lease
     title_deed_us: 'title_deed',
     tapu_senedi: 'title_deed',
+    property_encumbrance_extract: 'title_deed',
     lease_commercial: 'lease_or_property',
     lease_residential: 'lease_or_property',
+    real_estate_purchase_closing: 'lease_or_property',
     // Contracts / business
     customer_contract: 'business_contract',
     supplier_contract: 'business_contract',
@@ -251,22 +253,30 @@ export function coarseFromFineDocTypeId(
     fdd: 'business_contract',
     fdd_item7: 'business_contract',
     fdd_item19: 'business_contract',
+    incentive_grant_taxcredit: 'business_contract',
+    partnership_jv_alliance: 'business_contract',
     // Invoices / receipts
     paid_invoice: 'invoice_or_receipt',
     vendor_invoice: 'invoice_or_receipt',
     delivery_receipt: 'invoice_or_receipt',
     equipment_po: 'invoice_or_receipt',
+    retail_receipt: 'invoice_or_receipt',
+    professional_services_invoice: 'invoice_or_receipt',
     // Payroll
     payroll_register: 'payroll_doc',
     salary_payslip_treaty_country: 'payroll_doc',
+    form_941_quarterly: 'payroll_doc',
+    employee_roster: 'payroll_doc',
     // Financial
     audited_financial_statement: 'financial_statement',
     balance_sheet: 'financial_statement',
     profit_loss_statement: 'financial_statement',
+    cash_flow_statement: 'financial_statement',
     business_profit_distribution: 'financial_statement',
     investment_portfolio_statement: 'financial_statement',
     // Credentials / licenses
     diploma: 'credential',
+    academic_transcript: 'credential',
     professional_license: 'credential',
     professional_business_license: 'credential',
     state_business_license: 'credential',
@@ -280,16 +290,49 @@ export function coarseFromFineDocTypeId(
     // Letters
     recommendation_letter: 'expert_letter',
     cpa_letter: 'expert_letter',
+    expert_letter_industry: 'expert_letter',
+    expert_letter_technical: 'expert_letter',
     employment_record_treaty_country: 'employer_letter',
     employment_record_us: 'employer_letter',
     service_record: 'employer_letter',
     offer_letter: 'employer_letter',
     // CV / resume
     cv: 'cv_or_resume',
+    cv_academic: 'cv_or_resume',
     // Translation
     certified_translation: 'translation_certification',
+    sworn_translation: 'translation_certification',
     // Business plan
     business_plan_5yr: 'business_plan',
+    business_plan_pitch_deck: 'business_plan',
+    financial_model_spreadsheet: 'business_plan',
+    // Government IDs
+    national_id_card: 'government_id',
+    drivers_license: 'government_id',
+    residency_immigrant_id: 'government_id',
+    // New status_doc & passport variants
+    cbp_admission_stamp: 'status_doc',
+    i94_paper_card: 'i94',
+    // New money_movement variants
+    inter_account_transfer: 'money_movement',
+    // New bank_statement variants
+    bank_statement_fx_multicurrency: 'bank_statement',
+    bank_statement_brokerage: 'bank_statement',
+    // New SOF variants
+    share_purchase_agreement: 'source_of_funds',
+    salary_savings_declaration: 'source_of_funds',
+    // New formation variants
+    articles_amendment: 'formation_doc',
+    // New vital_record variants
+    divorce_decree: 'vital_record',
+    death_certificate: 'vital_record',
+    // New uscis_or_dos_form variant
+    rfe_noid_notice: 'uscis_or_dos_form',
+    // New cover_letter variant
+    cover_letter_transmittal: 'cover_letter',
+    // Other / catch-all
+    internal_memo_worksheet: 'other',
+    unclassified_other: 'other',
   };
   return map[id] ?? null;
 }
