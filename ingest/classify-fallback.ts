@@ -19,8 +19,8 @@
  * typed-extract.ts pipeline.
  */
 
-import { ALL_DOC_TYPES } from '@/lib/e2/doc-taxonomy';
-import type { DocType } from '@/lib/e2/types';
+import { ALL_DOC_TYPES, DOC_TYPES_BY_ID } from '@/lib/e2/doc-taxonomy';
+import type { DocCategory } from '@/lib/e2/types';
 
 export interface FallbackClassification {
   doc_type_id: string | null;
@@ -57,16 +57,45 @@ function fold(s: string): string {
     .toLowerCase();
 }
 
-function scoreOne(filename: string, firstPageText: string, formFieldNames: string[], dt: DocType): MatchTrace {
+/**
+ * Precomputed scoring data per doc-type. Built once at module init from
+ * `ALL_DOC_TYPES`. Keyword phrases are pre-folded and form-field hints
+ * pre-lowercased so the per-classification hot path skips re-folding
+ * 1700+ static strings on every call.
+ */
+interface PrecomputedDocType {
+  id: string;
+  filenameRegexes: readonly RegExp[];
+  headerRegexes: readonly RegExp[];
+  keywords: readonly { phrase: string; folded: string }[];
+  formFieldHints: readonly { hint: string; lower: string }[];
+}
+
+const PRECOMPUTED: readonly PrecomputedDocType[] = ALL_DOC_TYPES.map((dt) => ({
+  id: dt.id,
+  filenameRegexes: dt.identifying_signals.filename_regex ?? [],
+  headerRegexes: dt.identifying_signals.header_regex ?? [],
+  keywords: (dt.identifying_signals.keyword_phrases ?? []).map((phrase) => ({
+    phrase,
+    folded: fold(phrase),
+  })),
+  formFieldHints: (dt.identifying_signals.pdf_form_field_hints ?? []).map((hint) => ({
+    hint,
+    lower: hint.toLowerCase(),
+  })),
+}));
+
+function scoreOne(
+  foldedFilename: string,
+  firstPageText: string,
+  foldedText: string,
+  lowerFormFieldNames: readonly string[],
+  dt: PrecomputedDocType,
+): MatchTrace {
   const hits: string[] = [];
   let score = 0;
 
-  const foldedFilename = fold(filename);
-  const foldedText = fold(firstPageText);
-
-  // Filename regex — tested against accent-folded form so accented
-  // filenames hit the same patterns as their ASCII equivalents.
-  for (const re of dt.identifying_signals.filename_regex ?? []) {
+  for (const re of dt.filenameRegexes) {
     if (re.test(foldedFilename)) {
       score += FILENAME_HIT;
       hits.push(`filename ~ ${re.source}`);
@@ -74,33 +103,28 @@ function scoreOne(filename: string, firstPageText: string, formFieldNames: strin
     }
   }
 
-  // First-page header regex
-  for (const re of dt.identifying_signals.header_regex ?? []) {
+  for (const re of dt.headerRegexes) {
     if (re.test(firstPageText) || re.test(foldedText)) {
       score += HEADER_HIT;
       hits.push(`header ~ ${re.source}`);
     }
   }
 
-  // Keyword phrases (folded substring match)
-  for (const phrase of dt.identifying_signals.keyword_phrases ?? []) {
-    if (foldedText.includes(fold(phrase))) {
+  for (const k of dt.keywords) {
+    if (foldedText.includes(k.folded)) {
       score += KEYWORD_HIT;
-      hits.push(`keyword "${phrase}"`);
+      hits.push(`keyword "${k.phrase}"`);
     }
   }
 
-  // PDF form field hints (highest signal — fillable forms are unambiguous)
-  for (const field of dt.identifying_signals.pdf_form_field_hints ?? []) {
-    if (formFieldNames.some((f) => f.toLowerCase().includes(field.toLowerCase()))) {
+  for (const f of dt.formFieldHints) {
+    if (lowerFormFieldNames.some((name) => name.includes(f.lower))) {
       score += PDF_FORM_FIELD_HIT;
-      hits.push(`form field "${field}"`);
+      hits.push(`form field "${f.hint}"`);
     }
   }
 
-  // Structural hints reserved — currently no auto-detection. STRUCTURAL_HIT
-  // is unused on purpose; left as a constant so the scoring weights stay in
-  // one place when structural detection lands.
+  // STRUCTURAL_HIT reserved for future structural-hint detection.
   void STRUCTURAL_HIT;
 
   return { doc_type_id: dt.id, score, hits };
@@ -113,9 +137,23 @@ export interface FallbackInput {
 }
 
 export function classifyByTier0(input: FallbackInput): FallbackClassification {
-  const traces: MatchTrace[] = ALL_DOC_TYPES.map((dt) =>
-    scoreOne(input.filename, input.first_page_text, input.pdf_form_field_names ?? [], dt),
-  ).filter((t) => t.score > 0);
+  const foldedFilename = fold(input.filename);
+  const foldedText = fold(input.first_page_text);
+  const lowerFormFieldNames = (input.pdf_form_field_names ?? []).map((f) =>
+    f.toLowerCase(),
+  );
+
+  const traces: MatchTrace[] = [];
+  for (const dt of PRECOMPUTED) {
+    const t = scoreOne(
+      foldedFilename,
+      input.first_page_text,
+      foldedText,
+      lowerFormFieldNames,
+      dt,
+    );
+    if (t.score > 0) traces.push(t);
+  }
 
   traces.sort((a, b) => b.score - a.score);
 
@@ -145,11 +183,121 @@ export function tier0Hint(input: FallbackInput): string | null {
 }
 
 /**
+ * Default coarse-bucket per fine-grained DocCategory. Covers the categories
+ * that map 1:1 to a single coarse bucket. Categories that fan out to multiple
+ * coarse buckets (identity → passport/status_doc/i94/government_id;
+ * real_estate → title_deed/lease_or_property; employment_evidence →
+ * employer_letter/payroll_doc; credentials → credential/cv_or_resume/expert_letter;
+ * crypto_evidence → money_movement/source_of_funds) are handled in COARSE_BY_ID
+ * below. Anything not in either table returns null and the caller falls back
+ * to 'other'.
+ */
+const COARSE_BY_CATEGORY: Partial<
+  Record<DocCategory, import('./typed-memory').DocType>
+> = {
+  uscis_form: 'uscis_or_dos_form',
+  dos_form: 'uscis_or_dos_form',
+  vital_record: 'vital_record',
+  corporate_formation: 'formation_doc',
+  corporate_governance: 'ownership_evidence',
+  ownership_transfer: 'ownership_evidence',
+  foreign_corporate_registry: 'formation_doc',
+  tax_return: 'tax_doc',
+  tax_registration: 'tax_doc',
+  financial_statement: 'financial_statement',
+  bank_statement: 'bank_statement',
+  wire_or_receipt: 'money_movement',
+  currency_conversion: 'money_movement',
+  business_contract: 'business_contract',
+  business_plan: 'business_plan',
+  payroll: 'payroll_doc',
+  invoice_or_receipt: 'invoice_or_receipt',
+  sof_origin_evidence: 'source_of_funds',
+  translation: 'translation_certification',
+  insurance: 'business_contract',
+  credentials: 'credential',
+  permits_licenses: 'credential',
+  merchant_processing: 'formation_doc',
+  attorney_work_product: 'cover_letter',
+};
+
+/**
+ * Per-id overrides. Required only where the category-default is wrong for a
+ * specific doc-type — e.g. `cbi_certificate` lives in the `identity` category
+ * but the firm files it as a `credential`. Keep this list as small as possible;
+ * adding a new doc-type should normally not require a new entry here.
+ */
+const COARSE_BY_ID: Record<string, import('./typed-memory').DocType> = {
+  // identity → fan-out across passport / status_doc / i94 / government_id /
+  // vital_record / credential.
+  passport_bio: 'passport',
+  passport_full: 'passport',
+  donor_passport: 'passport',
+  visa_stamp: 'status_doc',
+  ead: 'status_doc',
+  prior_approval_notice: 'status_doc',
+  cbp_admission_stamp: 'status_doc',
+  i94: 'i94',
+  i94_paper_card: 'i94',
+  naturalization_certificate: 'vital_record',
+  cbi_certificate: 'credential',
+  national_id_card: 'government_id',
+  drivers_license: 'government_id',
+  residency_immigrant_id: 'government_id',
+
+  // real_estate → title_deed vs lease_or_property
+  title_deed_us: 'title_deed',
+  tapu_senedi: 'title_deed',
+  property_encumbrance_extract: 'title_deed',
+  lease_commercial: 'lease_or_property',
+  lease_residential: 'lease_or_property',
+  real_estate_purchase_closing: 'lease_or_property',
+
+  // employment_evidence → employer_letter vs payroll_doc
+  offer_letter: 'employer_letter',
+  employment_record_us: 'employer_letter',
+  employment_record_treaty_country: 'employer_letter',
+  salary_payslip_treaty_country: 'payroll_doc',
+
+  // credentials → cv_or_resume / employer_letter / expert_letter
+  cv: 'cv_or_resume',
+  cv_academic: 'cv_or_resume',
+  service_record: 'employer_letter',
+  recommendation_letter: 'expert_letter',
+  expert_letter_industry: 'expert_letter',
+  expert_letter_technical: 'expert_letter',
+
+  // financial_statement → expert_letter (CPA letter is third-party advisory)
+  cpa_letter: 'expert_letter',
+
+  // crypto_evidence → money_movement vs source_of_funds
+  crypto_blockchain_txid: 'money_movement',
+  crypto_trade_ledger: 'source_of_funds',
+  crypto_liquidation_record: 'source_of_funds',
+
+  // amigos_domicile → tax_doc (treaty-country tax cert)
+  amigos_treaty_country_tax_cert: 'tax_doc',
+
+  // attorney_work_product internal memo → other (not filed)
+  internal_memo_worksheet: 'other',
+
+  // FDD items have category 'industry_evidence' but functionally belong with
+  // the franchise contract bundle the firm files them with.
+  fdd_item7: 'business_contract',
+  fdd_item19: 'business_contract',
+
+  // membership_certificate has category 'corporate_formation' but the firm
+  // treats it as direct ownership evidence (Tab D ownership-percent proof).
+  membership_certificate: 'ownership_evidence',
+
+  // other → other (catch-all)
+  unclassified_other: 'other',
+};
+
+/**
  * Map fine-grained doc-taxonomy ids (e.g., `passport_bio`, `diploma`,
  * `tapu_senedi`) to the coarse `DocType` enum used by the typed-memory
- * pipeline. Used by the image-classification path (no first-page text →
- * filename signals only) to take a Tier-0 hit and route the document
- * into the right per-DocType bucket.
+ * pipeline. Resolution order: per-id override → category default → null.
  *
  * Returns `null` for ids that legitimately have no coarse mapping
  * (industry-evidence stat reports, organizational charts, raw photos);
@@ -159,180 +307,9 @@ export function coarseFromFineDocTypeId(
   id: string | null | undefined,
 ): import('./typed-memory').DocType | null {
   if (!id) return null;
-  const map: Record<string, import('./typed-memory').DocType> = {
-    // Identity
-    passport_bio: 'passport',
-    passport_full: 'passport',
-    donor_passport: 'passport',
-    visa_stamp: 'status_doc',
-    ead: 'status_doc',
-    prior_approval_notice: 'status_doc',
-    i94: 'i94',
-    naturalization_certificate: 'vital_record',
-    birth_certificate: 'vital_record',
-    marriage_certificate: 'vital_record',
-    adoption_decree: 'vital_record',
-    nufus_kayit_ornegi: 'vital_record',
-    // USCIS / DOS / consular forms
-    i129: 'uscis_or_dos_form',
-    i129_e_supplement: 'uscis_or_dos_form',
-    i539: 'uscis_or_dos_form',
-    i539a: 'uscis_or_dos_form',
-    ds156e: 'uscis_or_dos_form',
-    ds160_confirmation: 'uscis_or_dos_form',
-    g28: 'uscis_or_dos_form',
-    g1145: 'uscis_or_dos_form',
-    g1650: 'uscis_or_dos_form',
-    mita: 'uscis_or_dos_form',
-    cover_letter: 'cover_letter',
-    // Money / banking
-    bank_statement_personal: 'bank_statement',
-    bank_statement_business: 'bank_statement',
-    bank_receipt: 'money_movement',
-    cancelled_check: 'money_movement',
-    fx_conversion_receipt: 'money_movement',
-    wire_confirmation: 'money_movement',
-    wire_swift_mt103: 'money_movement',
-    crypto_blockchain_txid: 'money_movement',
-    // Source of funds
-    gift_letter: 'source_of_funds',
-    inheritance_estate_accounting: 'source_of_funds',
-    loan_agreement: 'source_of_funds',
-    crypto_liquidation_record: 'source_of_funds',
-    crypto_trade_ledger: 'source_of_funds',
-    // Tax
-    tax_return_1040: 'tax_doc',
-    tax_return_1065: 'tax_doc',
-    tax_return_1120: 'tax_doc',
-    tax_return_1120s: 'tax_doc',
-    tax_return_foreign: 'tax_doc',
-    tax_return_schedule_c: 'tax_doc',
-    vergi_levhasi: 'tax_doc',
-    w2: 'tax_doc',
-    amigos_treaty_country_tax_cert: 'tax_doc',
-    // Formation / corporate
-    articles_of_incorporation: 'formation_doc',
-    articles_of_organization: 'formation_doc',
-    bylaws: 'formation_doc',
-    operating_agreement: 'formation_doc',
-    member_resolution: 'formation_doc',
-    board_minutes: 'formation_doc',
-    ein_cp575: 'formation_doc',
-    ss4_form: 'formation_doc',
-    employer_registration: 'formation_doc',
-    certificate_of_good_standing: 'formation_doc',
-    merchant_processing_approval: 'formation_doc',
-    foreign_corporate_registry_companies_house: 'formation_doc',
-    foreign_corporate_registry_handelsregister: 'formation_doc',
-    foreign_corporate_registry_kbis: 'formation_doc',
-    foreign_corporate_registry_other: 'formation_doc',
-    foreign_corporate_registry_ticaret_sicil_gazetesi: 'formation_doc',
-    foreign_corporate_registry_visura: 'formation_doc',
-    // Ownership
-    cap_table: 'ownership_evidence',
-    stock_subscription: 'ownership_evidence',
-    membership_certificate: 'ownership_evidence',
-    // Real estate / lease
-    title_deed_us: 'title_deed',
-    tapu_senedi: 'title_deed',
-    property_encumbrance_extract: 'title_deed',
-    lease_commercial: 'lease_or_property',
-    lease_residential: 'lease_or_property',
-    real_estate_purchase_closing: 'lease_or_property',
-    // Contracts / business
-    customer_contract: 'business_contract',
-    supplier_contract: 'business_contract',
-    vendor_contract: 'business_contract',
-    franchise_agreement: 'business_contract',
-    sale_contract: 'business_contract',
-    bill_of_sale: 'business_contract',
-    collateral_schedule: 'business_contract',
-    payroll_provider_contract: 'business_contract',
-    insurance_general_liability: 'business_contract',
-    insurance_workers_comp: 'business_contract',
-    fdd: 'business_contract',
-    fdd_item7: 'business_contract',
-    fdd_item19: 'business_contract',
-    incentive_grant_taxcredit: 'business_contract',
-    partnership_jv_alliance: 'business_contract',
-    // Invoices / receipts
-    paid_invoice: 'invoice_or_receipt',
-    vendor_invoice: 'invoice_or_receipt',
-    delivery_receipt: 'invoice_or_receipt',
-    equipment_po: 'invoice_or_receipt',
-    retail_receipt: 'invoice_or_receipt',
-    professional_services_invoice: 'invoice_or_receipt',
-    // Payroll
-    payroll_register: 'payroll_doc',
-    salary_payslip_treaty_country: 'payroll_doc',
-    form_941_quarterly: 'payroll_doc',
-    employee_roster: 'payroll_doc',
-    // Financial
-    audited_financial_statement: 'financial_statement',
-    balance_sheet: 'financial_statement',
-    profit_loss_statement: 'financial_statement',
-    cash_flow_statement: 'financial_statement',
-    business_profit_distribution: 'financial_statement',
-    investment_portfolio_statement: 'financial_statement',
-    // Credentials / licenses
-    diploma: 'credential',
-    academic_transcript: 'credential',
-    professional_license: 'credential',
-    professional_business_license: 'credential',
-    state_business_license: 'credential',
-    contractor_license: 'credential',
-    sales_tax_permit: 'credential',
-    food_permit: 'credential',
-    health_department_permit: 'credential',
-    liquor_license: 'credential',
-    cbi_certificate: 'credential',
-    training_certificate: 'credential',
-    // Letters
-    recommendation_letter: 'expert_letter',
-    cpa_letter: 'expert_letter',
-    expert_letter_industry: 'expert_letter',
-    expert_letter_technical: 'expert_letter',
-    employment_record_treaty_country: 'employer_letter',
-    employment_record_us: 'employer_letter',
-    service_record: 'employer_letter',
-    offer_letter: 'employer_letter',
-    // CV / resume
-    cv: 'cv_or_resume',
-    cv_academic: 'cv_or_resume',
-    // Translation
-    certified_translation: 'translation_certification',
-    sworn_translation: 'translation_certification',
-    // Business plan
-    business_plan_5yr: 'business_plan',
-    business_plan_pitch_deck: 'business_plan',
-    financial_model_spreadsheet: 'business_plan',
-    // Government IDs
-    national_id_card: 'government_id',
-    drivers_license: 'government_id',
-    residency_immigrant_id: 'government_id',
-    // New status_doc & passport variants
-    cbp_admission_stamp: 'status_doc',
-    i94_paper_card: 'i94',
-    // New money_movement variants
-    inter_account_transfer: 'money_movement',
-    // New bank_statement variants
-    bank_statement_fx_multicurrency: 'bank_statement',
-    bank_statement_brokerage: 'bank_statement',
-    // New SOF variants
-    share_purchase_agreement: 'source_of_funds',
-    salary_savings_declaration: 'source_of_funds',
-    // New formation variants
-    articles_amendment: 'formation_doc',
-    // New vital_record variants
-    divorce_decree: 'vital_record',
-    death_certificate: 'vital_record',
-    // New uscis_or_dos_form variant
-    rfe_noid_notice: 'uscis_or_dos_form',
-    // New cover_letter variant
-    cover_letter_transmittal: 'cover_letter',
-    // Other / catch-all
-    internal_memo_worksheet: 'other',
-    unclassified_other: 'other',
-  };
-  return map[id] ?? null;
+  const override = COARSE_BY_ID[id];
+  if (override) return override;
+  const dt = DOC_TYPES_BY_ID[id];
+  if (!dt) return null;
+  return COARSE_BY_CATEGORY[dt.category] ?? null;
 }
