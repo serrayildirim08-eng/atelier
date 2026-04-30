@@ -110,6 +110,38 @@ describe('Tier-0 — US bank brand + invoice patterns', () => {
   });
 });
 
+describe('Tier-0 — SS-4 and membership certificate', () => {
+  it('"SS-4.pdf" → fine ss4_form', () => {
+    const r = classifyFilename('SS-4.pdf');
+    expect(r.candidates[0]?.doc_type_id).toBe('ss4_form');
+  });
+
+  it('"Application for EIN.pdf" → fine ss4_form', () => {
+    const r = classifyFilename('Application for EIN.pdf');
+    expect(r.candidates[0]?.doc_type_id).toBe('ss4_form');
+  });
+
+  it('"Membership Certificate.pdf" → fine membership_certificate', () => {
+    const r = classifyFilename('Membership Certificate.pdf');
+    expect(r.candidates[0]?.doc_type_id).toBe('membership_certificate');
+  });
+
+  it('"Share Certificate.pdf" → fine membership_certificate', () => {
+    const r = classifyFilename('Share Certificate.pdf');
+    expect(r.candidates[0]?.doc_type_id).toBe('membership_certificate');
+  });
+});
+
+describe('coarseFromFineDocTypeId — SS-4 and membership certificate', () => {
+  it('ss4_form → formation_doc', () => {
+    expect(coarseFromFineDocTypeId('ss4_form')).toBe('formation_doc');
+  });
+
+  it('membership_certificate → ownership_evidence', () => {
+    expect(coarseFromFineDocTypeId('membership_certificate')).toBe('ownership_evidence');
+  });
+});
+
 describe('coarseFromFineDocTypeId', () => {
   it('maps foreign-language hits to coarse buckets', () => {
     expect(coarseFromFineDocTypeId('diploma')).toBe('credential');

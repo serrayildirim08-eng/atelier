@@ -217,6 +217,7 @@ export function coarseFromFineDocTypeId(
     member_resolution: 'formation_doc',
     board_minutes: 'formation_doc',
     ein_cp575: 'formation_doc',
+    ss4_form: 'formation_doc',
     employer_registration: 'formation_doc',
     certificate_of_good_standing: 'formation_doc',
     merchant_processing_approval: 'formation_doc',
@@ -229,6 +230,7 @@ export function coarseFromFineDocTypeId(
     // Ownership
     cap_table: 'ownership_evidence',
     stock_subscription: 'ownership_evidence',
+    membership_certificate: 'ownership_evidence',
     // Real estate / lease
     title_deed_us: 'title_deed',
     tapu_senedi: 'title_deed',

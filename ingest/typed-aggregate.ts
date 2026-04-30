@@ -16,6 +16,12 @@ import { getAnthropic } from '@/lib/anthropic';
 import { logAnthropicUsage } from '@/lib/usage-log';
 import { countMessageTokens } from '@/lib/token-count';
 import { resolveSubApplicationAlias } from '@/lib/case-folder-aliases';
+import {
+  inferApplicantFromOwnership,
+  inferApplicantWithLlmFallback,
+  type OwnershipEntryT,
+  type ConflictEntryT as InferenceConflictEntryT,
+} from '@/lib/e2/applicant-inference';
 import { E2FactsSchema, type E2Facts } from './schema';
 import {
   DOC_TYPE_LABELS,
@@ -3864,6 +3870,96 @@ export function enrichPhase9Fields(facts: E2Facts, memory: TypedMemory): E2Facts
   return facts;
 }
 
+/* ---------------------------------------------------------------------- */
+/* Applicant identification from ownership chain (Phase-3 sub-step)       */
+/*                                                                        */
+/* When the LLM aggregator leaves investor.full_name blank but the        */
+/* ownership_chain it produced contains exactly one treaty-national       */
+/* majority owner, we can deterministically fill the principal-applicant  */
+/* slot. Ambiguous and case-theory-broken configurations log conflicts    */
+/* instead of fabricating a name.                                         */
+/* ---------------------------------------------------------------------- */
+
+function isInferenceConflictAlreadyLogged(
+  existing: readonly E2Facts['conflict_register'][number][],
+  conflictType: string,
+  factADoc: string | null,
+): boolean {
+  return existing.some(
+    (c) =>
+      c.conflict_type.value === conflictType &&
+      (factADoc == null || c.fact_a_doc.value === factADoc),
+  );
+}
+
+function ownershipChainAsInferenceInput(facts: E2Facts): OwnershipEntryT[] {
+  return facts.ownership_chain.map((e) => ({
+    owner_name: e.owner_name,
+    ownership_percent: e.ownership_percent,
+    nationality: e.nationality,
+    direct_or_indirect: e.direct_or_indirect,
+  }));
+}
+
+function applyInferenceConflicts(
+  facts: E2Facts,
+  conflicts: readonly InferenceConflictEntryT[],
+): void {
+  for (const c of conflicts) {
+    const ct = c.conflict_type.value;
+    const fa = c.fact_a_doc.value;
+    if (typeof ct !== 'string') continue;
+    if (isInferenceConflictAlreadyLogged(facts.conflict_register, ct, fa)) continue;
+    facts.conflict_register.push(c);
+  }
+}
+
+/**
+ * Synchronous deterministic applicant-identification pass. Runs as part
+ * of enrichPhase3Fields. Idempotent — never overwrites investor.full_name.
+ */
+export function enrichInvestorFromOwnershipChain(facts: E2Facts): E2Facts {
+  const current = facts.investor.full_name?.value ?? null;
+  if (current && current.trim().length > 0) return facts;
+
+  const result = inferApplicantFromOwnership({
+    ownership_chain: ownershipChainAsInferenceInput(facts),
+    current_investor_full_name: current,
+  });
+
+  if (result.decision === 'filled_single_treaty_majority' && result.full_name) {
+    facts.investor.full_name = result.full_name;
+  }
+
+  applyInferenceConflicts(facts, result.conflicts);
+  return facts;
+}
+
+/**
+ * Async opt-in pass: when the deterministic ladder declined and the
+ * env-flag APPLICANT_HAIKU_FALLBACK_ENABLED is set, fire one Haiku call
+ * to attempt a verdict. Default-disabled so tests stay deterministic and
+ * CI doesn't burn API credits. Errors are swallowed (the deterministic
+ * decision stands).
+ */
+export async function enrichInvestorFromOwnershipChainAsync(
+  facts: E2Facts,
+): Promise<E2Facts> {
+  const current = facts.investor.full_name?.value ?? null;
+  if (current && current.trim().length > 0) return facts;
+
+  const result = await inferApplicantWithLlmFallback({
+    ownership_chain: ownershipChainAsInferenceInput(facts),
+    current_investor_full_name: current,
+  });
+
+  if (result.decision === 'filled_single_treaty_majority' && result.full_name) {
+    facts.investor.full_name = result.full_name;
+  }
+  applyInferenceConflicts(facts, result.conflicts);
+  return facts;
+}
+
 /**
  * Phase-3 orchestrator. Mutates `facts` in place to populate any of the
  * Phase-1 / Phase-2 optional gate inputs that the LLM aggregator left
@@ -3951,6 +4047,11 @@ export function enrichPhase3Fields(facts: E2Facts, memory: TypedMemory): E2Facts
 
   // rfes[].initial_filing_assertion / response_assertion — see above
   // (cover-letter / RFE-response body extraction is Phase-4).
+
+  // investor.full_name from ownership_chain — deterministic only. The
+  // optional Haiku fallback runs in aggregateTypedMemoryToE2 once the
+  // full enrichment chain has settled (see enrichInvestorFromOwnershipChainAsync).
+  enrichInvestorFromOwnershipChain(facts);
 
   return facts;
 }
@@ -4157,6 +4258,14 @@ export async function aggregateTypedMemoryToE2(
   // five_year_horizon_vs_business_plan_drift gate can compare it
   // against the cover-letter narrative claim.
   enrichPhase9Fields(parsed.data, memory);
+
+  // Optional Haiku-fallback pass for applicant identification. Only fires
+  // when (a) investor.full_name is still blank after the deterministic
+  // ownership-chain ladder ran inside enrichPhase3Fields AND (b) the env
+  // flag APPLICANT_HAIKU_FALLBACK_ENABLED is truthy. Errors are swallowed
+  // so a missing API key never breaks the aggregator. Default-disabled
+  // keeps tests deterministic and CI free of spurious API charges.
+  await enrichInvestorFromOwnershipChainAsync(parsed.data);
 
   // Manual §4.5 quality gate: deterministic backstop for the Sonnet
   // reasoning. If the membership_interest_transfer total_consideration
