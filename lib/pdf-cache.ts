@@ -26,7 +26,7 @@ import { dirname, join } from 'node:path';
 import type { PerPdfResult } from '@/ingest/typed-memory';
 
 /** Bump when PerPdfResult-shaped fields change. */
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 
 const DEFAULT_CACHE_DIR = 'db/pdf-cache';
 

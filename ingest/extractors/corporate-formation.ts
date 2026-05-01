@@ -72,6 +72,8 @@ articles_of_organization / articles_of_incorporation:
 - members_or_shareholders: one entry per member (LLC) or initial shareholder (Corp). Capture name + ownership_percent + role (e.g., "Manager", "Member", "Director", "President"). If percentages are not stated, leave that field null per row.
 - organizer_or_incorporator_name: the natural person who signed the formation document on behalf of the registrant.
 - signed_date: the date next to the organizer's signature.
+- principal_office_address: the entity's principal office / business / mailing address as listed on the Articles. Capture the full multi-line address as a single string with comma separators (street, city, state, zip). This is the operating address — NOT the registered agent's address. If the Articles list only a registered-agent address and no separate principal office, leave principal_office_address=null and populate registered_agent_address only.
+- registered_agent_address: the registered agent's service-of-process address as listed alongside the registered_agent_name. Same comma-separated single-string format. Populate even when it equals the principal office (downstream will dedupe).
 
 operating_agreement_amendment:
 - amendment_number: string like "First Amendment", "Amendment No. 2".
@@ -84,6 +86,7 @@ ein_assignment_letter:
 - ein_full: capture the FULL EIN exactly as stated. Renderers downstream will mask all but the last 4 digits per the firm's PII rule — do NOT pre-mask in your JSON output.
 - assigned_date: the date the letter was issued.
 - irs_signature_present: true if the letter shows an IRS signature block / IRS officer name.
+- mailing_address: the entity's mailing address as printed on the IRS letter (the address block addressed to the entity, NOT IRS's own return address). Capture as a single string with comma separators (street, city, state, zip). This populates the master fact sheet's company physical_address — extract carefully, the EIN letter is often the most authoritative address source in the file.
 
 certificate_of_good_standing:
 - jurisdiction: the state / authority issuing the certificate.
@@ -94,6 +97,7 @@ certificate_of_good_standing:
 state_registration:
 - registration_kind: 'annual_report' | 'foreign_qualification' | 'amendment_of_articles' | 'name_change' | 'other_state_registration'.
 - status_value: short phrase describing the registration's status (e.g., "filed", "accepted", "rejected").
+- principal_office_address: the entity's current business address as filed with the state on this registration. Annual reports often carry the most up-to-date address even when Articles only listed the registered agent. Same comma-separated single-string format.
 
 Provenance rules — non-negotiable on every leaf field:
 - NEVER invent. If a field is not present in this document, return value=null AND source_page=null AND source_quote=null AND confidence=null.

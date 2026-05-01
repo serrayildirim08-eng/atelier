@@ -6,7 +6,7 @@
  * module boundary so the route's wiring is exercised end-to-end (path
  * validation → walk → per-PDF cache read → aggregate → response shape).
  *
- * The PDF cache (db/pdf-cache/v1/<sha256>.json) is asserted to survive
+ * The PDF cache (db/pdf-cache/v2/<sha256>.json) is asserted to survive
  * across re-aggregation calls — that's the bug Phase 11 fixes.
  */
 
@@ -178,7 +178,7 @@ describe('POST /api/re-aggregate', () => {
       const after = readPdfCache(hash);
       expect(after).not.toBeNull();
       // Cache directory still exists with at least the seeded entry.
-      const versioned = join(cacheDir, 'v1');
+      const versioned = join(cacheDir, 'v2');
       expect(existsSync(versioned)).toBe(true);
       const files = readdirSync(versioned).filter((f) => f.endsWith('.json'));
       expect(files.length).toBeGreaterThanOrEqual(1);
