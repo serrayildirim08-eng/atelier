@@ -14,6 +14,9 @@
  * attorney edits to caseFacts and call them directly.
  */
 
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import { draftCoverLetter } from '@/draft/cover-letter';
 import { draftDeclaration } from '@/draft/declaration';
 import { fillForm } from '@/draft/forms-filler';
@@ -31,6 +34,38 @@ export interface ExecuteResult {
   output_path: string | null;
   output_inline: string | null;
   usage: { input_tokens: number; output_tokens: number } | null;
+}
+
+/**
+ * Persist an inline-text generator output to disk under db/drafts/. Without
+ * this, approved cover letters / declarations / business plans only lived
+ * in the API response and were lost when the user navigated away. Failures
+ * are logged but do not break the approve flow — the inline text is still
+ * returned to the UI.
+ */
+async function persistInlineDraft(
+  matterId: string,
+  generator: string,
+  inline: string,
+  approvedAt: string,
+): Promise<string | null> {
+  const safeMatter = matterId.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const stamp = approvedAt.replace(/[:.]/g, '-');
+  const filename = `${generator}-${stamp}.md`;
+  const dir = join(process.cwd(), 'db', 'drafts', safeMatter);
+  const path = join(dir, filename);
+  try {
+    await mkdir(dir, { recursive: true });
+    await writeFile(path, inline, 'utf8');
+    return path;
+  } catch (e: unknown) {
+    console.warn(
+      `[execute] Failed to persist draft ${generator} for matter ${matterId}: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    );
+    return null;
+  }
 }
 
 /**
@@ -74,12 +109,19 @@ export async function executeApprovedPreview(
   edits: PreviewEdit[],
 ): Promise<ExecuteResult> {
   const editedFacts = applyEditsToCaseFacts(caseFacts, edits);
+  const approvedAt = new Date().toISOString();
 
   switch (record.generator) {
     case 'cover_letter': {
       const result = await draftCoverLetter(editedFacts);
+      const path = await persistInlineDraft(
+        record.matter_id,
+        'cover_letter',
+        result.letter,
+        approvedAt,
+      );
       return {
-        output_path: null,
+        output_path: path,
         output_inline: result.letter,
         usage: result.usage,
       };
@@ -100,8 +142,14 @@ export async function executeApprovedPreview(
         caseFacts: editedFacts as { case_type: 'E2'; facts: E2Facts },
         declarant,
       });
+      const path = await persistInlineDraft(
+        record.matter_id,
+        record.generator,
+        result.rendered_text,
+        approvedAt,
+      );
       return {
-        output_path: null,
+        output_path: path,
         output_inline: result.rendered_text,
         usage: result.usage,
       };
@@ -131,9 +179,16 @@ export async function executeApprovedPreview(
       const list = buildExhibitList({ memory });
       const md = renderExhibitListMarkdown(list);
       const compact = renderExhibitListCompact(list);
+      const inline = `${md}\n\n---\n\n${compact}`;
+      const path = await persistInlineDraft(
+        record.matter_id,
+        'exhibit_list',
+        inline,
+        approvedAt,
+      );
       return {
-        output_path: null,
-        output_inline: `${md}\n\n---\n\n${compact}`,
+        output_path: path,
+        output_inline: inline,
         usage: null,
       };
     }
@@ -144,24 +199,38 @@ export async function executeApprovedPreview(
       const result = await draftBusinessPlan({
         caseFacts: editedFacts.facts as E2Facts,
       });
+      const path = await persistInlineDraft(
+        record.matter_id,
+        'business_plan',
+        result.rendered_markdown,
+        approvedAt,
+      );
       return {
-        output_path: null,
+        output_path: path,
         output_inline: result.rendered_markdown,
         usage: result.usage,
       };
     }
     case 'noid_principal':
-    case 'noid_dependent':
+    case 'noid_dependent': {
       // NoID generator is a thin attestation; the draft layer doesn't
       // ship a dedicated module yet. Stub the executor: render a
       // markdown attestation from the preview's facts_used. When the
       // full NoID drafter ships it slots in here without changing the
       // route.
+      const inline = renderNoidAttestation(record);
+      const path = await persistInlineDraft(
+        record.matter_id,
+        record.generator,
+        inline,
+        approvedAt,
+      );
       return {
-        output_path: null,
-        output_inline: renderNoidAttestation(record),
+        output_path: path,
+        output_inline: inline,
         usage: null,
       };
+    }
     default: {
       // Exhaustiveness guard — adding a new PreviewGenerator member without
       // wiring it here will fail compilation on the `never` assignment.

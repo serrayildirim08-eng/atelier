@@ -195,6 +195,30 @@ const SERVICE_CENTER_LABELS: Record<UscisServiceCenter, string> = {
   unknown: 'Unknown Service Center',
 };
 
+// ── Filing addresses ──────────────────────────────────────────────────────────
+//
+// Mailing addresses for I-129 petitions per service center. USCIS adjusts
+// lockbox PO Boxes from time to time — the strings here name the canonical
+// service-center city + the verification URL so a generated cover letter
+// always points the attorney to confirm the current PO Box before mailing.
+// Direct-PO-Box numbers are intentionally NOT hardcoded to avoid drift.
+//
+// For consular filings (DS-160 + DS-156E) the filing address is N/A —
+// petitions are submitted via the CEAC portal, not mailed.
+const SERVICE_CENTER_FILING_ADDRESS: Record<UscisServiceCenter, string | null> = {
+  california:
+    'USCIS California Service Center, Laguna Niguel, CA — verify current PO Box at uscis.gov/i-129',
+  nebraska:
+    'USCIS Nebraska Service Center, Lincoln, NE — verify current PO Box at uscis.gov/i-129',
+  texas:
+    'USCIS Texas Service Center, Mesquite, TX — verify current PO Box at uscis.gov/i-129',
+  vermont:
+    'USCIS Vermont Service Center, St. Albans, VT — verify current PO Box at uscis.gov/i-129',
+  potomac:
+    'USCIS Potomac Service Center, Arlington, VA — verify current PO Box at uscis.gov/i-129',
+  unknown: null,
+};
+
 // ── Normalize input to a 2-letter state code ──────────────────────────────────
 function normalizeToStateCode(raw: string): string | null {
   const trimmed = raw.trim();
@@ -259,6 +283,7 @@ export function routeServiceCenter(
   return {
     service_center: center,
     service_center_label: SERVICE_CENTER_LABELS[center],
+    filing_address: SERVICE_CENTER_FILING_ADDRESS[center] ?? undefined,
     source: 'state_lookup',
   };
 }

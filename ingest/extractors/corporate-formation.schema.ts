@@ -61,6 +61,14 @@ const ArticlesOfOrganizationSchema = z.object({
   members_or_shareholders: z.array(MemberOrShareholderSchema),
   organizer_or_incorporator_name: Field(z.string()),
   signed_date: Field(z.string()),
+  /**
+   * Principal office / business address as printed on the Articles. Used to
+   * populate caseFacts.facts.entity.physical_address. Optional because some
+   * jurisdictions only list a registered-agent address; absence forces the
+   * generate-gate to surface "physical_address missing".
+   */
+  principal_office_address: Field(z.string()).optional(),
+  registered_agent_address: Field(z.string()).optional(),
 });
 
 const ArticlesOfIncorporationSchema = z.object({
@@ -74,6 +82,8 @@ const ArticlesOfIncorporationSchema = z.object({
   members_or_shareholders: z.array(MemberOrShareholderSchema),
   organizer_or_incorporator_name: Field(z.string()),
   signed_date: Field(z.string()),
+  principal_office_address: Field(z.string()).optional(),
+  registered_agent_address: Field(z.string()).optional(),
 });
 
 const OperatingAgreementAmendmentSchema = z.object({
@@ -104,6 +114,8 @@ const EinAssignmentLetterSchema = z.object({
   ein_full: Field(z.string()),
   assigned_date: Field(z.string()),
   irs_signature_present: Field(z.boolean()),
+  /** Mailing address printed on the IRS letter — populates entity.physical_address. */
+  mailing_address: Field(z.string()).optional(),
 });
 
 const CertificateOfGoodStandingSchema = z.object({
@@ -136,6 +148,8 @@ const StateRegistrationSchema = z.object({
     ]),
   ),
   status_value: Field(z.string()),
+  /** Current business address as filed with the state — populates entity.physical_address. */
+  principal_office_address: Field(z.string()).optional(),
 });
 
 const OtherFormationSchema = z.object({

@@ -2690,6 +2690,114 @@ export function deriveOwnershipHistory(
 /**
  * Phase-3 §3 — filed_date_i129.
  *
+ * Phase-3 §3a — enterprise.physical_address.
+ *
+ * Preference order across all corporate-formation entries:
+ *   1. ArticlesOfOrganization / ArticlesOfIncorporation principal_office_address
+ *   2. StateRegistration principal_office_address (annual reports often carry
+ *      the current address even when Articles only listed the registered agent)
+ *   3. EinAssignmentLetter mailing_address
+ *   4. ArticlesOfOrganization / ArticlesOfIncorporation registered_agent_address
+ *      (least preferred — registered-agent address is often a formation-service
+ *      P.O. Box, not the operating address)
+ *
+ * First non-empty hit at the highest available tier wins; conflict resolution
+ * across multiple Articles is left to the conflict register.
+ */
+export function deriveEnterprisePhysicalAddress(
+  memory: TypedMemory,
+): FieldT<string> | null {
+  let principalFromArticles: FieldT<string> | null = null;
+  let principalFromState: FieldT<string> | null = null;
+  let mailingFromEin: FieldT<string> | null = null;
+  let registeredAgentAddress: FieldT<string> | null = null;
+
+  for (const entry of iterMemoryEntries(memory)) {
+    const cf = entry.corporateFormation;
+    if (!cf) continue;
+    const sub = cf.formation_doc_subtype;
+    if (sub === 'articles_of_organization' || sub === 'articles_of_incorporation') {
+      const p = cf.principal_office_address;
+      if (!principalFromArticles && p?.value) {
+        principalFromArticles = makeField(p.value, p.source_page, p.source_quote, p.confidence ?? 0.9);
+      }
+      const r = cf.registered_agent_address;
+      if (!registeredAgentAddress && r?.value) {
+        registeredAgentAddress = makeField(r.value, r.source_page, r.source_quote, r.confidence ?? 0.6);
+      }
+    } else if (sub === 'state_registration') {
+      const p = cf.principal_office_address;
+      if (!principalFromState && p?.value) {
+        principalFromState = makeField(p.value, p.source_page, p.source_quote, p.confidence ?? 0.85);
+      }
+    } else if (sub === 'ein_assignment_letter') {
+      const m = cf.mailing_address;
+      if (!mailingFromEin && m?.value) {
+        mailingFromEin = makeField(m.value, m.source_page, m.source_quote, m.confidence ?? 0.8);
+      }
+    }
+  }
+
+  return (
+    principalFromArticles ?? principalFromState ?? mailingFromEin ?? registeredAgentAddress
+  );
+}
+
+/**
+ * Phase-3 §3b — enterprise.legal_name.
+ *
+ * First non-empty entity_legal_name across formation entries. Articles preferred,
+ * then EIN letter (which carries the same name on IRS letterhead), then state
+ * registration / good-standing / amendment.
+ */
+export function deriveEnterpriseLegalName(
+  memory: TypedMemory,
+): FieldT<string> | null {
+  let fromArticles: FieldT<string> | null = null;
+  let fromEin: FieldT<string> | null = null;
+  let fromOther: FieldT<string> | null = null;
+
+  for (const entry of iterMemoryEntries(memory)) {
+    const cf = entry.corporateFormation;
+    if (!cf) continue;
+    const n = cf.entity_legal_name;
+    if (!n?.value) continue;
+    const f = makeField(n.value, n.source_page, n.source_quote, n.confidence ?? 0.9);
+    const sub = cf.formation_doc_subtype;
+    if (sub === 'articles_of_organization' || sub === 'articles_of_incorporation') {
+      if (!fromArticles) fromArticles = f;
+    } else if (sub === 'ein_assignment_letter') {
+      if (!fromEin) fromEin = f;
+    } else {
+      if (!fromOther) fromOther = f;
+    }
+  }
+
+  return fromArticles ?? fromEin ?? fromOther;
+}
+
+/**
+ * Phase-3 §3c — enterprise.ein.
+ *
+ * Pull from the IRS EIN assignment letter (CP-575 / 147-C). Renders as the
+ * full EIN on this layer; PII redaction (mask all but last 4) is applied at
+ * the renderer boundary, not here.
+ */
+export function deriveEnterpriseEin(
+  memory: TypedMemory,
+): FieldT<string> | null {
+  for (const entry of iterMemoryEntries(memory)) {
+    const cf = entry.corporateFormation;
+    if (!cf || cf.formation_doc_subtype !== 'ein_assignment_letter') continue;
+    const e = cf.ein_full;
+    if (e?.value) {
+      return makeField(e.value, e.source_page, e.source_quote, e.confidence ?? 0.95);
+    }
+  }
+  return null;
+}
+
+/**
  * Pull from the I-129 USCIS form's signature_date. Falls back to null when
  * no I-129 form is present or signature_date is missing. Treats both
  * "I-129" and "I-129E" (Supplement) as valid sources, preferring the base
@@ -4244,6 +4352,30 @@ export function enrichPhase3Fields(facts: E2Facts, memory: TypedMemory): E2Facts
   ) {
     const wa = deriveWorkAuthorizationDate(memory);
     if (wa) facts.investor.work_authorization_date = wa;
+  }
+
+  // enterprise.physical_address — derive from corporate-formation entries.
+  // Preference order: principal_office_address > registered_agent_address >
+  // mailing_address (EIN letter). First non-empty hit wins; subsequent
+  // formation docs are ignored (avoids Articles vs amendment conflict).
+  if (
+    !facts.enterprise.physical_address ||
+    facts.enterprise.physical_address.value == null
+  ) {
+    const addr = deriveEnterprisePhysicalAddress(memory);
+    if (addr) facts.enterprise.physical_address = addr;
+  }
+
+  // enterprise.legal_name — fill when LLM aggregator left it blank.
+  if (!facts.enterprise.legal_name || facts.enterprise.legal_name.value == null) {
+    const name = deriveEnterpriseLegalName(memory);
+    if (name) facts.enterprise.legal_name = name;
+  }
+
+  // enterprise.ein — pull from the EIN assignment letter when missing.
+  if (!facts.enterprise.ein || facts.enterprise.ein.value == null) {
+    const ein = deriveEnterpriseEin(memory);
+    if (ein) facts.enterprise.ein = ein;
   }
 
   // enterprise.fully_operational_since_date / claimed_business_model —

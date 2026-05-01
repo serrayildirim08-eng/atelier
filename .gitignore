@@ -63,6 +63,11 @@ db/matter-snapshot/
 db/previews/
 db/audit/
 
+# generated drafts (cover letters, declarations, business plans, exhibit
+# index, NoID attestations) — persisted by lib/preview-builders/execute.ts
+# so approved output survives a page navigation. Per-matter folder.
+db/drafts/
+
 # doctrine RAG snapshot (built locally from manuals/ + ~/akalan-context/
 # via `npm run rag:build`). Re-buildable; not version-controlled.
 db/rag-index.json

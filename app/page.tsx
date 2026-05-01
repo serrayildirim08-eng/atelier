@@ -6457,9 +6457,31 @@ function DraftPane({
     return { classifyPercent: pct, totalDocs: total };
   }, [typedMemory, documentOverrides]);
 
-  const gateOpen = classifyPercent >= DRAFT_GATE_PERCENT;
   const matterId = result.filename;
   const caseFacts = result.caseFacts;
+
+  // Generate-gate fact completeness check. The classification gate is
+  // necessary but not sufficient: a CL drafted with [Address: TBD] is
+  // malpractice-adjacent. Block generation when key facts are missing,
+  // and surface the missing list so the attorney knows what to fix.
+  const missingFacts = useMemo(() => {
+    const missing: string[] = [];
+    if (caseFacts?.case_type !== 'E2') return missing;
+    const f = caseFacts.facts as E2Facts;
+    if (!f.enterprise.legal_name?.value) missing.push('company legal name');
+    if (!f.enterprise.ein?.value) missing.push('EIN');
+    if (!f.enterprise.physical_address?.value) missing.push('company physical address');
+    if (!f.enterprise.state_of_formation?.value)
+      missing.push('state of formation');
+    if (!f.investor.full_name?.value) missing.push('beneficiary full name');
+    if (!f.investor.passport_number?.value)
+      missing.push('beneficiary passport number');
+    if (!f.investor.nationality?.value) missing.push('beneficiary nationality');
+    return missing;
+  }, [caseFacts]);
+
+  const gateOpen =
+    classifyPercent >= DRAFT_GATE_PERCENT && missingFacts.length === 0;
 
   function onPickRef(ref: string) {
     if (!matterRoot) return;
@@ -6496,18 +6518,46 @@ function DraftPane({
               attorney sign-off required · every artifact routes through preview → approve
             </div>
           </div>
-          <div className="font-mono text-meta tabular-nums">
+          <div className="font-mono text-meta tabular-nums text-right">
             {gateOpen ? (
               <span className="text-graphite-soft">
                 {classifyPercent}% classified · gate open
               </span>
-            ) : (
+            ) : classifyPercent < DRAFT_GATE_PERCENT ? (
               <span className="text-ink">
                 {classifyPercent}% classified · need ≥{DRAFT_GATE_PERCENT}%
+              </span>
+            ) : (
+              <span className="text-ink">
+                {classifyPercent}% classified · {missingFacts.length} fact
+                {missingFacts.length === 1 ? '' : 's'} missing
               </span>
             )}
           </div>
         </header>
+        {missingFacts.length > 0 && classifyPercent >= DRAFT_GATE_PERCENT && (
+          <div className="border-l-[3px] border-ink bg-paper-deep/30 px-4 py-3">
+            <div className="smcp text-graphite mb-1.5">
+              gate locked — required facts missing
+            </div>
+            <ul className="grid gap-1 text-meta text-ink-2">
+              {missingFacts.map((m) => (
+                <li
+                  key={m}
+                  className="font-mono leading-snug before:content-['—'] before:text-graphite-soft before:mr-2"
+                >
+                  {m}
+                </li>
+              ))}
+            </ul>
+            <div className="text-meta text-graphite-soft mt-2 leading-relaxed">
+              Drafts cannot ship with placeholder values for these fields. Add
+              the source documents (Articles of Organization, EIN letter,
+              passport bio) or edit the dossier facts directly to fill the
+              gaps.
+            </div>
+          </div>
+        )}
         {totalDocs === 0 ? (
           <p className="text-body text-graphite-soft italic">
             Ingest a matter first — there are no documents to draft from yet.
@@ -6534,7 +6584,9 @@ function DraftPane({
                       title={
                         gateOpen
                           ? 'Opens the preview → approve modal. NO output ships without attorney sign-off.'
-                          : `Locked until ${DRAFT_GATE_PERCENT}% of documents are classified (currently ${classifyPercent}%).`
+                          : classifyPercent < DRAFT_GATE_PERCENT
+                            ? `Locked until ${DRAFT_GATE_PERCENT}% of documents are classified (currently ${classifyPercent}%).`
+                            : `Locked — required facts missing: ${missingFacts.join(', ')}.`
                       }
                       className="text-left border border-rule bg-paper px-4 py-4 hover:border-ink transition-colors group disabled:opacity-40 disabled:hover:border-rule disabled:cursor-not-allowed"
                     >
