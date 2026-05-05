@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Atelier — vibe-check · Master Fact Sheet First</title>
+<style>
+  :root {
+    --paper: #FAFAFA;
+    --paper-2: #F0F0F0;
+    --paper-3: #E5E5E5;
+    --paper-deep: #D4D4D4;
+    --ink: #0A0A0A;
+    --ink-2: #1F1F1F;
+    --graphite: #404040;
+    --graphite-soft: #595959;
+    --rule: rgba(10,10,10,0.10);
+    --rule-strong: rgba(10,10,10,0.32);
+    --font-display: "Iowan Old Style", "Hoefler Text", "Apple Garamond", Georgia, "Times New Roman", serif;
+    --font-body: -apple-system, "Helvetica Neue", "Inter", system-ui, sans-serif;
+    --font-mono: "Courier New", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--paper); color: var(--ink); margin: 0; padding: 0;
+    font-family: var(--font-body); font-size: 15px; line-height: 1.5; font-weight: 500;
+    -webkit-font-smoothing: antialiased;
+  }
+  .tnum, .mono, code, table { font-variant-numeric: tabular-nums; font-family: var(--font-mono); }
+  .smcp { font-family: var(--font-mono); font-weight: 600; font-size: 11.5px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--graphite); }
+
+  /* shell */
+  .shell { display: grid; grid-template-columns: 240px 1fr 400px; min-height: 100vh; }
+
+  /* matter rail */
+  .rail { border-right: 1px solid var(--rule); padding: 28px 16px; }
+  .rail h6 { margin: 0 0 14px 0; }
+  .rail ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+  .rail li { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 12px;
+    padding: 10px 12px; border: 1px solid transparent; cursor: default; }
+  .rail li.active { border-color: var(--rule); background: var(--paper-2); }
+  .rail .matter-name { font-size: 13px; color: var(--ink); line-height: 1.2; }
+  .rail .matter-tail { font-family: var(--font-mono); font-size: 11.5px; color: var(--graphite-soft); margin-top: 2px; }
+  .chip { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.06em; padding: 2px 8px; border: 1px solid var(--rule); color: var(--graphite); white-space: nowrap; }
+  .chip.solid { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .chip.outline-ink { border-color: var(--ink); color: var(--ink); }
+
+  /* sheet (center column) */
+  .sheet { padding: 0; min-width: 0; }
+  .masthead { background: var(--paper-2); padding: 28px 36px 22px;
+    border-bottom: 1px solid var(--rule); position: sticky; top: 0; z-index: 5; }
+  .masthead-bar { display: flex; align-items: baseline; gap: 14px; margin-bottom: 18px; }
+  .masthead-eyebrow { font-family: var(--font-mono); font-weight: 600; font-size: 11.5px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--graphite); }
+  .masthead-h1 { font-family: var(--font-display); font-weight: 700; font-size: 64px; line-height: 1.0; letter-spacing: -0.014em; color: var(--ink); margin: 0; }
+  .masthead-meta { font-weight: 600; font-size: 15px; color: var(--ink); white-space: nowrap; margin-left: auto; display: flex; gap: 8px; align-items: baseline; }
+
+  .pinned { display: grid; grid-template-columns: repeat(6, 1fr); gap: 24px 28px; }
+  .pin { border-left: 4px solid var(--rule-strong); padding-left: 12px; min-width: 0; }
+  .pin .eb { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--graphite-soft); margin-bottom: 4px; }
+  .pin .val { font-family: var(--font-mono); font-size: 15px; color: var(--ink); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pin .val.serif { font-family: var(--font-display); font-size: 17px; font-weight: 600; }
+  .pin .tail { font-family: var(--font-body); font-size: 11.5px; color: var(--graphite); margin-top: 4px; }
+  .pin.confirmed { border-left-color: var(--ink); }
+  .pin.attention .val { color: var(--ink); font-weight: 700; }
+  .pin.attention .tail { color: var(--ink); }
+
+  /* fatal gaps */
+  .section { padding: 40px 36px; border-bottom: 1px solid var(--rule); }
+  .section h2 { font-family: var(--font-body); font-size: 16.8px; font-weight: 600; color: var(--ink); margin: 0 0 18px 0; display: flex; align-items: baseline; gap: 14px; }
+  .section .numeral { font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 38.4px; color: var(--ink); letter-spacing: -0.01em; line-height: 1; }
+  .section .anchor { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.06em; color: var(--graphite-soft); margin-left: auto; }
+
+  .fatal { display: grid; gap: 4px; font-family: var(--font-mono); font-size: 13px; }
+  .fatal .row { display: grid; grid-template-columns: 22px 1fr auto; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+  .fatal .row:last-child { border-bottom: none; }
+  .fatal .row .lab { color: var(--ink-2); }
+  .fatal .row .stat { color: var(--graphite); }
+  .fatal-coda { margin-top: 14px; font-family: var(--font-body); font-size: 13px; color: var(--graphite); }
+
+  /* sof spine */
+  .spine { position: relative; padding-left: 0; }
+  .spine .col-h { display: grid; grid-template-columns: 56px 1fr 140px 1.4fr 1.2fr; gap: 18px; padding-bottom: 10px; border-bottom: 1px solid var(--rule-strong); margin-bottom: 4px; }
+  .spine .col-h span { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--graphite); }
+  .spine .col-h .right { text-align: right; }
+  .leg { display: grid; grid-template-columns: 56px 1fr 140px 1.4fr 1.2fr; gap: 18px; padding: 18px 0; border-bottom: 1px solid var(--rule); position: relative; }
+  .leg:last-child { border-bottom: 1px solid var(--ink-2); }
+  .leg .num { font-family: var(--font-mono); font-size: 13px; color: var(--graphite-soft); padding-top: 2px; }
+  .leg .num::after { content: ""; display: block; width: 1px; background: var(--rule-strong); margin: 8px 0 -18px 13px; height: 18px; }
+  .leg:last-child .num::after { display: none; }
+  .leg .origin { font-size: 15px; color: var(--ink); }
+  .leg .origin .sub { font-size: 13px; color: var(--graphite); margin-top: 4px; }
+  .leg .usd { font-family: var(--font-mono); font-size: 15px; color: var(--ink); text-align: right; }
+  .leg .delta { font-family: var(--font-mono); font-size: 13px; font-weight: 700; color: var(--ink); margin-top: 6px; text-align: right; }
+  .leg .ev { font-size: 13px; color: var(--ink-2); font-family: var(--font-mono); }
+  .leg .ev .aps { color: var(--graphite); display: block; margin-top: 4px; }
+  .leg .dest { font-family: var(--font-mono); font-size: 13px; color: var(--ink-2); }
+  .leg .dest .meta { color: var(--graphite); display: block; margin-top: 4px; }
+  .leg.has-conflict { border-left: 3px solid var(--ink); margin-left: -36px; padding-left: 33px; padding-right: 0; }
+  .leg .pin-conflict { grid-column: 2 / -1; margin-top: 10px; padding: 8px 12px; background: var(--paper-2); font-family: var(--font-mono); font-size: 13px; color: var(--ink); display: flex; align-items: center; gap: 10px; }
+  .leg .pin-conflict .sev { background: var(--ink); color: var(--paper); padding: 1px 8px; font-size: 10.5px; letter-spacing: 0.10em; }
+  .leg .pin-conflict .anchor { margin-left: auto; color: var(--graphite); }
+  .sigma { display: grid; grid-template-columns: 56px 1fr 140px 1.4fr 1.2fr; gap: 18px; padding: 16px 0 0; }
+  .sigma .lab { grid-column: 1 / 3; font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--graphite); }
+  .sigma .total { font-family: var(--font-mono); font-size: 24px; font-weight: 600; color: var(--ink); text-align: right; }
+
+  /* gated section */
+  .gated { position: relative; opacity: 0.55; }
+  .gated::after { content: ""; position: absolute; inset: 0;
+    background-image: repeating-linear-gradient(45deg, transparent 0 6px, var(--rule) 6px 7px);
+    pointer-events: none; }
+  .gated .gated-tag { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.10em; text-transform: uppercase; color: var(--graphite); padding: 6px 0; }
+
+  /* inspector */
+  .inspector { background: var(--paper-2); border-left: 1px solid var(--rule); display: grid; grid-template-rows: auto 1fr 32px; min-height: 100vh; }
+  .inspector-tabs { display: flex; gap: 22px; padding: 18px 24px 0; border-bottom: 1px solid var(--rule); position: relative; }
+  .inspector-tabs button { background: none; border: none; padding: 0 0 14px 0; font: inherit; cursor: pointer; color: var(--graphite); font-size: 15px; }
+  .inspector-tabs button.active { color: var(--ink); }
+  .inspector-tabs button .count { font-family: var(--font-mono); font-size: 11.5px; color: var(--graphite-soft); margin-left: 6px; }
+  .inspector-tabs::after { content: ""; position: absolute; bottom: -1px; left: 24px; width: 78px; height: 2px; background: var(--ink); }
+  .inspector-body { padding: 22px 24px; overflow-y: auto; }
+  .conflict { padding: 14px 14px 14px 11px; border-left: 3px solid var(--ink); border-top: 1px solid var(--rule); border-right: 1px solid var(--rule); border-bottom: 1px solid var(--rule); background: var(--paper); margin-bottom: 12px; }
+  .conflict.sev4 { border-left: 3px solid var(--rule-strong); }
+  .conflict.sev3 { border-left: 2px dashed var(--rule); }
+  .conflict .head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 8px; }
+  .conflict .head .tag { font-family: var(--font-mono); font-size: 10.5px; letter-spacing: 0.10em; padding: 2px 8px; background: var(--ink); color: var(--paper); }
+  .conflict.sev4 .head .tag { background: transparent; border: 1px solid var(--ink); color: var(--ink); }
+  .conflict.sev3 .head .tag { background: transparent; border: 1px dashed var(--rule-strong); color: var(--ink-2); }
+  .conflict .head .type { font-family: var(--font-mono); font-size: 11.5px; color: var(--graphite-soft); }
+  .conflict .body { font-size: 13.5px; color: var(--ink); line-height: 1.5; margin: 0 0 10px; }
+  .conflict .refs { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; padding-top: 8px; border-top: 1px solid var(--rule); font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-2); }
+  .conflict .refs .lab { color: var(--graphite-soft); margin-right: 6px; }
+
+  .audit-ribbon { background: var(--paper); border-top: 1px solid var(--rule); padding: 8px 18px; font-family: var(--font-mono); font-size: 11.5px; color: var(--graphite); display: flex; align-items: center; gap: 18px; overflow: hidden; white-space: nowrap; }
+  .audit-ribbon .stamp { color: var(--ink-2); }
+  .audit-ribbon .full { margin-left: auto; color: var(--ink); }
+
+  /* swatch / type / motion strip at the bottom for designer review */
+  .review-strip { padding: 64px 36px; border-top: 1px solid var(--rule-strong); background: var(--paper-2); }
+  .review-strip h3 { font-family: var(--font-body); font-size: 16.8px; font-weight: 600; margin: 0 0 16px 0; }
+  .swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 28px; }
+  .sw { padding: 14px 12px; border: 1px solid var(--rule); }
+  .sw .hex { font-family: var(--font-mono); font-size: 11.5px; color: var(--graphite); }
+  .sw .name { font-family: var(--font-mono); font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); margin-bottom: 4px; }
+  .sw .role { font-size: 12px; color: var(--graphite); margin-top: 4px; }
+  .sw.ink { background: var(--ink); }
+  .sw.ink .name, .sw.ink .hex, .sw.ink .role { color: var(--paper); }
+
+  .typescale > div { padding: 6px 0; border-bottom: 1px solid var(--rule); display: flex; align-items: baseline; gap: 18px; }
+  .typescale .label { font-family: var(--font-mono); font-size: 11.5px; color: var(--graphite); width: 180px; flex-shrink: 0; }
+  .typescale .sample { color: var(--ink); }
+
+  .motion-demo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 18px; }
+  .motion-card { border: 1px solid var(--rule); padding: 14px; }
+  .motion-card .lab { font-family: var(--font-mono); font-size: 11.5px; color: var(--graphite); margin-bottom: 8px; }
+  .motion-card .demo { height: 8px; background: var(--rule); position: relative; overflow: hidden; }
+  .motion-card .demo::after { content: ""; position: absolute; inset: 0; background: var(--ink); transform-origin: left; }
+  .motion-card.ledger .demo::after { animation: ledger 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+  .motion-card.inkwell .demo::after { animation: inkwell 3.2s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+  .motion-card.flick .demo::after { animation: flick 1.5s cubic-bezier(0.2, 0, 0.2, 1) infinite; }
+  @keyframes ledger { 0% { transform: scaleX(0); } 60% { transform: scaleX(1); } 100% { transform: scaleX(1); opacity: 0.2; } }
+  @keyframes inkwell { 0% { transform: scaleX(0); } 50% { transform: scaleX(1); } 100% { transform: scaleX(0); transform-origin: right; } }
+  @keyframes flick { 0%, 100% { transform: scaleX(0); } 30%, 70% { transform: scaleX(1); } }
+
+  /* ambient-conflict pulse — applied to the inline conflict pin */
+  @keyframes pulse-rail { 0%, 100% { border-left-width: 3px; } 50% { border-left-width: 4px; } }
+  .leg.has-conflict { animation: pulse-rail 8s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- left rail -->
+  <aside class="rail">
+    <h6 class="smcp">matters · 4</h6>
+    <ul>
+      <li>
+        <div>
+          <div class="matter-name">Yıldız · Anatolia Coffee LLC</div>
+          <div class="matter-tail">E-2 · individual · uscis cos</div>
+        </div>
+        <span class="chip">READY</span>
+      </li>
+      <li class="active">
+        <div>
+          <div class="matter-name">Demir · Bebek Atölye LLC</div>
+          <div class="matter-tail">E-2 · individual · consular new</div>
+        </div>
+        <span class="chip solid">GAPS·3</span>
+      </li>
+      <li>
+        <div>
+          <div class="matter-name">Kaya · Pacific Holdings Co</div>
+          <div class="matter-tail">E-2 · corp-owned · uscis ext</div>
+        </div>
+        <span class="chip solid">CONFLICTS·1</span>
+      </li>
+      <li>
+        <div>
+          <div class="matter-name">Polat · Family Trust Adv.</div>
+          <div class="matter-tail">E-2 · executive · consular</div>
+        </div>
+        <span class="chip">INTAKE</span>
+      </li>
+    </ul>
+  </aside>
+
+  <!-- center sheet -->
+  <main class="sheet">
+
+    <!-- masthead (sticky) -->
+    <header class="masthead">
+      <div class="masthead-bar">
+        <span class="masthead-eyebrow">⁂  the matter</span>
+        <h1 class="masthead-h1">Demir, Cem</h1>
+        <span class="masthead-meta">
+          E-2 · individual investor
+          <span class="chip outline-ink">consular new</span>
+          <span class="chip">+ 1 dep</span>
+          <span class="chip">conf 87%</span>
+        </span>
+      </div>
+
+      <div class="pinned">
+        <div class="pin confirmed">
+          <div class="eb">investor</div>
+          <div class="val serif">Cem Demir ✓</div>
+          <div class="tail">TR · pending consular</div>
+        </div>
+        <div class="pin">
+          <div class="eb">enterprise</div>
+          <div class="val serif">Bebek Atölye LLC</div>
+          <div class="tail">food &amp; beverage · FL</div>
+        </div>
+        <div class="pin">
+          <div class="eb">passport</div>
+          <div class="val">••••8431</div>
+          <div class="tail">exp. 2031-08-22</div>
+        </div>
+        <div class="pin">
+          <div class="eb">EIN · formed</div>
+          <div class="val">••••4892</div>
+          <div class="tail">2024-11-04 · DE</div>
+        </div>
+        <div class="pin attention">
+          <div class="eb">I-94 admit-until</div>
+          <div class="val">in 12 days</div>
+          <div class="tail">attention · §§II</div>
+        </div>
+        <div class="pin">
+          <div class="eb">proportionality</div>
+          <div class="val">112.3%</div>
+          <div class="tail">meets §V</div>
+        </div>
+      </div>
+    </header>
+
+    <!-- fatal gaps (boot) -->
+    <section class="section">
+      <h2>
+        <span class="numeral">i.</span>
+        <span>fatal gaps before this matter can be filed</span>
+        <span class="anchor">§§I</span>
+      </h2>
+      <div class="fatal">
+        <div class="row">
+          <span>·</span>
+          <span class="lab">Articles of Organization (Tab D)</span>
+          <span class="stat">not on record</span>
+        </div>
+        <div class="row">
+          <span>·</span>
+          <span class="lab">Beneficiary passport bio page (Tab C)</span>
+          <span class="stat">received · not yet OCR'd</span>
+        </div>
+        <div class="row">
+          <span>·</span>
+          <span class="lab">I-129 draft</span>
+          <span class="stat">not yet generated</span>
+        </div>
+      </div>
+      <p class="fatal-coda">the rest of the dossier is hidden until these clear.</p>
+    </section>
+
+    <!-- §III SOF spine -->
+    <section class="section">
+      <h2>
+        <span class="numeral">iii.</span>
+        <span>investment &amp; source-of-funds chain</span>
+        <span class="anchor">§§III</span>
+      </h2>
+
+      <div class="spine">
+        <div class="col-h">
+          <span></span>
+          <span>origin</span>
+          <span class="right">USD</span>
+          <span>evidence</span>
+          <span>destination</span>
+        </div>
+
+        <div class="leg">
+          <div class="num">01</div>
+          <div class="origin">property sale<div class="sub">Bebek tapu, family residence</div></div>
+          <div class="usd">$425,000</div>
+          <div class="ev">tapu_deed_bebek.pdf p.3<span class="aps">APS-4 · attorney-confirmed ✓</span></div>
+          <div class="dest">garanti TRY ••••8819<span class="meta">personal acct</span></div>
+        </div>
+
+        <div class="leg">
+          <div class="num">02</div>
+          <div class="origin">FX conversion<div class="sub">spot, no derivative leg</div></div>
+          <div class="usd">$419,800<div class="delta">Δ −$5,200</div></div>
+          <div class="ev">garanti_FX_confirmation.pdf p.2<span class="aps">APS-4 · bot-classified · 0.91</span></div>
+          <div class="dest">garanti USD ••••8902<span class="meta">personal acct</span></div>
+        </div>
+
+        <div class="leg has-conflict">
+          <div class="num">03</div>
+          <div class="origin">wire to US LLC<div class="sub">deployment to operating account</div></div>
+          <div class="usd">$410,000<div class="delta">Δ −$9,800</div></div>
+          <div class="ev">wire_8819_8902_9015.pdf<span class="aps">APS-3 · attorney-confirmed ✓</span></div>
+          <div class="dest">wells fargo ••••9015<span class="meta">business operating</span></div>
+          <div class="pin-conflict">
+            <span class="sev">DISPOSITIVE</span>
+            <span>cover letter says $425,000 deployed; wire-confirm + wells fargo stmt show $410,000 received.</span>
+            <span class="anchor">§§V conflict-3 →</span>
+          </div>
+        </div>
+
+        <div class="sigma">
+          <div class="lab">Σ chain total deployed</div>
+          <div class="total">$410,000</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- §VI drafts (gated) -->
+    <section class="section gated">
+      <h2>
+        <span class="numeral">vi.</span>
+        <span>drafts</span>
+        <span class="anchor">§§VI</span>
+      </h2>
+      <div class="gated-tag">gated · resolve fatal gaps and 1 sev-5 conflict before generating</div>
+      <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;">
+        <div style="border: 1px solid var(--rule); padding: 14px; background: var(--paper);">
+          <div style="font-size: 16.8px; font-weight: 600; color: var(--ink);">Cover letter</div>
+          <div style="font-size: 13px; color: var(--graphite); margin-top: 6px;">Sonnet 4.6 · ~16K · ~$0.30</div>
+          <div style="font-family: var(--font-mono); font-size: 11.5px; color: var(--graphite); margin-top: 16px; border-top: 1px solid var(--rule); padding-top: 12px;">resolve before generating →</div>
+        </div>
+        <div style="border: 1px solid var(--rule); padding: 14px; background: var(--paper);">
+          <div style="font-size: 16.8px; font-weight: 600; color: var(--ink);">Exhibit list</div>
+          <div style="font-size: 13px; color: var(--graphite); margin-top: 6px;">Mechanical · A–L · $0</div>
+          <div style="font-family: var(--font-mono); font-size: 11.5px; color: var(--graphite); margin-top: 16px; border-top: 1px solid var(--rule); padding-top: 12px;">resolve before generating →</div>
+        </div>
+        <div style="border: 1px solid var(--rule); padding: 14px; background: var(--paper);">
+          <div style="font-size: 16.8px; font-weight: 600; color: var(--ink);">Business plan (E-2)</div>
+          <div style="font-size: 13px; color: var(--graphite); margin-top: 6px;">5-yr P&L · Sonnet 4.6 · ~$0.30</div>
+          <div style="font-family: var(--font-mono); font-size: 11.5px; color: var(--graphite); margin-top: 16px; border-top: 1px solid var(--rule); padding-top: 12px;">resolve before generating →</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- review strip — designer review -->
+    <section class="review-strip">
+      <h3>palette · type scale · motion (designer review strip — not part of UI)</h3>
+      <div class="swatches">
+        <div class="sw"><div class="name">paper</div><div class="hex">#FAFAFA</div><div class="role">sheet ground</div></div>
+        <div class="sw" style="background: var(--paper-2);"><div class="name">paper-2</div><div class="hex">#F0F0F0</div><div class="role">recess · masthead · inspector</div></div>
+        <div class="sw" style="background: var(--paper-3);"><div class="name">paper-3</div><div class="hex">#E5E5E5</div><div class="role">keycap · severity-5 fill</div></div>
+        <div class="sw ink"><div class="name">ink</div><div class="hex">#0A0A0A</div><div class="role">primary type · sev-5 rail</div></div>
+        <div class="sw" style="background: var(--graphite); color: var(--paper);"><div class="name" style="color: var(--paper);">graphite</div><div class="hex" style="color: var(--paper);">#404040</div><div class="role" style="color: var(--paper);">meta · bot-classified</div></div>
+        <div class="sw"><div class="name">rule-strong</div><div class="hex">rgba(10,10,10,.32)</div><div class="role">card border · sev-3 rail</div></div>
+      </div>
+
+      <div class="typescale">
+        <div><span class="label">hero · Fraunces 700 / 64px</span><span class="sample" style="font-family: var(--font-display); font-size: 64px; font-weight: 700; line-height: 1; letter-spacing: -0.014em;">Cem Demir</span></div>
+        <div><span class="label">section numeral · Fraunces 400 italic / 38.4px</span><span class="sample" style="font-family: var(--font-display); font-style: italic; font-weight: 400; font-size: 38.4px; letter-spacing: -0.01em;">iii.</span></div>
+        <div><span class="label">title · system 600 / 16.8px</span><span class="sample" style="font-size: 16.8px; font-weight: 600;">investment & source-of-funds chain</span></div>
+        <div><span class="label">fact-mono · Courier 500 / 15px</span><span class="sample mono" style="font-size: 15px;">$425,000 → $419,800 → $410,000</span></div>
+        <div><span class="label">meta · system 500 / 13px</span><span class="sample" style="font-size: 13px;">tapu_deed_bebek.pdf · APS-4 · attorney-confirmed</span></div>
+        <div><span class="label">smcp · mono 600 / 11.5px</span><span class="sample smcp" style="color: var(--graphite);">the matter · severity · proof slots</span></div>
+      </div>
+
+      <div class="motion-demo">
+        <div class="motion-card flick"><div class="lab">flick · 150ms cubic-bezier(0.2, 0, 0.2, 1) — accordion expand</div><div class="demo"></div></div>
+        <div class="motion-card ledger"><div class="lab">ledger · 240ms cubic-bezier(0.4, 0, 0.2, 1) — cell save → ✓ pulse</div><div class="demo"></div></div>
+        <div class="motion-card inkwell"><div class="lab">inkwell · 320ms cubic-bezier(0.4, 0, 0.2, 1) — anchor jump underline</div><div class="demo"></div></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- right inspector -->
+  <aside class="inspector">
+    <div class="inspector-tabs">
+      <button class="active">conflicts <span class="count">4</span></button>
+      <button>SOF <span class="count">3</span></button>
+      <button>proof slots <span class="count">24/27</span></button>
+      <button>drafts <span class="count">·</span></button>
+      <button>audit</button>
+    </div>
+
+    <div class="inspector-body">
+      <div class="conflict">
+        <div class="head">
+          <span class="tag">DISPOSITIVE</span>
+          <span class="type">numeric_mismatch</span>
+        </div>
+        <p class="body">cover letter recites $425,000 deployed to the U.S. LLC; wire confirmation and Wells Fargo statement show $410,000 received. $15,000 unaccounted.</p>
+        <dl class="refs">
+          <div><span class="lab">A</span>cover_letter_v0.4_DRAFT.pdf · p.3</div>
+          <div><span class="lab">B</span>wire_8819_8902_9015.pdf · p.1</div>
+        </dl>
+      </div>
+
+      <div class="conflict sev4">
+        <div class="head">
+          <span class="tag">MATERIAL</span>
+          <span class="type">address_mismatch</span>
+        </div>
+        <p class="body">articles of organization recite registered address in Wilmington, DE; lease and POS daily summary recite operating address in Brickell, FL. requires §H develop-and-direct evidence to reconcile.</p>
+        <dl class="refs">
+          <div><span class="lab">A</span>articles_of_organization_FL.pdf · p.2</div>
+          <div><span class="lab">B</span>lease.pdf · p.1</div>
+        </dl>
+      </div>
+
+      <div class="conflict sev3">
+        <div class="head">
+          <span class="tag">MINOR</span>
+          <span class="type">date_off_by_one</span>
+        </div>
+        <p class="body">EIN issuance date listed as 2024-11-04 in CP575; cover letter recites 2024-11-05.</p>
+        <dl class="refs">
+          <div><span class="lab">A</span>EIN_letter_CP575.pdf · p.1</div>
+          <div><span class="lab">B</span>cover_letter_v0.4_DRAFT.pdf · p.5</div>
+        </dl>
+      </div>
+
+      <div style="font-family: var(--font-mono); font-size: 11.5px; color: var(--graphite); padding: 12px 0;">+ 1 minor · clerical → expand</div>
+    </div>
+
+    <div class="audit-ribbon">
+      <span class="stamp">02:41</span> attorney-confirmed §§III.investment.committed_usd · 425000 · serra
+      <span class="full">full log →</span>
+    </div>
+  </aside>
+
+</div>
+
+</body>
+</html>

@@ -19,7 +19,12 @@ import { pdfContentHash, readPdfCache, writePdfCache } from '@/lib/pdf-cache';
 import { sampleLongText } from '@/lib/token-count';
 import { extractPdfText } from './pdf';
 import { extractDocxText } from './docx';
+import { extractEmlText, extractMsgText } from './email';
+import { extractTxtText } from './text';
+import { extractHtmlText } from './html';
+import { extractSpreadsheetText } from './spreadsheet';
 import { classifyByTier0, coarseFromFineDocTypeId } from './classify-fallback';
+import { classifyEb1aVariant } from './extractors/eb1a-variant-classify';
 import {
   PerPdfFactsSchema,
   type DocType,
@@ -646,6 +651,20 @@ export interface TypedExtractInput {
    * Used by the manual reclassification flow on re-aggregate.
    */
   forcedDocType?: DocType;
+  /**
+   * Case-type hint. When set to 'EB1A', the per-PDF pipeline runs the
+   * deterministic EB-1A 41-variant classifier (ingest/extractors/
+   * eb1a-variant-classify.ts) against filename + first-page text and
+   * attaches the result to `eb1aVariant` on the PerPdfResult. Pure /
+   * synchronous / zero LLM cost — orthogonal to the existing E-2
+   * doc_type classification, which still runs.
+   *
+   * The EB-1A classifier output is NOT written into the pdf-cache: a
+   * cache hit re-runs the classifier on cached results (cheap regex
+   * pass) so the same byte content fed to a different case-type
+   * doesn't poison the cache.
+   */
+  caseTypeHint?: 'E2' | 'EB1A' | 'EB1B' | 'EB1C';
 }
 
 const MAX_TEXT_CHARS = 60_000;
@@ -660,7 +679,52 @@ const MAX_TEXT_CHARS = 60_000;
  */
 const TIMING_ENABLED = !!process.env.DEBUG_INGEST_TIMING;
 
+/**
+ * Public entry — runs the case-agnostic per-PDF classify+extract path
+ * AND, when `caseTypeHint === 'EB1A'`, layers the deterministic 41-
+ * variant EB-1A classifier on top. The EB-1A pass is post-cache so it
+ * always reflects the latest manifest version regardless of cache age.
+ */
 export async function classifyAndExtractOnePdf(
+  input: TypedExtractInput,
+): Promise<PerPdfResult> {
+  const result = await classifyAndExtractOnePdfInner(input);
+  if (input.caseTypeHint !== 'EB1A' || result.error) return result;
+
+  // EB-1A variant classifier needs filename + first-page text. Re-parse
+  // a small slice (≤4K) when we have a buffer; for image / scan / cache
+  // paths the rich-extracted text isn't available here, so we fall back
+  // to the one-line summary the Haiku stage produced. Filename signals
+  // alone still get useful matches for narrowly-named EB-1A evidence.
+  let firstPageText = '';
+  try {
+    const lower = input.filename.toLowerCase();
+    const isPdf = lower.endsWith('.pdf');
+    if (isPdf) {
+      const parsed = await extractPdfText(input.buffer);
+      firstPageText = parsed.text.slice(0, 4000);
+    }
+  } catch {
+    /* best-effort — filename-only classification is still useful */
+  }
+  if (
+    !firstPageText &&
+    result.facts &&
+    'one_line_summary' in result.facts &&
+    result.facts.one_line_summary?.value
+  ) {
+    firstPageText = result.facts.one_line_summary.value;
+  }
+
+  const eb1aVariant = classifyEb1aVariant({
+    filename: input.filename,
+    first_page_text: firstPageText,
+  });
+
+  return { ...result, eb1aVariant };
+}
+
+async function classifyAndExtractOnePdfInner(
   input: TypedExtractInput,
 ): Promise<PerPdfResult> {
   const t0 = TIMING_ENABLED ? Date.now() : 0;
@@ -707,12 +771,29 @@ export async function classifyAndExtractOnePdf(
   // File-format dispatch. The ingest pipeline accepts:
   //   - .pdf   → extractPdfText (existing path)
   //   - .docx  → extractDocxText (mammoth raw-text → ExtractedPdf shape)
+  //   - .eml   → extractEmlText (mailparser → ExtractedPdf with header
+  //              preamble + body + attachment list)
+  //   - .msg   → extractMsgText (msgreader → ExtractedPdf, same shape)
   //   - .jpg/.jpeg/.png/.webp/.gif → no text path; route directly to
   //     image-photo vision extraction with the raw bytes.
   // Anything else is rejected at the route layer; we still defensively
   // default to PDF here.
   const lowerName = input.filename.toLowerCase();
   const isDocx = lowerName.endsWith('.docx');
+  const isEml = lowerName.endsWith('.eml');
+  const isMsg = lowerName.endsWith('.msg');
+  const isTxt = lowerName.endsWith('.txt');
+  const isHtml =
+    lowerName.endsWith('.html') ||
+    lowerName.endsWith('.htm') ||
+    lowerName.endsWith('.mhtml') ||
+    lowerName.endsWith('.mht') ||
+    lowerName.endsWith('.webarchive');
+  const isSpreadsheet =
+    lowerName.endsWith('.xlsx') ||
+    lowerName.endsWith('.xls') ||
+    lowerName.endsWith('.ods') ||
+    lowerName.endsWith('.csv');
   const imageMediaType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' | null =
     lowerName.endsWith('.jpg') || lowerName.endsWith('.jpeg')
       ? 'image/jpeg'
@@ -798,13 +879,36 @@ export async function classifyAndExtractOnePdf(
   try {
     parsed = isDocx
       ? await extractDocxText(input.buffer)
-      : await extractPdfText(input.buffer);
+      : isEml
+        ? await extractEmlText(input.buffer)
+        : isMsg
+          ? await extractMsgText(input.buffer)
+          : isTxt
+            ? extractTxtText(input.buffer)
+            : isHtml
+              ? extractHtmlText(input.buffer, input.filename)
+              : isSpreadsheet
+                ? extractSpreadsheetText(input.buffer, input.filename)
+                : await extractPdfText(input.buffer);
   } catch (e: unknown) {
+    const code = isDocx
+      ? 'docx_parse_failed'
+      : isEml
+        ? 'eml_parse_failed'
+        : isMsg
+          ? 'msg_parse_failed'
+          : isTxt
+            ? 'txt_parse_failed'
+            : isHtml
+              ? 'html_parse_failed'
+              : isSpreadsheet
+                ? 'spreadsheet_parse_failed'
+                : 'pdf_parse_failed';
     return {
       filename: input.filename,
       pageCount: 0,
       error: {
-        code: isDocx ? 'docx_parse_failed' : 'pdf_parse_failed',
+        code,
         message: e instanceof Error ? e.message : String(e),
       },
     };

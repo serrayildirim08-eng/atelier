@@ -1,0 +1,1141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Atelier — Full System v3 vibe check (Designer B)</title>
+<style>
+  :root {
+    --paper: #FAFAFA;
+    --paper-2: #F0F0F0;
+    --paper-3: #E5E5E5;
+    --paper-deep: #D4D4D4;
+    --ink: #0A0A0A;
+    --ink-2: #1F1F1F;
+    --graphite: #404040;
+    --graphite-soft: #595959;
+    --rule: rgba(10,10,10,.10);
+    --rule-strong: rgba(10,10,10,.32);
+    --accent-alarm: #7A2F1F;
+
+    --ease-paper: cubic-bezier(0.22, 0.61, 0.36, 1);
+    --ease-decisive: cubic-bezier(0.16, 1, 0.30, 1);
+    --ease-margin: cubic-bezier(0.40, 0, 0.60, 1);
+
+    --display: 'Source Serif Pro', 'Lyon', Georgia, serif;
+    --body: -apple-system, 'Inter', 'Helvetica Neue', sans-serif;
+    --mono: 'Courier New', monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 14px;
+    line-height: 1.43;
+    -webkit-font-smoothing: antialiased;
+  }
+  .smcp { font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+  .label { font-family: var(--mono); font-size: 12px; line-height: 16px; }
+  .meta  { font-size: 13px; line-height: 18px; color: var(--graphite); }
+  .body  { font-size: 14px; line-height: 20px; }
+  .fact  { font-size: 16px; line-height: 22px; font-weight: 500; letter-spacing: -.005em; font-variant-numeric: tabular-nums; }
+  .title { font-family: var(--display); font-size: 22px; line-height: 26px; font-weight: 600; letter-spacing: -.012em; }
+  .page  { font-family: var(--display); font-size: 32px; line-height: 36px; letter-spacing: -.018em; font-weight: 400; }
+  .stunt { font-family: var(--display); font-size: 88px; line-height: 84px; letter-spacing: -.025em; font-weight: 300; }
+  .mono  { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .ital  { font-style: italic; color: var(--graphite-soft); }
+  .alarm { color: var(--accent-alarm); }
+
+  /* nav between vibe sections */
+  nav.demo {
+    position: sticky; top: 0; z-index: 50;
+    border-bottom: 1px solid var(--rule-strong);
+    background: var(--paper);
+    padding: 12px 48px;
+    display: flex; align-items: baseline; gap: 24px;
+  }
+  nav.demo .wordmark { font-family: var(--display); font-size: 32px; font-weight: 600; letter-spacing: -.025em; line-height: 1; }
+  nav.demo .wordmark .dot { font-style: italic; }
+  nav.demo a {
+    color: var(--graphite); text-decoration: none; cursor: pointer;
+    font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+    transition: color 120ms var(--ease-paper);
+  }
+  nav.demo a:hover { color: var(--ink); }
+  nav.demo .spacer { flex: 1; }
+  nav.demo .clock { font-family: var(--mono); font-size: 13px; color: var(--graphite); }
+
+  /* shared shell */
+  .demo-section { padding: 48px; border-bottom: 1px solid var(--rule-strong); }
+  .demo-section h2.eyebrow {
+    font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--graphite); margin: 0 0 8px;
+  }
+  .demo-section h3.note { font-family: var(--display); font-size: 22px; font-weight: 600; letter-spacing: -.012em; margin: 0 0 24px; }
+
+  /* ─────── 1. HOME ─────── */
+  .home {
+    display: grid;
+    grid-template-columns: 240px 1fr 320px;
+    gap: 24px;
+    border: 1px solid var(--rule-strong);
+    background: var(--paper);
+    min-height: 720px;
+  }
+  .home > .left {
+    border-right: 1px solid var(--rule);
+    padding: 24px 16px;
+    background: var(--paper);
+  }
+  .home > .left .head { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite-soft); margin-bottom: 8px; }
+  .home > .left .ml-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: baseline;
+    padding: 6px 8px;
+    border-radius: 0;
+    cursor: pointer;
+    transition: background 120ms var(--ease-paper);
+  }
+  .home > .left .ml-row:hover { background: rgba(240,240,240,.6); }
+  .home > .left .ml-row .name { font-size: 14px; line-height: 18px; color: var(--ink); }
+  .home > .left .ml-row .glyph { font-family: var(--mono); font-size: 12px; color: var(--graphite-soft); }
+  .home > .left .ml-row .glyph.alarm { color: var(--accent-alarm); }
+  .home > .left .ml-row .glyph.ok { color: var(--graphite); }
+  .home > .left .ml-row.selected { background: var(--paper-2); }
+  .home > .left hr { border: 0; border-top: 1px solid var(--rule); margin: 16px -16px; }
+  .home > .left .anchor-rail .ar-row {
+    display: grid;
+    grid-template-columns: 16px 1fr auto;
+    align-items: baseline;
+    padding: 4px 8px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .home > .left .anchor-rail .ar-row:hover { background: rgba(240,240,240,.6); }
+  .home > .left .anchor-rail .ar-row.active { border-left: 2px solid var(--ink); margin-left: -2px; padding-left: 6px; }
+  .home > .left .anchor-rail .ar-row .glyph { font-family: var(--mono); }
+  .home > .left .anchor-rail .ar-row .label { color: var(--graphite); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+  .home > .left .anchor-rail .ar-row .tail { font-family: var(--mono); font-size: 11px; color: var(--graphite-soft); }
+  .home > .left .anchor-rail .ar-row.alarm .glyph { color: var(--accent-alarm); }
+
+  /* center column */
+  .home > .center {
+    padding: 32px 32px 48px;
+    overflow: hidden;
+  }
+  .home > .center .hero-list { border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); margin-bottom: 24px; }
+  .home > .center .matter-line {
+    display: grid;
+    grid-template-columns: 1fr 200px 24px 220px;
+    gap: 16px;
+    align-items: baseline;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--rule);
+    cursor: pointer;
+    transition: background 120ms var(--ease-paper);
+  }
+  .home > .center .matter-line:last-child { border-bottom: 0; }
+  .home > .center .matter-line:hover { background: rgba(240,240,240,.4); }
+  .home > .center .matter-line .name { font-size: 16px; line-height: 22px; font-weight: 500; letter-spacing: -.005em; color: var(--ink); }
+  .home > .center .matter-line .subtype { font-size: 13px; color: var(--graphite); font-family: var(--body); }
+  .home > .center .matter-line .gate { font-family: var(--mono); font-size: 14px; text-align: center; }
+  .home > .center .matter-line .gate.alarm { color: var(--accent-alarm); }
+  .home > .center .matter-line .gate.ok { color: var(--graphite); }
+  .home > .center .matter-line .gate.partial { color: var(--graphite); }
+  .home > .center .matter-line .touched { font-family: var(--mono); font-size: 12px; color: var(--graphite-soft); text-align: right; }
+
+  .home > .center .drop-zone {
+    border: 1px solid var(--rule-strong);
+    padding: 22px 24px;
+    text-align: center;
+    margin-top: 24px;
+    transition: all 120ms var(--ease-paper);
+    cursor: copy;
+  }
+  .home > .center .drop-zone:hover { border-color: var(--ink); background: var(--paper-2); }
+  .home > .center .drop-zone .smcp { color: var(--graphite-soft); }
+
+  /* right rail (home empty) */
+  .home > .right {
+    border-left: 1px solid var(--rule);
+    padding: 24px 16px;
+    background: var(--paper);
+  }
+  .home > .right .last-touched {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--graphite-soft);
+    margin-bottom: 24px;
+    line-height: 1.6;
+  }
+  .home > .right .last-touched strong { color: var(--graphite); font-weight: 600; }
+  .home > .right .cmdk-hint {
+    border: 1px solid var(--rule);
+    padding: 12px;
+    text-align: center;
+    margin-top: 16px;
+  }
+  .home > .right .cmdk-hint .smcp { color: var(--graphite-soft); }
+
+  /* ─────── 2. DOSSIER ─────── */
+  .dossier {
+    display: grid;
+    grid-template-columns: 240px 1fr 320px;
+    gap: 24px;
+    border: 1px solid var(--rule-strong);
+    background: var(--paper);
+    min-height: 1200px;
+  }
+  .dossier > .left { border-right: 1px solid var(--rule); padding: 24px 16px; }
+  .dossier > .left .group { margin-bottom: 16px; }
+  .dossier > .left .group .head { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite-soft); margin-bottom: 8px; }
+  .dossier > .left .ml-row {
+    display: grid; grid-template-columns: 1fr auto;
+    padding: 4px 8px; align-items: baseline;
+    cursor: pointer;
+  }
+  .dossier > .left .ml-row.selected { background: var(--paper-2); }
+  .dossier > .left .ml-row .name { font-size: 14px; }
+  .dossier > .left .ml-row .glyph { font-family: var(--mono); font-size: 12px; }
+  .dossier > .left .ml-row .glyph.alarm { color: var(--accent-alarm); }
+  .dossier > .left hr { border: 0; border-top: 1px solid var(--rule); margin: 16px -16px; }
+  .dossier > .left .anchor-rail .ar-row {
+    display: grid; grid-template-columns: 16px 1fr auto;
+    padding: 4px 8px; align-items: baseline;
+    cursor: pointer;
+  }
+  .dossier > .left .anchor-rail .ar-row.active { border-left: 2px solid var(--ink); padding-left: 6px; margin-left: -2px; }
+  .dossier > .left .anchor-rail .ar-row .glyph { font-family: var(--mono); font-size: 12px; }
+  .dossier > .left .anchor-rail .ar-row .glyph.alarm { color: var(--accent-alarm); }
+  .dossier > .left .anchor-rail .ar-row .label { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite); }
+  .dossier > .left .anchor-rail .ar-row .tail { font-family: var(--mono); font-size: 11px; color: var(--graphite-soft); }
+
+  /* matter header */
+  .matter-header {
+    background: var(--paper-2);
+    border-bottom: 1px solid var(--rule);
+    padding: 18px 32px;
+    position: sticky; top: 56px; z-index: 5;
+  }
+  .matter-header .h1 { font-family: var(--display); font-size: 32px; line-height: 36px; letter-spacing: -.018em; font-weight: 400; }
+  .matter-header .meta { display: flex; gap: 16px; margin-top: 4px; align-items: baseline; }
+  .matter-header .pill { border: 1px solid var(--rule-strong); padding: 1px 8px; font-size: 10px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2); }
+  .matter-header .pill.alarm { border-color: var(--accent-alarm); color: var(--accent-alarm); }
+  .matter-header .gate-banner {
+    margin-top: 8px;
+    border-left: 2px solid var(--accent-alarm);
+    padding-left: 8px;
+    font-size: 13px;
+    color: var(--ink);
+  }
+  .matter-header .gate-banner.clean { border-left-color: var(--rule-strong); color: var(--graphite); }
+  .matter-header .last-touched { margin-top: 6px; font-family: var(--mono); font-size: 11px; color: var(--graphite-soft); }
+
+  /* center: fact sheet sections */
+  .dossier > .center { padding: 0 32px 48px; position: relative; }
+  .dossier .center .fact-sheet { position: relative; }
+  .dossier .center .audit-gutter {
+    position: absolute; top: 0; right: -14px; bottom: 0; width: 14px;
+    background: var(--paper-3);
+    border-left: 1px solid var(--rule);
+  }
+  .dossier .center .audit-gutter .dot {
+    position: absolute; right: 5px; width: 4px; height: 4px;
+    background: var(--ink); border-radius: 0;
+    transition: width 120ms var(--ease-paper), background 120ms var(--ease-paper);
+  }
+  .dossier .center .section { padding: 32px 0 24px; border-bottom: 1px solid var(--rule); }
+  .dossier .center .section .eyebrow {
+    position: sticky; top: 152px;
+    background: var(--paper-2);
+    padding: 6px 12px; margin: 0 -32px 16px;
+    border-bottom: 1px solid var(--rule);
+    display: flex; align-items: baseline; justify-content: space-between;
+    z-index: 4;
+  }
+  .dossier .center .section .eyebrow .lbl { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite); }
+  .dossier .center .section .eyebrow .tail { font-family: var(--mono); font-size: 11px; color: var(--graphite-soft); }
+  .dossier .center .section .eyebrow .tail.alarm { color: var(--accent-alarm); }
+
+  /* fact rows */
+  .fact-row {
+    display: grid;
+    grid-template-columns: 200px 1fr 32px 240px;
+    gap: 16px;
+    align-items: baseline;
+    height: 28px;
+    padding: 0 8px 0 12px;
+    transition: background 120ms var(--ease-paper);
+    position: relative;
+  }
+  .fact-row:hover { background: rgba(240,240,240,.5); }
+  .fact-row.alarm-fatal {
+    border-left: 2px solid var(--accent-alarm);
+    padding-left: 10px;
+  }
+  .fact-row.alarm-fatal[data-seen="false"] { animation: alarm-breath 2s 1; }
+  @keyframes alarm-breath {
+    0%, 100% { border-left-color: rgba(122,47,31,.55); }
+    50%      { border-left-color: rgba(122,47,31,1); }
+  }
+  .fact-row .lbl { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite); }
+  .fact-row .val { font-size: 16px; line-height: 22px; font-weight: 500; letter-spacing: -.005em; font-variant-numeric: tabular-nums; }
+  .fact-row .val.unset { font-style: italic; color: var(--graphite-soft); font-weight: 400; letter-spacing: 0; }
+  .fact-row .val.mono { font-family: var(--mono); font-size: 14px; }
+  .fact-row .glyph { font-family: var(--mono); font-size: 14px; text-align: center; color: var(--graphite-soft); }
+  .fact-row .glyph.ok { color: var(--graphite); }
+  .fact-row .glyph.alarm { color: var(--accent-alarm); }
+  .fact-row .src { font-family: var(--mono); font-size: 11px; color: var(--graphite-soft); text-align: right; opacity: 0; transition: opacity 120ms var(--ease-paper); }
+  .fact-row:hover .src { opacity: 1; }
+
+  /* SOF chain */
+  .sof-chain { padding: 16px 0; }
+  .sof-chain svg { display: block; width: 100%; height: 240px; }
+  .sof-chain .summary {
+    margin-top: 12px;
+    font-family: var(--mono); font-size: 12px; color: var(--graphite);
+    display: flex; gap: 24px;
+  }
+  .sof-chain .delta { color: var(--accent-alarm); }
+
+  /* proof matrix */
+  .proof-matrix { padding: 8px 0; display: grid; gap: 4px; }
+  .proof-row {
+    display: grid;
+    grid-template-columns: 200px 80px 80px 32px 1fr;
+    gap: 16px;
+    align-items: center;
+    height: 32px;
+    padding: 0 12px;
+    transition: background 120ms var(--ease-paper);
+  }
+  .proof-row:hover { background: rgba(240,240,240,.5); }
+  .proof-row .lbl { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite); }
+  .proof-row .frac { font-family: var(--mono); font-size: 14px; }
+  .proof-row .spark { display: grid; grid-template-columns: repeat(5, 8px); gap: 2px; }
+  .proof-row .spark .cell { width: 8px; height: 12px; background: var(--paper-deep); }
+  .proof-row .spark .cell.filled { background: var(--ink); }
+  .proof-row .spark .cell.weak { background: var(--graphite); }
+  .proof-row .glyph { font-family: var(--mono); font-size: 14px; text-align: center; }
+  .proof-row .glyph.ok { color: var(--graphite); }
+  .proof-row .glyph.alarm { color: var(--accent-alarm); }
+  .proof-row .auth { font-family: var(--mono); font-size: 10px; color: var(--graphite-soft); }
+
+  /* conflict sidecar */
+  .conflict-row {
+    display: grid;
+    grid-template-columns: 24px 180px 1fr;
+    gap: 16px;
+    padding: 8px 12px 8px 10px;
+    align-items: baseline;
+  }
+  .conflict-row.sev-5 { border-left: 2px solid var(--accent-alarm); padding-left: 8px; }
+  .conflict-row .glyph { font-family: var(--mono); font-size: 14px; text-align: center; }
+  .conflict-row.sev-5 .glyph { color: var(--accent-alarm); font-weight: 700; }
+  .conflict-row .type { font-family: var(--mono); font-size: 12px; color: var(--ink); font-weight: 700; }
+  .conflict-row .desc { font-size: 14px; line-height: 20px; }
+  .conflict-row .refs { font-family: var(--mono); font-size: 11px; color: var(--graphite-soft); margin-top: 4px; }
+  .conflict-summary {
+    margin-top: 8px;
+    font-size: 13px; color: var(--graphite); font-style: italic;
+    border-top: 1px dotted var(--rule); padding-top: 8px;
+  }
+
+  /* exhibit grid */
+  .exhibit-row {
+    display: grid;
+    grid-template-columns: 24px 1fr 100px 80px 32px;
+    gap: 16px;
+    padding: 8px 12px;
+    align-items: baseline;
+    border-bottom: 1px solid var(--rule);
+    cursor: pointer;
+    transition: background 120ms var(--ease-paper);
+  }
+  .exhibit-row:hover { background: rgba(240,240,240,.5); }
+  .exhibit-row .num { font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--ink); }
+  .exhibit-row .lbl { font-size: 14px; color: var(--ink); }
+  .exhibit-row .lbl small { color: var(--graphite-soft); font-size: 12px; }
+  .exhibit-row .count { font-family: var(--mono); font-size: 12px; color: var(--graphite); text-align: right; }
+  .exhibit-row .pages { font-family: var(--mono); font-size: 12px; color: var(--graphite-soft); text-align: right; }
+  .exhibit-row .glyph { font-family: var(--mono); font-size: 14px; text-align: center; color: var(--graphite); }
+  .exhibit-row .glyph.alarm { color: var(--accent-alarm); }
+  .exhibit-row.needs-review { background: var(--paper-2); border-left: 2px solid var(--ink); }
+
+  /* draft gate */
+  .draft-group { margin-top: 16px; }
+  .draft-group .head { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite); margin-bottom: 6px; }
+  .draft-row {
+    display: grid;
+    grid-template-columns: 200px 1fr 200px;
+    gap: 16px;
+    padding: 8px 12px;
+    align-items: baseline;
+    border-bottom: 1px solid var(--rule);
+    transition: background 120ms var(--ease-paper);
+  }
+  .draft-row .name { font-size: 14px; color: var(--ink); }
+  .draft-row .preqs { font-family: var(--mono); font-size: 11px; color: var(--graphite-soft); }
+  .draft-row .preqs .ok { color: var(--graphite); }
+  .draft-row .preqs .alarm { color: var(--accent-alarm); font-weight: 700; }
+  .draft-row .verdict { font-family: var(--mono); font-size: 12px; text-align: right; }
+  .draft-row.gated .verdict { color: var(--accent-alarm); font-weight: 700; }
+  .draft-row.unlocked .verdict { color: var(--graphite); }
+  .draft-row.complete .verdict { color: var(--graphite-soft); }
+
+  /* right rail (citation pane) */
+  .dossier > .right {
+    border-left: 1px solid var(--rule);
+    padding: 24px 16px;
+    background: var(--paper);
+  }
+  .dossier > .right .head { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite); margin-bottom: 12px; }
+  .dossier > .right .pane-card { border: 1px solid var(--rule); padding: 12px; margin-bottom: 16px; background: var(--paper); }
+  .dossier > .right .pane-card .src { font-family: var(--mono); font-size: 11px; color: var(--graphite-soft); margin-bottom: 6px; }
+  .dossier > .right .pane-card .quote { font-style: italic; color: var(--graphite); font-size: 13px; line-height: 19px; border-left: 1px solid var(--rule); padding-left: 8px; }
+  .dossier > .right .pane-card .conf { font-family: var(--mono); font-size: 11px; color: var(--graphite-soft); margin-top: 8px; }
+  .dossier > .right .audit-trail { font-family: var(--mono); font-size: 11px; color: var(--graphite); }
+  .dossier > .right .audit-trail .row { padding: 3px 0; border-bottom: 1px dotted var(--rule); }
+
+  /* dinkus */
+  .dinkus {
+    text-align: center;
+    color: var(--graphite-soft);
+    font-family: var(--display);
+    font-size: 14px;
+    letter-spacing: .8em;
+    padding: 16px 0;
+  }
+  .dinkus::before { content: "✻ ✻ ✻"; }
+
+  /* ─────── 3. GENERATION (third demo) ─────── */
+  .generation {
+    display: grid;
+    grid-template-columns: 240px 1fr 360px;
+    gap: 24px;
+    border: 1px solid var(--rule-strong);
+    background: var(--paper);
+    min-height: 800px;
+  }
+  .generation > .left { border-right: 1px solid var(--rule); padding: 24px 16px; opacity: 0.55; }
+  .generation > .center { padding: 32px; }
+  .generation > .center .fact-sheet { opacity: 0.85; }
+  .generation > .right { border-left: 1px solid var(--rule); padding: 24px 16px; background: var(--paper); display: flex; flex-direction: column; }
+  .generation > .right .head { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite); margin-bottom: 6px; }
+  .generation > .right .gen-status { font-family: var(--mono); font-size: 12px; color: var(--graphite); margin-bottom: 16px; }
+  .generation > .right .stream {
+    border: 1px solid var(--rule);
+    padding: 12px;
+    flex: 1;
+    overflow-y: auto;
+    background: var(--paper);
+    font-family: var(--display);
+    font-size: 14px;
+    line-height: 22px;
+    color: var(--ink);
+    max-height: 580px;
+    margin-bottom: 16px;
+  }
+  .generation > .right .stream p { margin: 0 0 12px; }
+  .generation > .right .stream em { color: var(--graphite); }
+  .generation > .right .stream .cursor {
+    display: inline-block; width: 0.5em; height: 1em;
+    background: var(--ink);
+    vertical-align: text-bottom;
+    animation: blink 0.6s steps(2, start) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  .generation > .right .signature {
+    border-top: 1px solid var(--rule-strong);
+    padding-top: 16px;
+    display: grid; gap: 8px;
+  }
+  .generation > .right .signature .label { font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite); }
+  .generation > .right .signature input {
+    border: 0; border-bottom: 1px solid var(--ink);
+    background: transparent;
+    padding: 6px 0;
+    font-family: var(--mono); font-size: 14px;
+    width: 80px;
+    color: var(--ink);
+  }
+  .generation > .right .signature input:focus { outline: none; border-bottom-width: 2px; }
+  .generation > .right .signature .row { display: flex; gap: 12px; align-items: baseline; justify-content: space-between; margin-top: 12px; }
+  .generation > .right .signature button {
+    border: 1px solid var(--ink);
+    background: var(--paper);
+    padding: 8px 16px;
+    font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+    cursor: pointer;
+    transition: all 120ms var(--ease-paper);
+    color: var(--ink);
+  }
+  .generation > .right .signature button:hover { background: var(--ink); color: var(--paper); }
+  .generation > .right .signature button.reject { border-color: var(--rule-strong); color: var(--graphite); }
+  .generation > .right .signature button:disabled { opacity: .35; cursor: not-allowed; }
+
+  /* ingest demo */
+  .ingest-demo {
+    border: 1px solid var(--rule-strong);
+    background: var(--paper);
+    padding: 32px;
+  }
+  .ingest-demo .strip {
+    display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px;
+    margin-bottom: 24px;
+  }
+  .ingest-demo .strip .cell {
+    border: 1px solid var(--rule);
+    padding: 10px 6px;
+    text-align: center;
+    font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--graphite-soft);
+    transition: all 120ms var(--ease-paper);
+  }
+  .ingest-demo .strip .cell.done { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .ingest-demo .strip .cell.running { border: 2px solid var(--ink); color: var(--ink); }
+  .ingest-demo .typewriter {
+    border: 1px solid var(--rule);
+    padding: 16px;
+    background: var(--paper);
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--graphite);
+    max-height: 320px;
+    overflow-y: auto;
+  }
+  .ingest-demo .typewriter .row { padding: 2px 0; border-bottom: 1px dotted var(--rule); display: grid; grid-template-columns: 32px 1fr; gap: 8px; }
+  .ingest-demo .typewriter .row strong { color: var(--ink); font-weight: 700; }
+  .ingest-demo .typewriter .row.subtype { color: var(--ink); }
+  .ingest-demo .typewriter .row.gate { color: var(--accent-alarm); }
+  .ingest-demo .progress {
+    margin-top: 16px;
+    height: 1px;
+    background: var(--rule);
+    position: relative;
+    overflow: hidden;
+  }
+  .ingest-demo .progress::after {
+    content: "";
+    position: absolute; top: 0; left: 0; bottom: 0;
+    width: 64%;
+    background: var(--ink-2);
+    transition: width 240ms var(--ease-paper);
+  }
+
+  /* footer */
+  footer { padding: 32px 48px; color: var(--graphite-soft); font-size: 11px; line-height: 1.6; border-top: 1px solid var(--rule-strong); }
+  footer .smcp { color: var(--graphite); }
+  footer code { font-family: var(--mono); color: var(--graphite); }
+
+  /* anchor jump targets */
+  .anchor-target { scroll-margin-top: 80px; }
+</style>
+</head>
+<body>
+
+<nav class="demo">
+  <span class="wordmark">atelier<span class="dot">.</span></span>
+  <a href="#home">Home</a>
+  <a href="#ingest">Ingest</a>
+  <a href="#dossier">Dossier</a>
+  <a href="#generation">Generation</a>
+  <span class="spacer"></span>
+  <span class="clock mono" id="clock">14:32:08</span>
+</nav>
+
+<!-- ═════════════════════════ 1. HOME ═════════════════════════ -->
+<section class="demo-section anchor-target" id="home">
+  <h2 class="eyebrow">screen 01</h2>
+  <h3 class="note">Home — three matters in flight, the legal pad</h3>
+
+  <div class="home">
+    <div class="left">
+      <div class="head">my matters · 14</div>
+      <div class="ml-row selected">
+        <span class="name">Kacar-Salih</span>
+        <span class="glyph alarm">‡</span>
+      </div>
+      <div class="ml-row">
+        <span class="name">Camural-Pomega</span>
+        <span class="glyph ok">✓</span>
+      </div>
+      <div class="ml-row">
+        <span class="name">Demir-LLC</span>
+        <span class="glyph">·</span>
+      </div>
+      <div class="ml-row">
+        <span class="name">Yılmaz-IP</span>
+        <span class="glyph ok">✓</span>
+      </div>
+      <div class="ml-row">
+        <span class="name">Aydin-Construction</span>
+        <span class="glyph">·</span>
+      </div>
+      <hr />
+      <div class="head">no matter selected</div>
+      <div class="meta" style="font-size:13px; color:var(--graphite-soft); padding: 4px 8px;">drop a folder to begin</div>
+      <div style="position:absolute; bottom:24px; left:24px; right:24px; font-family: var(--mono); font-size:11px; color:var(--graphite-soft);">⌘K · ?</div>
+    </div>
+
+    <div class="center">
+      <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom: 16px;">
+        <div class="head" style="font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite);">recent matters</div>
+        <div class="mono" style="font-size: 12px; color: var(--graphite-soft);">14 active · 23 archived</div>
+      </div>
+      <div class="hero-list">
+        <div class="matter-line" onclick="document.getElementById('dossier').scrollIntoView({behavior:'smooth',block:'start'})">
+          <span class="name">Kacar-Salih · Wise Guys Deli LLC</span>
+          <span class="subtype">E-2 individual investor · uscis_extension</span>
+          <span class="gate alarm">‡</span>
+          <span class="touched">AS · 14:32 · investment.total_committed_usd</span>
+        </div>
+        <div class="matter-line">
+          <span class="name">Camural-Pomega · Pomega Energy LLC</span>
+          <span class="subtype">E-2 essential skills · uscis_cos_new</span>
+          <span class="gate ok">✓</span>
+          <span class="touched">AS · 13:14 · enterprise.legal_name</span>
+        </div>
+        <div class="matter-line">
+          <span class="name">Demir-LLC · Demir Construction USA</span>
+          <span class="subtype">E-2 corporate-owned · consular_new</span>
+          <span class="gate partial">·</span>
+          <span class="touched">PB · 09:48 · ownership_chain[1]</span>
+        </div>
+        <div class="matter-line">
+          <span class="name">Yılmaz-IP · Yilmaz Patent LLC</span>
+          <span class="subtype">E-2 individual investor · uscis_extension</span>
+          <span class="gate ok">✓</span>
+          <span class="touched">AS · yesterday · drafts.cover_letter_v0.7</span>
+        </div>
+        <div class="matter-line">
+          <span class="name">Aydin-Construction · Aydin Build LLC</span>
+          <span class="subtype">E-2 individual investor · consular_new</span>
+          <span class="gate partial">·</span>
+          <span class="touched">AS · 2d · facts.investment.items</span>
+        </div>
+      </div>
+      <div class="drop-zone">
+        <div class="smcp">drop a dossier · or ⌘O</div>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="head">last touched</div>
+      <div class="last-touched">
+        <strong>Kacar-Salih</strong><br>
+        AS · 14:32 · 14 minutes ago<br>
+        edited <span class="mono">facts.investment.total_committed_usd</span><br>
+        prev <span class="mono">410000</span> → <span class="mono">425000</span>
+      </div>
+      <div class="head">ingest queue</div>
+      <div class="last-touched"><strong>0 in flight.</strong></div>
+      <div class="cmdk-hint">
+        <div class="smcp">⌘K to search the binder</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════ 2. INGEST ═════════════════════════ -->
+<section class="demo-section anchor-target" id="ingest">
+  <h2 class="eyebrow">screen 02</h2>
+  <h3 class="note">Ingest — Phase 1 streaming, the binder fills itself</h3>
+
+  <div class="ingest-demo">
+    <div style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom: 8px;">
+      <div class="page" style="font-size: 64px; font-weight: 300; line-height: 1; letter-spacing: -.025em;"><em style="font-style: italic;">36</em><span style="color:var(--graphite-soft); font-size:.5em;">%</span></div>
+      <div class="smcp" style="color: var(--graphite);">classifying · haiku 4.5 · 31 of 87</div>
+    </div>
+    <div class="progress"></div>
+    <div class="strip" style="margin-top: 32px;">
+      <div class="cell done">scan</div>
+      <div class="cell done">subtype</div>
+      <div class="cell running">classify</div>
+      <div class="cell">aggregate</div>
+      <div class="cell">draft</div>
+      <div class="cell">review</div>
+      <div class="cell">assemble</div>
+    </div>
+    <div class="typewriter" id="typewriter">
+      <div class="row"><span>00</span><span><strong>case_type:</strong> E2 · confidence 0.95 · <em>haiku 4.5 · 1.0s</em></span></div>
+      <div class="row subtype"><span>0.6</span><span><strong>subtype:</strong> individual_investor · uscis_extension · HIGH · 4 dependents</span></div>
+      <div class="row"><span>27</span><span><strong>kacar-salih-passport-bio-page.pdf</strong> → passport · <em>kacar-salih-passport-bio-page.pdf</em></span></div>
+      <div class="row"><span>28</span><span><strong>ozlem-kacar-passport-bio-page.pdf</strong> → passport · <em>kacar-ozlem-passport-bio-page.pdf</em></span></div>
+      <div class="row"><span>29</span><span><strong>kacar-salih-i94-2025-08-12.pdf</strong> → i94 · <em>kacar-salih-i94-2025-08-12.pdf</em></span></div>
+      <div class="row"><span>30</span><span><strong>wise-guys-deli-articles-of-organization.pdf</strong> → formation_doc · <em>wise-guys-deli-articles-of-organization-rhode-island-2021.pdf</em></span></div>
+      <div class="row"><span>31</span><span><strong>wise-guys-deli-membership-transfer.pdf</strong> → business_contract · <em>wise-guys-deli-membership-interest-transfer-agreement-2025-12-05.pdf</em></span></div>
+      <div class="row"><span></span><span><span class="cursor"></span></span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════ 3. DOSSIER ═════════════════════════ -->
+<section class="demo-section anchor-target" id="dossier">
+  <h2 class="eyebrow">screen 03</h2>
+  <h3 class="note">Dossier — the master fact sheet, with audit margin</h3>
+
+  <div class="dossier">
+    <div class="left">
+      <div class="group">
+        <div class="head">my matters · 14</div>
+        <div class="ml-row selected"><span class="name">Kacar-Salih</span><span class="glyph alarm">‡</span></div>
+        <div class="ml-row"><span class="name">Camural-Pomega</span><span class="glyph">✓</span></div>
+        <div class="ml-row"><span class="name">Demir-LLC</span><span class="glyph">·</span></div>
+        <div class="ml-row"><span class="name">Yılmaz-IP</span><span class="glyph">✓</span></div>
+      </div>
+      <hr />
+      <div class="group anchor-rail">
+        <div class="head">this matter</div>
+        <div class="ar-row alarm" data-anchor="facts"><span class="glyph">‡</span><span class="label">facts</span><span class="tail">3 unset</span></div>
+        <div class="ar-row" data-anchor="chain"><span class="glyph">✓</span><span class="label">chain</span><span class="tail"></span></div>
+        <div class="ar-row" data-anchor="proof"><span class="glyph">·</span><span class="label">proof</span><span class="tail">4 / 5</span></div>
+        <div class="ar-row alarm active" data-anchor="register"><span class="glyph">‡</span><span class="label">register</span><span class="tail">1 sev-5</span></div>
+        <div class="ar-row" data-anchor="binder"><span class="glyph">·</span><span class="label">binder</span><span class="tail">87 docs</span></div>
+        <div class="ar-row" data-anchor="drafts"><span class="glyph">·</span><span class="label">drafts</span><span class="tail">5 gated</span></div>
+        <div class="ar-row" data-anchor="audit"><span class="glyph">·</span><span class="label">audit</span><span class="tail"></span></div>
+        <div class="ar-row" data-anchor="log"><span class="glyph">·</span><span class="label">log</span><span class="tail"></span></div>
+      </div>
+    </div>
+
+    <div style="grid-column: 2 / 4; display: contents;">
+      <div class="center" style="grid-column: 2 / 3;">
+        <div class="matter-header" style="margin: 0 -32px;">
+          <h1 class="h1">Salih Kaçar · Wise Guys Deli LLC</h1>
+          <div class="meta">
+            <span class="pill">E-2 individual</span>
+            <span class="pill">uscis_extension</span>
+            <span class="pill">+ 4 dep</span>
+            <span class="pill">HIGH</span>
+          </div>
+          <div class="gate-banner">3 facts unset · 1 sev-5 conflict · drafts gated.</div>
+          <div class="last-touched">last touched: AS · 14:32 · facts.investment.total_committed_usd</div>
+        </div>
+
+        <div class="fact-sheet" style="position:relative;">
+          <div class="audit-gutter">
+            <span class="dot" style="top: 200px;"></span>
+            <span class="dot" style="top: 232px;"></span>
+            <span class="dot" style="top: 264px;"></span>
+            <span class="dot" style="top: 416px;"></span>
+            <span class="dot" style="top: 448px;"></span>
+          </div>
+
+          <!-- Identity -->
+          <div class="section anchor-target" id="anchor-facts">
+            <div class="eyebrow"><span class="lbl">i · identity</span><span class="tail">7 / 8 set</span></div>
+            <div class="fact-row"><span class="lbl">investor</span><span class="val">Salih Kaçar</span><span class="glyph ok">✓</span><span class="src">passport p.1</span></div>
+            <div class="fact-row"><span class="lbl">date of birth</span><span class="val">1972-03-14</span><span class="glyph ok">✓</span><span class="src">passport p.1</span></div>
+            <div class="fact-row alarm-fatal" data-seen="false"><span class="lbl">place of birth</span><span class="val unset">unset</span><span class="glyph alarm">‡</span><span class="src">required for filing</span></div>
+            <div class="fact-row"><span class="lbl">nationality</span><span class="val">Turkey</span><span class="glyph ok">✓</span><span class="src">passport p.1</span></div>
+            <div class="fact-row"><span class="lbl">passport</span><span class="val mono">••••XXX1</span><span class="glyph ok">✓</span><span class="src">passport p.1</span></div>
+            <div class="fact-row"><span class="lbl">passport expiry</span><span class="val mono">2032-04-11</span><span class="glyph ok">✓</span><span class="src">passport p.1</span></div>
+            <div class="fact-row"><span class="lbl">current US status</span><span class="val">E-2 (extension)</span><span class="glyph ok">✓</span><span class="src">i94 p.1</span></div>
+            <div class="fact-row"><span class="lbl">dependents</span><span class="val">4 (1 spouse · 3 children)</span><span class="glyph ok">✓</span><span class="src">subtype HIGH</span></div>
+          </div>
+
+          <div class="dinkus"></div>
+
+          <!-- Enterprise (compressed) -->
+          <div class="section anchor-target" id="anchor-enterprise">
+            <div class="eyebrow"><span class="lbl">ii · enterprise</span><span class="tail">8 / 8 set</span></div>
+            <div class="fact-row"><span class="lbl">legal name</span><span class="val">Wise Guys Deli LLC</span><span class="glyph ok">✓</span><span class="src">articles p.1</span></div>
+            <div class="fact-row"><span class="lbl">EIN</span><span class="val mono">XX-XXX2472</span><span class="glyph ok">✓</span><span class="src">cp575 p.1</span></div>
+            <div class="fact-row"><span class="lbl">formation date</span><span class="val mono">2021-10-04</span><span class="glyph ok">✓</span><span class="src">articles p.1</span></div>
+            <div class="fact-row"><span class="lbl">state · entity</span><span class="val">Rhode Island · LLC</span><span class="glyph ok">✓</span><span class="src">articles p.1</span></div>
+            <div class="fact-row"><span class="lbl">industry · NAICS</span><span class="val">retail food · 445110</span><span class="glyph ok">✓</span><span class="src">i129e p.2</span></div>
+          </div>
+
+          <div class="dinkus"></div>
+
+          <!-- Investment -->
+          <div class="section anchor-target" id="anchor-invest">
+            <div class="eyebrow"><span class="lbl">iii · investment posture</span><span class="tail">5 / 6 set · 1 minor</span></div>
+            <div class="fact-row alarm-fatal" data-seen="false"><span class="lbl">total committed</span><span class="val mono">$120,000</span><span class="glyph alarm">‡</span><span class="src">drift vs i129e</span></div>
+            <div class="fact-row"><span class="lbl">irrevocably spent</span><span class="val mono">$80,000</span><span class="glyph ok">✓</span><span class="src">wire 8819</span></div>
+            <div class="fact-row"><span class="lbl">enterprise cost</span><span class="val unset">unset</span><span class="glyph">·</span><span class="src">no business plan on file</span></div>
+            <div class="fact-row"><span class="lbl">proportionality</span><span class="val mono">66.7%</span><span class="glyph ok">✓</span><span class="src">computed</span></div>
+            <div class="fact-row"><span class="lbl">substantiality</span><span class="val">review §V</span><span class="glyph">·</span><span class="src">marginal</span></div>
+            <div class="fact-row"><span class="lbl">marginality</span><span class="val">supported · 2 W-2 employees</span><span class="glyph ok">✓</span><span class="src">payroll q1</span></div>
+          </div>
+
+          <div class="dinkus"></div>
+
+          <!-- SOF chain -->
+          <div class="section anchor-target" id="anchor-chain">
+            <div class="eyebrow"><span class="lbl">iv · source of funds chain</span><span class="tail">3 legs · reconciled</span></div>
+            <div class="sof-chain">
+              <svg viewBox="0 0 720 240" preserveAspectRatio="none">
+                <defs>
+                  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(10,10,10,0.04)" stroke-width="1"/>
+                  </pattern>
+                </defs>
+                <rect width="720" height="240" fill="url(#grid)" />
+
+                <!-- nodes -->
+                <rect x="20" y="60" width="120" height="40" fill="none" stroke="#0A0A0A" stroke-width="1" />
+                <text x="80" y="80" text-anchor="middle" font-family="Source Serif Pro, Georgia, serif" font-size="13" fill="#0A0A0A">Tapu (TR)</text>
+                <text x="80" y="94" text-anchor="middle" font-family="Courier New, monospace" font-size="10" fill="#404040">$95,600</text>
+
+                <rect x="280" y="40" width="120" height="40" fill="none" stroke="#0A0A0A" stroke-width="1" />
+                <text x="340" y="60" text-anchor="middle" font-family="Source Serif Pro, Georgia, serif" font-size="13" fill="#0A0A0A">FX TRY → USD</text>
+                <text x="340" y="74" text-anchor="middle" font-family="Courier New, monospace" font-size="10" fill="#404040">42.75 · $80,000</text>
+
+                <rect x="280" y="160" width="120" height="40" fill="none" stroke="#0A0A0A" stroke-width="1" />
+                <text x="340" y="180" text-anchor="middle" font-family="Source Serif Pro, Georgia, serif" font-size="13" fill="#0A0A0A">SWIFT to US</text>
+                <text x="340" y="194" text-anchor="middle" font-family="Courier New, monospace" font-size="10" fill="#404040">Citi 2472</text>
+
+                <rect x="540" y="100" width="160" height="40" fill="none" stroke="#0A0A0A" stroke-width="2" />
+                <text x="620" y="120" text-anchor="middle" font-family="Source Serif Pro, Georgia, serif" font-size="13" fill="#0A0A0A">Wise Guys Deli LLC</text>
+                <text x="620" y="134" text-anchor="middle" font-family="Courier New, monospace" font-size="10" fill="#404040">via co-owner 3772</text>
+
+                <!-- legs (Sankey-ish) -->
+                <path d="M140 80 C 200 80, 220 60, 280 60" stroke="#1F1F1F" stroke-width="14" fill="none" stroke-linecap="round" />
+                <path d="M400 60 C 460 60, 480 100, 540 110" stroke="#1F1F1F" stroke-width="14" fill="none" stroke-linecap="round" />
+                <path d="M140 88 C 200 88, 220 180, 280 180" stroke="#404040" stroke-width="6" fill="none" stroke-linecap="round" stroke-dasharray="4 3" />
+                <path d="M400 180 C 460 180, 480 130, 540 130" stroke="#1F1F1F" stroke-width="14" fill="none" stroke-linecap="round" />
+
+                <!-- glyphs -->
+                <text x="210" y="55" text-anchor="middle" font-family="Courier New, monospace" font-size="14" fill="#404040">✓</text>
+                <text x="470" y="80" text-anchor="middle" font-family="Courier New, monospace" font-size="14" fill="#404040">✓</text>
+                <text x="210" y="220" text-anchor="middle" font-family="Courier New, monospace" font-size="14" fill="#7A2F1F" font-weight="700">‡</text>
+                <text x="210" y="234" text-anchor="middle" font-family="Courier New, monospace" font-size="10" fill="#7A2F1F">−$5,000</text>
+                <text x="470" y="155" text-anchor="middle" font-family="Courier New, monospace" font-size="14" fill="#404040">✓</text>
+              </svg>
+              <div class="summary">
+                <span>Σ chain total <strong>$80,000</strong></span>
+                <span>3 legs</span>
+                <span class="delta">‡ leg 1.b discrepant · −$5,000</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="dinkus"></div>
+
+          <!-- proof matrix -->
+          <div class="section anchor-target" id="anchor-proof">
+            <div class="eyebrow"><span class="lbl">v · proof slot matrix</span><span class="tail">4 / 5 at-spec</span></div>
+            <div class="proof-matrix">
+              <div class="proof-row">
+                <span class="lbl">e1 treaty nationality</span>
+                <span class="frac">04 / 05</span>
+                <span class="spark">
+                  <span class="cell filled"></span><span class="cell filled"></span><span class="cell filled"></span><span class="cell filled"></span><span class="cell"></span>
+                </span>
+                <span class="glyph ok">✓</span>
+                <span class="auth">9 FAM 402.9-4(B)</span>
+              </div>
+              <div class="proof-row">
+                <span class="lbl">e2 substantial investment</span>
+                <span class="frac">06 / 06</span>
+                <span class="spark">
+                  <span class="cell filled"></span><span class="cell filled"></span><span class="cell filled"></span><span class="cell filled"></span><span class="cell filled"></span>
+                </span>
+                <span class="glyph ok">✓</span>
+                <span class="auth">8 CFR 214.2(e)(12)</span>
+              </div>
+              <div class="proof-row">
+                <span class="lbl">e3 real and operating</span>
+                <span class="frac">05 / 05</span>
+                <span class="spark">
+                  <span class="cell filled"></span><span class="cell filled"></span><span class="cell filled"></span><span class="cell filled"></span><span class="cell filled"></span>
+                </span>
+                <span class="glyph ok">✓</span>
+                <span class="auth">9 FAM 402.9-6</span>
+              </div>
+              <div class="proof-row" style="border-left: 2px solid var(--accent-alarm); padding-left: 10px;">
+                <span class="lbl">e4 more than marginal</span>
+                <span class="frac">02 / 04</span>
+                <span class="spark">
+                  <span class="cell filled"></span><span class="cell filled"></span><span class="cell weak"></span><span class="cell"></span><span class="cell"></span>
+                </span>
+                <span class="glyph alarm">‡</span>
+                <span class="auth">9 FAM 402.9-7(B)</span>
+              </div>
+              <div class="proof-row">
+                <span class="lbl">e5 develop and direct</span>
+                <span class="frac">03 / 03</span>
+                <span class="spark">
+                  <span class="cell filled"></span><span class="cell filled"></span><span class="cell filled"></span><span class="cell"></span><span class="cell"></span>
+                </span>
+                <span class="glyph ok">✓</span>
+                <span class="auth">9 FAM 402.9-7(1)</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="dinkus"></div>
+
+          <!-- conflict register -->
+          <div class="section anchor-target" id="anchor-register">
+            <div class="eyebrow"><span class="lbl">vi · conflict register</span><span class="tail alarm">1 sev-5 inline · 12 minor collapsed</span></div>
+            <div class="conflict-row sev-5">
+              <span class="glyph">‡</span>
+              <span class="type">investment_amount_drift</span>
+              <span>
+                <span class="desc">Membership Interest Transfer says <strong>$120,000</strong>; I-129E supplement says <strong>$115,000</strong>. §4.5 gate failed.</span>
+                <div class="refs">A: wise-guys-deli-membership-interest-transfer-agreement-2025-12-05.pdf p.2 · B: kacar-salih-form-i-129e-supplement-2026-01-07.pdf p.1</div>
+              </span>
+            </div>
+            <div class="conflict-summary">12 sev-1–3 minor — click to expand</div>
+          </div>
+
+          <div class="dinkus"></div>
+
+          <!-- binder / exhibit grid -->
+          <div class="section anchor-target" id="anchor-binder">
+            <div class="eyebrow"><span class="lbl">vii · binder</span><span class="tail">87 docs · 412 pages</span></div>
+            <div class="exhibit-row needs-review">
+              <span class="num">!</span>
+              <span class="lbl"><strong>needs review</strong> <small>· 4 entries — bot confidence &lt; 0.85 OR doc_type='other'</small></span>
+              <span class="count">4 docs</span>
+              <span class="pages">12p</span>
+              <span class="glyph">›</span>
+            </div>
+            <div class="exhibit-row">
+              <span class="num">1</span>
+              <span class="lbl">Applicant Documents <small>· passport · status_doc · i94 · government_id · vital_record · credential · cv_or_resume</small></span>
+              <span class="count">12 docs</span>
+              <span class="pages">47p</span>
+              <span class="glyph">✓</span>
+            </div>
+            <div class="exhibit-row">
+              <span class="num">2</span>
+              <span class="lbl">Company Documents <small>· formation_doc · ownership_evidence</small></span>
+              <span class="count">04 docs</span>
+              <span class="pages">32p</span>
+              <span class="glyph">✓</span>
+            </div>
+            <div class="exhibit-row">
+              <span class="num">3</span>
+              <span class="lbl">Source of Funds <small>· source_of_funds · title_deed · money_movement</small></span>
+              <span class="count">09 docs</span>
+              <span class="pages">41p</span>
+              <span class="glyph alarm">‡</span>
+            </div>
+            <div class="exhibit-row">
+              <span class="num">4</span>
+              <span class="lbl">Company Bank Statements</span>
+              <span class="count">14 docs</span>
+              <span class="pages">112p</span>
+              <span class="glyph">✓</span>
+            </div>
+            <div class="exhibit-row">
+              <span class="num">5</span>
+              <span class="lbl">Operational Contracts <small>· lease_or_property · business_contract</small></span>
+              <span class="count">08 docs</span>
+              <span class="pages">62p</span>
+              <span class="glyph">✓</span>
+            </div>
+            <div class="exhibit-row">
+              <span class="num">6</span>
+              <span class="lbl">Employee Documents</span>
+              <span class="count">06 docs</span>
+              <span class="pages">28p</span>
+              <span class="glyph">·</span>
+            </div>
+            <div class="exhibit-row">
+              <span class="num">7</span>
+              <span class="lbl">Tax Returns</span>
+              <span class="count">02 docs</span>
+              <span class="pages">36p</span>
+              <span class="glyph">✓</span>
+            </div>
+            <div class="exhibit-row">
+              <span class="num">8</span>
+              <span class="lbl">Invoices &amp; Receipts</span>
+              <span class="count">22 docs</span>
+              <span class="pages">38p</span>
+              <span class="glyph">✓</span>
+            </div>
+            <div class="exhibit-row">
+              <span class="num">9</span>
+              <span class="lbl">Others</span>
+              <span class="count">06 docs</span>
+              <span class="pages">14p</span>
+              <span class="glyph">·</span>
+            </div>
+          </div>
+
+          <div class="dinkus"></div>
+
+          <!-- drafts -->
+          <div class="section anchor-target" id="anchor-drafts">
+            <div class="eyebrow"><span class="lbl">viii · drafts</span><span class="tail">5 gated · 7 unlocked · 2 complete</span></div>
+            <div class="draft-group">
+              <div class="head">cover letter and exhibit index</div>
+              <div class="draft-row gated">
+                <span class="name">cover letter</span>
+                <span class="preqs"><span class="ok">Identity ✓</span> · <span class="ok">Enterprise ✓</span> · <span class="alarm">SOF ‡</span> · <span class="alarm">Conflicts ‡</span></span>
+                <span class="verdict">gated · see facts</span>
+              </div>
+              <div class="draft-row unlocked">
+                <span class="name">exhibit list</span>
+                <span class="preqs">—</span>
+                <span class="verdict">unlocked</span>
+              </div>
+              <div class="draft-row gated">
+                <span class="name">business plan (E-2)</span>
+                <span class="preqs"><span class="ok">Investment ✓</span> · <span class="ok">Items ✓</span> · <span class="alarm">Marginality ‡</span></span>
+                <span class="verdict">gated-soft</span>
+              </div>
+            </div>
+            <div class="draft-group">
+              <div class="head">declarations</div>
+              <div class="draft-row complete">
+                <span class="name">declaration · beneficiary</span>
+                <span class="preqs"><span class="ok">Identity ✓</span> · <span class="ok">Investor ✓</span></span>
+                <span class="verdict">last AS · 14:32 · v0.5.docx</span>
+              </div>
+              <div class="draft-row unlocked">
+                <span class="name">declaration · spouse</span>
+                <span class="preqs"><span class="ok">Dependents ✓</span></span>
+                <span class="verdict">unlocked</span>
+              </div>
+              <div class="draft-row unlocked">
+                <span class="name">declaration · enterprise rep</span>
+                <span class="preqs"><span class="ok">Ownership ✓</span></span>
+                <span class="verdict">unlocked</span>
+              </div>
+            </div>
+            <div class="draft-group">
+              <div class="head">USCIS / DOS forms</div>
+              <div class="draft-row unlocked"><span class="name">I-129</span><span class="preqs"><span class="ok">Identity ✓</span> · <span class="ok">Enterprise ✓</span></span><span class="verdict">unlocked</span></div>
+              <div class="draft-row gated"><span class="name">I-129E</span><span class="preqs"><span class="alarm">Conflicts ‡</span></span><span class="verdict">gated</span></div>
+              <div class="draft-row unlocked"><span class="name">G-28</span><span class="preqs"><span class="ok">Identity ✓</span></span><span class="verdict">unlocked</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="right" style="grid-column: 3 / 4;">
+        <div class="head">register · sev-5 drilldown</div>
+        <div class="pane-card">
+          <div class="src">A · membership transfer · p.2</div>
+          <div class="quote">"…in consideration of <strong>$120,000.00</strong>, of which $80,000 paid upfront…"</div>
+          <div class="conf">extracted · contract.total_consideration_amount · confidence 0.99</div>
+        </div>
+        <div class="pane-card">
+          <div class="src">B · I-129E supplement · p.1</div>
+          <div class="quote">"Total amount invested: <strong>$115,000.00</strong>"</div>
+          <div class="conf">extracted · uscis_or_dos_form.investment_amount_usd · confidence 0.97</div>
+        </div>
+        <div style="border-top: 1px solid var(--rule-strong); padding-top: 12px; margin-bottom: 16px;">
+          <div class="head">resolve</div>
+          <div style="display: grid; gap: 6px; margin-top: 8px;">
+            <button style="border: 1px solid var(--rule-strong); background: var(--paper); padding: 6px 10px; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; cursor: pointer; text-align: left;">resolve A — accept $120,000</button>
+            <button style="border: 1px solid var(--rule-strong); background: var(--paper); padding: 6px 10px; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; cursor: pointer; text-align: left;">resolve B — accept $115,000</button>
+            <button style="border: 1px solid var(--rule); background: var(--paper); padding: 6px 10px; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; cursor: pointer; text-align: left; color: var(--graphite);">add note · escalate</button>
+            <button style="border: 1px solid var(--rule); background: var(--paper); padding: 6px 10px; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; cursor: pointer; text-align: left; color: var(--graphite);">dismiss · false positive</button>
+          </div>
+        </div>
+        <div class="head">audit trail · this fact</div>
+        <div class="audit-trail">
+          <div class="row">2026-05-01T14:32:08Z · AS · fact_edit · facts.investment.total_committed_usd · 410000 → 425000</div>
+          <div class="row">2026-04-30T11:14:52Z · AS · fact_edit · facts.investment.total_committed_usd · null → 410000</div>
+          <div class="row">2026-04-30T11:08:19Z · clerk · ingest_complete · 87 PDFs · 412 pages</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═════════════════════════ 4. GENERATION ═════════════════════════ -->
+<section class="demo-section anchor-target" id="generation">
+  <h2 class="eyebrow">screen 04</h2>
+  <h3 class="note">Generation — fact sheet stays, draft streams in the rail</h3>
+
+  <div class="generation">
+    <div class="left">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite-soft); margin-bottom: 8px;">my matters</div>
+      <div style="font-size: 14px; color: var(--graphite-soft); padding: 4px 8px;">Kacar-Salih ‡</div>
+      <div style="font-size: 14px; color: var(--graphite-soft); padding: 4px 8px;">Camural-Pomega ✓</div>
+      <hr style="border: 0; border-top: 1px solid var(--rule); margin: 16px -16px;" />
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite-soft); margin-bottom: 8px;">this matter</div>
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite-soft); padding: 4px 8px;">‡ facts</div>
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite-soft); padding: 4px 8px;">✓ chain</div>
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--ink); padding: 4px 8px; border-left: 2px solid var(--ink); margin-left: -2px;">· drafts <span style="color: var(--graphite-soft); font-family: var(--mono); float: right;">generating</span></div>
+    </div>
+
+    <div class="center">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite); margin-bottom: 12px;">iii · investment posture</div>
+      <p style="font-size: 13px; color: var(--graphite); margin-bottom: 16px; max-width: 60ch; font-style: italic;">while the cover letter streams in the rail, the fact sheet stays visible — the attorney scrolls and verifies the facts as the draft cites them.</p>
+      <div class="fact-sheet">
+        <div class="fact-row" style="border-left: 2px solid var(--accent-alarm); padding-left: 10px;">
+          <span class="lbl">total committed</span><span class="val mono">$120,000</span><span class="glyph alarm">‡</span><span class="src" style="opacity:1;">contract p.2</span>
+        </div>
+        <div class="fact-row"><span class="lbl">irrevocably spent</span><span class="val mono">$80,000</span><span class="glyph ok">✓</span><span class="src" style="opacity:1;">wire 8819 p.1</span></div>
+        <div class="fact-row"><span class="lbl">proportionality</span><span class="val mono">66.7%</span><span class="glyph ok">✓</span><span class="src" style="opacity:1;">computed</span></div>
+        <div class="fact-row"><span class="lbl">marginality</span><span class="val">supported · 2 W-2 employees</span><span class="glyph ok">✓</span><span class="src" style="opacity:1;">payroll q1</span></div>
+      </div>
+    </div>
+
+    <div class="right">
+      <div class="head">drafting · cover letter</div>
+      <div class="gen-status">streaming · sonnet 4.6 · 02:14 elapsed · ~04:00 ETA</div>
+      <div class="stream" id="streamPane">
+        <p><strong>RE: E-2 Extension — Salih Kaçar / Wise Guys Deli LLC</strong></p>
+        <p><em>Counsel respectfully submits this petition</em> for extension of E-2 nonimmigrant status on behalf of Salih Kaçar, the Beneficiary, who has been admitted in E-2 classification since August 12, 2023.</p>
+        <p>Beneficiary holds Turkish nationality (passport <em>U17******1</em>, expiring April 11, 2032) and currently maintains valid status under I-94 #12345XXXXXX, admitted until August 11, 2027.</p>
+        <p>Beneficiary acquired a 50% membership interest in Wise Guys Deli LLC, a Rhode Island limited liability company formed October 4, 2021, pursuant to a Membership Interest Transfer Agreement dated December 5, 2025 [ex. 3-A p.2]. Total consideration of <em>$120,000</em><span class="cursor"></span></p>
+      </div>
+      <div class="signature">
+        <div class="label">attorney initials</div>
+        <input type="text" maxlength="3" placeholder="AS" value="" />
+        <div class="row">
+          <button class="reject">reject</button>
+          <button>approve &amp; generate →</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="smcp">notes</div>
+  <p>This is a static vibe-check demonstrating <strong>home + ingest + dossier + generation</strong>. Three earned exceptions to monochrome are visible: <code>--accent-alarm</code> on the fatal-unset row (place_of_birth in §I), the discrepant SOF leg (§IV), the sev-5 conflict (§VI), the alarm anchor in the rail. Severity 1–4 carried by weight + glyph + position; only severity 5 + fatal-missing earn chromatic accent.</p>
+  <p>The audit gutter on the right edge of the center column is the docket-blame pattern. The dinkus glyph between sections is the only typographic ornament. The streaming draft pane in §IV demonstrates the two-monitor moment — the only time two things move at once.</p>
+  <p><strong>What's not in the static demo:</strong> Cmd+K dossier search, ? cheatsheet overlay, the alarm-breath one-cycle motion (visible on first scroll into the row in a real implementation), the audit-margin dot hover-pill, the right-rail mutating per fact-row hover. Those are specced in <code>spec.md §3.l</code>, <code>§3.m</code>, <code>§5.a</code>, <code>§5.b</code>.</p>
+</footer>
+
+<script>
+(function () {
+  function tick() {
+    var d = new Date();
+    var h = String(d.getHours()).padStart(2, '0');
+    var m = String(d.getMinutes()).padStart(2, '0');
+    var s = String(d.getSeconds()).padStart(2, '0');
+    var el = document.getElementById('clock');
+    if (el) el.textContent = h + ':' + m + ':' + s;
+  }
+  tick();
+  setInterval(tick, 1000);
+
+  // mark alarm rows as seen on first scroll-in
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (entry.isIntersecting && entry.target.dataset.seen === 'false') {
+        // let the animation play, then mark as seen
+        setTimeout(function () { entry.target.dataset.seen = 'true'; }, 2000);
+      }
+    });
+  }, { threshold: 0.5 });
+  document.querySelectorAll('[data-seen="false"]').forEach(function (el) { io.observe(el); });
+
+  // anchor jumps in the dossier left rail
+  document.querySelectorAll('.ar-row[data-anchor]').forEach(function (a) {
+    a.addEventListener('click', function () {
+      document.querySelectorAll('.ar-row.active').forEach(function (x) { x.classList.remove('active'); });
+      a.classList.add('active');
+      var t = document.getElementById('anchor-' + a.dataset.anchor);
+      if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+})();
+</script>
+</body>
+</html>

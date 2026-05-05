@@ -1,0 +1,765 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Atelier — Designer A vibe check</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,300..700,0,0&display=swap" rel="stylesheet" />
+<style>
+:root {
+  --paper-cream:   #FAFAFA;
+  --paper-vellum:  #F4F2EC;
+  --paper-recess:  #F0F0F0;
+  --paper-grain-3: #E8E6E0;
+  --paper-deep:    #D4D4D4;
+
+  --ink-jet:       #0A0A0A;
+  --ink-2:         #1F1F1F;
+  --ink-mute:      #2E2E2E;
+  --graphite:      #404040;
+  --graphite-soft: #595959;
+
+  --seal:          #5B1A12;
+  --brass-hair:    rgba(165, 135, 90, 0.55);
+  --sky-rule:      rgba(120, 145, 170, 0.55);
+
+  --rule:          rgba(10, 10, 10, 0.10);
+  --rule-strong:   rgba(10, 10, 10, 0.32);
+  --rule-edge:     rgba(10, 10, 10, 0.55);
+
+  --font-display: "Fraunces", "Iowan Old Style", "Hoefler Text", Georgia, serif;
+  --font-body: -apple-system, "Helvetica Neue", "Inter", system-ui, sans-serif;
+  --font-mono: "Courier New", ui-monospace, "SF Mono", Menlo, monospace;
+
+  --ease-cascade: cubic-bezier(0.22, 0.86, 0.32, 1);
+  --ease-lift:    cubic-bezier(0.20, 0.80, 0.20, 1);
+  --ease-glide:   cubic-bezier(0.45, 0.05, 0.20, 1);
+  --ease-reveal:  cubic-bezier(0.22, 0.86, 0.32, 1);
+}
+
+* { box-sizing: border-box; }
+html, body {
+  background: var(--paper-cream);
+  color: var(--ink-jet);
+  font-family: var(--font-body);
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.55;
+  font-feature-settings: "kern" 1, "tnum" 1;
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+  padding: 0;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(10,10,10,0.024) 1px, transparent 0),
+    radial-gradient(circle at 3px 4px, rgba(10,10,10,0.016) 1px, transparent 0);
+  background-size: 4px 4px, 7px 7px;
+  animation: grainDrift 18s linear infinite;
+}
+
+@keyframes grainDrift {
+  from { background-position: 0 0; }
+  to   { background-position: 60px 60px; }
+}
+
+.shell {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 56px 48px 96px;
+}
+
+/* ---------- masthead ---------- */
+.masthead {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 14px 24px;
+  border-bottom: 1.5px solid var(--ink-jet);
+  position: relative;
+  margin-bottom: 64px;
+}
+.wordmark {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 96, "SOFT" 0, "WONK" 0;
+  font-weight: 600;
+  font-size: 46px;
+  letter-spacing: -0.035em;
+  line-height: 1;
+}
+.wordmark em {
+  font-style: italic;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.cmd-k {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--graphite);
+  letter-spacing: 0.04em;
+  cursor: text;
+  transition: color 220ms var(--ease-lift);
+}
+.cmd-k:hover { color: var(--ink-jet); }
+.cmd-k .key { font-weight: 700; margin-right: 8px; }
+.meta {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--graphite);
+  font-variant-numeric: tabular-nums;
+}
+.meta span { padding: 0 8px; }
+.meta .sep { color: var(--rule-edge); }
+
+/* the brass score — the page breathes, not frozen */
+.brass-score {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 24px;
+  height: 1px;
+  background: var(--brass-hair);
+  transform: rotate(12deg) translateY(-50%);
+  transform-origin: right center;
+}
+
+/* ---------- alarm chip variant of the masthead (toggle to compare) ---------- */
+.alarm-toggle {
+  display: inline-flex;
+  gap: 10px;
+  margin-bottom: 24px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--graphite);
+}
+.alarm-toggle button {
+  font: inherit;
+  letter-spacing: inherit;
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--graphite);
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: border-color 220ms var(--ease-lift), color 220ms var(--ease-lift);
+}
+.alarm-toggle button:hover { border-color: var(--ink-jet); color: var(--ink-jet); }
+.alarm-toggle button.on { border-color: var(--ink-jet); color: var(--ink-jet); }
+
+.cmd-k.alarm {
+  color: var(--seal);
+  font-weight: 600;
+}
+.cmd-k.alarm .pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--seal);
+  margin-right: 8px;
+  animation: pulseDot 1.4s ease-in-out infinite;
+  vertical-align: 1px;
+}
+@keyframes pulseDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.45; transform: scale(0.7); }
+}
+
+/* ---------- panels ---------- */
+.row {
+  display: grid;
+  gap: 64px;
+  margin-bottom: 72px;
+}
+.section-label {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  font-weight: 600;
+  color: var(--graphite);
+  margin-bottom: 24px;
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+}
+.section-label .rule { flex: 1; border-bottom: 1px solid var(--rule); transform: translateY(-4px); }
+.section-h {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 36, "SOFT" 0, "WONK" 0;
+  font-weight: 600;
+  font-size: 24px;
+  letter-spacing: -0.012em;
+  margin: 0 0 24px;
+}
+
+/* ---------- palette ---------- */
+.palette {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+.swatch {
+  border: 1px solid var(--rule);
+  background: var(--paper-cream);
+}
+.swatch .chip {
+  height: 64px;
+  border-bottom: 1px solid var(--rule);
+}
+.swatch .label {
+  padding: 10px 12px 12px;
+}
+.swatch .name {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.swatch .hex {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--graphite);
+  letter-spacing: 0.04em;
+}
+.swatch .role {
+  font-size: 12px;
+  color: var(--graphite-soft);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+/* ---------- type scale ---------- */
+.type-row {
+  display: grid;
+  grid-template-columns: 6rem 1fr;
+  gap: 16px;
+  align-items: baseline;
+  border-bottom: 1px solid var(--rule);
+  padding: 16px 0;
+}
+.type-row .tag {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--graphite);
+}
+.type-row .sample {
+  font-family: var(--font-display);
+  color: var(--ink-jet);
+}
+.type-row .sample.body { font-family: var(--font-body); }
+.type-row .sample.mono { font-family: var(--font-mono); }
+.type-row .sample em { font-style: italic; font-weight: 600; }
+
+/* ---------- factspane tier 1 (vital signs slab) ---------- */
+.vital-slab {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0;
+  border-top: 1px solid var(--rule);
+  border-bottom: 1.5px solid var(--ink-jet);
+  padding: 36px 0 32px;
+  background-color: var(--paper-cream);
+}
+.vital {
+  padding: 0 32px;
+  border-right: 1px solid var(--rule);
+}
+.vital:last-child { border-right: 0; }
+.vital .label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--graphite);
+  margin-bottom: 14px;
+}
+.vital .name {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 36, "SOFT" 0, "WONK" 0;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  color: var(--ink-jet);
+  margin-bottom: 8px;
+}
+.vital .meta {
+  font-size: 13px;
+  color: var(--graphite);
+  text-align: left;
+  font-family: var(--font-body);
+  font-weight: 500;
+}
+.vital .meta b { color: var(--ink-2); font-weight: 600; }
+.vital.countdown { text-align: left; }
+.vital.countdown .days {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 96, "SOFT" 0, "WONK" 0;
+  font-size: 38.4px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1;
+  color: var(--ink-jet);
+  margin-bottom: 6px;
+}
+.vital.countdown .by {
+  font-size: 13px;
+  color: var(--graphite);
+}
+
+/* provenance hover */
+.provenance {
+  position: relative;
+  cursor: default;
+  border-bottom: 1px solid transparent;
+  transition: border-color 220ms var(--ease-lift);
+}
+.provenance:hover {
+  border-bottom-color: var(--brass-hair);
+}
+.provenance .pop {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  background: var(--paper-vellum);
+  border: 1px solid var(--rule-strong);
+  padding: 6px 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 180ms var(--ease-cascade), transform 180ms var(--ease-cascade);
+  pointer-events: none;
+  z-index: 5;
+}
+.provenance:hover .pop {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ---------- generate-panel register row ---------- */
+.register {
+  border-top: 1px solid var(--rule);
+}
+.gen-row {
+  display: grid;
+  grid-template-columns: 1.4fr 2fr auto;
+  align-items: baseline;
+  gap: 24px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--rule);
+  cursor: pointer;
+  transition: border-bottom-color 220ms var(--ease-lift);
+  position: relative;
+}
+.gen-row:hover { border-bottom-color: var(--ink-jet); border-bottom-width: 1.5px; padding-bottom: 17.5px; }
+.gen-row .name {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 20, "SOFT" 0, "WONK" 0;
+  font-size: 19.2px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}
+.gen-row .desc {
+  font-size: 13px;
+  color: var(--graphite);
+}
+.gen-row .est {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--graphite-soft);
+  letter-spacing: 0.06em;
+}
+.gen-row .arrow {
+  position: absolute;
+  right: -20px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--graphite-soft);
+  opacity: 0;
+  transition: opacity 220ms var(--ease-lift), color 220ms var(--ease-lift);
+}
+.gen-row:hover .arrow { opacity: 1; color: var(--ink-jet); }
+
+/* ---------- conflict register sample (sev-5 with seal) ---------- */
+.conflict-list {
+  display: grid;
+  gap: 12px;
+}
+.conflict {
+  display: grid;
+  grid-template-columns: 1.4rem 1fr auto;
+  gap: 12px;
+  align-items: baseline;
+  padding: 8px 0 8px 12px;
+}
+.conflict.sev-5 {
+  border-left: 2px solid var(--seal);
+  padding-left: 10px;
+}
+.conflict .glyph {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--graphite);
+  font-weight: 400;
+}
+.conflict.sev-3 .glyph { color: var(--ink-2); font-weight: 500; }
+.conflict.sev-4 .glyph { color: var(--ink-jet); font-weight: 600; }
+.conflict.sev-5 .glyph { color: var(--seal); font-weight: 700; }
+.conflict .desc {
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.conflict.sev-5 .desc { color: var(--ink-jet); font-weight: 600; }
+.conflict .type {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--graphite-soft);
+  margin-top: 2px;
+}
+.conflict .sev {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--graphite);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- editor's note (marginalia) ---------- */
+.marginalia {
+  background: var(--paper-vellum);
+  border: 1px solid var(--rule);
+  padding: 24px;
+  max-width: 304px;
+}
+.marginalia .editor-note {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-2);
+  line-height: 1.55;
+  margin-top: 16px;
+}
+.marginalia h4 {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  font-weight: 600;
+  color: var(--graphite);
+  margin: 0 0 12px;
+}
+.marginalia .countdown-mini {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 36, "SOFT" 0, "WONK" 0;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}
+.marginalia .last-admission {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--graphite);
+  margin-top: 6px;
+  letter-spacing: 0.04em;
+}
+
+/* ---------- wax stamp ---------- */
+.stamp-stage {
+  position: relative;
+  border: 1px solid var(--rule);
+  padding: 24px;
+  background: var(--paper-cream);
+}
+.stamp-stage .body {
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 36, "SOFT" 0, "WONK" 0;
+  font-size: 19.2px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  margin-bottom: 8px;
+}
+.stamp-stage .by {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--graphite);
+  letter-spacing: 0.04em;
+}
+.wax {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--seal);
+  display: grid;
+  place-items: center;
+  color: var(--paper-cream);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  animation: stampIn 280ms var(--ease-lift) both;
+  box-shadow: 0 1px 0 rgba(10,10,10,0.06), 0 4px 8px -6px rgba(10,10,10,0.18);
+}
+@keyframes stampIn {
+  from { opacity: 0; transform: scale(0.7); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* ---------- brass reveal under a computed value ---------- */
+.computed {
+  display: inline-block;
+  position: relative;
+  font-family: var(--font-display);
+  font-variation-settings: "opsz" 36, "SOFT" 0, "WONK" 0;
+  font-size: 19.2px;
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}
+.computed::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: -3px;
+  height: 1px;
+  width: 100%;
+  background: linear-gradient(
+    90deg,
+    rgba(110,135,118,0) 0%,
+    rgba(165,135,90,0.55) 50%,
+    rgba(120,145,170,0) 100%
+  );
+  transform: scaleX(0);
+  transform-origin: left;
+  animation: brassReveal 1200ms var(--ease-reveal) 200ms both;
+}
+@keyframes brassReveal {
+  from { transform: scaleX(0); transform-origin: left; }
+  to   { transform: scaleX(1); transform-origin: left; }
+}
+
+/* ---------- streaming cursor ---------- */
+.draft {
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--ink-2);
+  line-height: 1.65;
+  max-width: 68ch;
+}
+.draft .ref {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--ink-2);
+  border-bottom: 1px solid var(--sky-rule);
+  padding-bottom: 1px;
+  cursor: pointer;
+  transition: border-bottom-color 220ms var(--ease-lift), border-bottom-width 220ms var(--ease-lift);
+}
+.draft .ref:hover {
+  border-bottom-color: var(--ink-jet);
+}
+.draft .cursor {
+  font-family: var(--font-mono);
+  color: var(--ink-jet);
+  animation: blink 1.4s linear infinite;
+}
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0; }
+}
+
+.foot {
+  margin-top: 96px;
+  padding-top: 24px;
+  border-top: 1px solid var(--rule);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--graphite-soft);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-align: center;
+}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- MASTHEAD -->
+  <div class="masthead" id="mast">
+    <div class="wordmark">atelier<em>.</em></div>
+    <div class="cmd-k" id="cmdk"><span class="key">⌘K</span><span>search the binder</span></div>
+    <div class="meta">
+      <span>thu 1 may</span><span class="sep">—</span><span>14:53</span><span class="sep">—</span><span>4 matters</span>
+    </div>
+    <div class="brass-score" aria-hidden="true"></div>
+  </div>
+
+  <div class="alarm-toggle">
+    <span style="margin-right:8px;color:var(--graphite-soft);">masthead state:</span>
+    <button class="on" data-state="idle">idle</button>
+    <button data-state="alarm">sev≥4 alarm</button>
+  </div>
+
+  <!-- PALETTE -->
+  <div class="section-label">palette<span class="rule"></span></div>
+  <div class="palette">
+    <div class="swatch"><div class="chip" style="background:var(--paper-cream)"></div><div class="label"><div class="name">paper-cream</div><div class="hex">#FAFAFA</div><div class="role">default surface</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--paper-vellum)"></div><div class="label"><div class="name">paper-vellum</div><div class="hex">#F4F2EC</div><div class="role">dossier shell, marginalia</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--paper-recess)"></div><div class="label"><div class="name">paper-recess</div><div class="hex">#F0F0F0</div><div class="role">recessed wells</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--ink-jet)"></div><div class="label"><div class="name">ink-jet</div><div class="hex">#0A0A0A</div><div class="role">body, headlines, signature</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--graphite)"></div><div class="label"><div class="name">graphite</div><div class="hex">#404040</div><div class="role">meta, secondary inline</div></div></div>
+    <div class="swatch"><div class="chip" style="background:var(--seal)"></div><div class="label"><div class="name">seal</div><div class="hex">#5B1A12</div><div class="role">oxblood. one inked accent. ~6/page max.</div></div></div>
+    <div class="swatch"><div class="chip" style="background:linear-gradient(90deg,transparent 0,var(--brass-hair) 50%,transparent 100%)"></div><div class="label"><div class="name">brass-hair</div><div class="hex">rgba(165,135,90,0.55)</div><div class="role">"computed value" hairline</div></div></div>
+    <div class="swatch"><div class="chip" style="background:linear-gradient(90deg,transparent 0,var(--sky-rule) 50%,transparent 100%)"></div><div class="label"><div class="name">sky-rule</div><div class="hex">rgba(120,145,170,0.55)</div><div class="role">exhibit-ref hairline underline</div></div></div>
+  </div>
+
+  <!-- TYPE SCALE -->
+  <div class="row" style="gap:0;margin-top:72px;">
+    <div class="section-label">type scale<span class="rule"></span></div>
+    <div>
+      <div class="type-row"><div class="tag">stunt 96</div><div class="sample" style="font-size:96px;font-variation-settings:'opsz' 144,'SOFT' 0,'WONK' 0;font-weight:300;letter-spacing:-0.025em;line-height:.95;">Drop a dossier.</div></div>
+      <div class="type-row"><div class="tag">hero 64</div><div class="sample" style="font-size:64px;font-variation-settings:'opsz' 96,'SOFT' 0,'WONK' 0;font-weight:600;letter-spacing:-0.02em;line-height:1;">Demir <em>·</em> E-2</div></div>
+      <div class="type-row"><div class="tag">section 24</div><div class="sample" style="font-size:24px;font-variation-settings:'opsz' 36,'SOFT' 0,'WONK' 0;font-weight:600;letter-spacing:-0.012em;">Source of funds</div></div>
+      <div class="type-row"><div class="tag">subhead 19.2</div><div class="sample" style="font-size:19.2px;font-variation-settings:'opsz' 20,'SOFT' 0,'WONK' 0;font-weight:600;letter-spacing:-0.012em;">Investor</div></div>
+      <div class="type-row"><div class="tag">title 16.8</div><div class="sample" style="font-size:16.8px;font-variation-settings:'opsz' 20,'SOFT' 0,'WONK' 0;font-weight:600;">Approval — Cover letter</div></div>
+      <div class="type-row"><div class="tag">body 15</div><div class="sample body" style="font-size:15px;font-weight:500;">Mehmet Demir, Turkish national (passport U06342118), qualifies as a treaty investor.</div></div>
+      <div class="type-row"><div class="tag">meta 13</div><div class="sample body" style="font-size:13px;color:var(--graphite);">passport.pdf · p.2 · high confidence</div></div>
+      <div class="type-row"><div class="tag">smcp 11.5</div><div class="sample mono" style="font-size:11.5px;text-transform:uppercase;letter-spacing:0.10em;font-weight:600;color:var(--graphite);">decision &nbsp;·&nbsp; risk register &nbsp;·&nbsp; authorities cited</div></div>
+      <div class="type-row"><div class="tag">foot 10.5</div><div class="sample mono" style="font-size:10.5px;text-transform:uppercase;letter-spacing:0.18em;color:var(--graphite-soft);">8 cfr § 214.2(e) &nbsp;·&nbsp; fam 9 &nbsp;·&nbsp; uscis pm e-2.5</div></div>
+    </div>
+  </div>
+
+  <!-- FACTSPANE TIER 1: VITAL SIGNS SLAB -->
+  <div class="section-label" style="margin-top:96px;">factspane tier 1 — vital signs<span class="rule"></span></div>
+  <div class="vital-slab">
+    <div class="vital">
+      <div class="label">investor</div>
+      <div class="name"><span class="provenance">Mehmet Demir<span class="pop">passport.pdf · p.2 · high</span></span></div>
+      <div class="meta">turkish national · <b>passport U06342118</b> · b. 1981-04-22</div>
+    </div>
+    <div class="vital">
+      <div class="label">enterprise</div>
+      <div class="name"><span class="provenance">Demir Hospitality LLC<span class="pop">articles_of_organization_FL.pdf · p.1 · high</span></span></div>
+      <div class="meta">florida llc · ein 88-3127140 · formed <b>2024-02-14</b></div>
+    </div>
+    <div class="vital countdown">
+      <div class="label">i-94 deadline</div>
+      <div class="days">12 days</div>
+      <div class="by">submit by 14 May 2026 · last admission 03 Mar 2026</div>
+    </div>
+  </div>
+
+  <!-- BRASS REVEAL UNDER A COMPUTED VALUE -->
+  <div class="section-label" style="margin-top:96px;">computed-value reveal<span class="rule"></span></div>
+  <div style="font-size:13px;color:var(--graphite);margin-bottom:8px;">total committed (auto-derived from 6 source-of-funds chains)</div>
+  <span class="computed" id="computed">$ 217,400</span>
+
+  <!-- GENERATE-PANEL REGISTER -->
+  <div class="section-label" style="margin-top:96px;">generatepanel — editorial register<span class="rule"></span></div>
+  <h3 class="section-h">Cover letter &amp; exhibit index <sup style="font-family:var(--font-mono);font-size:11px;color:var(--graphite-soft);font-weight:500;">³</sup></h3>
+  <div class="register">
+    <div class="gen-row">
+      <div class="name">Cover letter</div>
+      <div class="desc">Full E-2 narrative drafted from facts on file, audited against unified register.</div>
+      <div class="est">Sonnet 4.6 · ~16K · ≈$0.30</div>
+      <div class="arrow">→</div>
+    </div>
+    <div class="gen-row">
+      <div class="name">Exhibit list</div>
+      <div class="desc">Mechanical, A–L tab convention, no model call.</div>
+      <div class="est">deterministic · $0</div>
+      <div class="arrow">→</div>
+    </div>
+    <div class="gen-row">
+      <div class="name">Business plan (E-2)</div>
+      <div class="desc">5-year P&amp;L with proportionality memo and source-of-funds appendix.</div>
+      <div class="est">Sonnet 4.6 · adaptive · ≈$0.30</div>
+      <div class="arrow">→</div>
+    </div>
+  </div>
+
+  <!-- CONFLICT REGISTER -->
+  <div class="section-label" style="margin-top:96px;">conflict register — sev-5 earns the seal<span class="rule"></span></div>
+  <div class="conflict-list">
+    <div class="conflict sev-1"><span class="glyph">·</span><div><div class="desc">Investor's middle name absent from passport but present in marriage certificate.</div><div class="type">name_minor</div></div><span class="sev">sev 1</span></div>
+    <div class="conflict sev-3"><span class="glyph">‡</span><div><div class="desc">Source-of-funds chain 3 stops at gift letter without bank-of-origin trace.</div><div class="type">sof_trace_break</div></div><span class="sev">sev 3</span></div>
+    <div class="conflict sev-4"><span class="glyph">‡</span><div><div class="desc">Proportionality computation inconsistent: 64% in memo vs 71% in build-up.</div><div class="type">proportionality_drift</div></div><span class="sev">sev 4</span></div>
+    <div class="conflict sev-5"><span class="glyph">‡</span><div><div class="desc">Cover letter cites I-94 admission of 2026-03-03; passport stamp shows 2026-03-13.</div><div class="type">admission_date_drift</div></div><span class="sev">sev 5</span></div>
+  </div>
+
+  <!-- DRAFT WITH STREAMING CURSOR + SKY-RULE REF -->
+  <div class="section-label" style="margin-top:96px;">draft — exhibit ref hairline + streaming cursor<span class="rule"></span></div>
+  <div class="draft">
+    Mr. Demir's investment of <span class="computed" style="font-size:15px;font-weight:600;font-variation-settings:'opsz' 20,'SOFT' 0,'WONK' 0;">$217,400</span> is documented in <span class="ref">[Tab E.4]</span>, traced through the Garanti BBVA FX confirmation at <span class="ref">[Tab E.2]</span>, and substantiated by the closing statement at <span class="ref">[Tab E.3]</span>. The enterprise has been formed and operational since 14 February 2024<span class="cursor">▍</span>
+  </div>
+
+  <!-- MARGINALIA + WAX STAMP -->
+  <div class="section-label" style="margin-top:96px;">marginalia + signed artifact<span class="rule"></span></div>
+  <div style="display:grid;grid-template-columns:304px 1fr;gap:48px;align-items:start;">
+    <div class="marginalia">
+      <h4>i-94 clock</h4>
+      <div class="countdown-mini">12 days</div>
+      <div class="last-admission">last admission 03 Mar 2026</div>
+      <div style="border-top:1px solid var(--rule);margin:20px 0;"></div>
+      <h4>recent</h4>
+      <div style="font-family:var(--font-display);font-style:italic;font-size:13px;color:var(--ink-2);">cover letter</div>
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--graphite);margin-top:2px;">14:51 · ≈$0.30</div>
+      <div style="border-top:1px solid var(--rule);margin:12px 0;"></div>
+      <div style="font-family:var(--font-display);font-style:italic;font-size:13px;color:var(--ink-2);">exhibit list</div>
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--graphite);margin-top:2px;">14:48 · $0</div>
+      <div class="editor-note">— the draft is on the desk; the auditor is sharpening her pencil.</div>
+    </div>
+
+    <div class="stamp-stage">
+      <div class="wax">SY</div>
+      <div class="body">Cover letter — E-2 · Demir</div>
+      <div class="by">signed 1 may 2026, 14:51 · sy · sealed · ≈$0.30 · 16,420 tokens</div>
+      <div style="margin-top:14px;font-size:14px;color:var(--ink-2);line-height:1.55;">
+        Mr. Demir's petition for E-2 classification proceeds on the following undisputed facts <em>—</em> nationality, enterprise formation, capital at risk, and good-faith intent to develop and direct the enterprise.
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">vibe check · designer A · editorial · cinematic · paper-cream · one inked seal</div>
+</div>
+
+<script>
+  // alarm chip toggle — sev≥4 swaps the masthead's ⌘K line for a seal-colored alarm
+  const cmdk = document.getElementById('cmdk');
+  const buttons = document.querySelectorAll('.alarm-toggle button');
+  buttons.forEach(b => b.addEventListener('click', () => {
+    buttons.forEach(x => x.classList.remove('on'));
+    b.classList.add('on');
+    const state = b.dataset.state;
+    if (state === 'alarm') {
+      cmdk.classList.add('alarm');
+      cmdk.innerHTML = '<span class="pulse"></span><span>4 critical · resolve before submission</span>';
+    } else {
+      cmdk.classList.remove('alarm');
+      cmdk.innerHTML = '<span class="key">⌘K</span><span>search the binder</span>';
+    }
+  }));
+
+  // re-trigger brass reveal on click for demo
+  const computed = document.getElementById('computed');
+  computed.addEventListener('click', () => {
+    computed.style.animation = 'none';
+    void computed.offsetWidth;
+    computed.style.animation = '';
+    const after = document.createElement('style');
+    after.textContent = '#computed::after { animation: brassReveal 1200ms var(--ease-reveal) 0ms both; }';
+    document.head.appendChild(after);
+    setTimeout(() => after.remove(), 1500);
+  });
+</script>
+</body>
+</html>

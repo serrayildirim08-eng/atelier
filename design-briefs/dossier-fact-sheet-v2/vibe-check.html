@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Atelier — Dossier v2 vibe check</title>
+<style>
+  :root {
+    --paper: #FAFAFA;
+    --paper-2: #F0F0F0;
+    --paper-3: #E5E5E5;
+    --paper-deep: #D4D4D4;
+    --ink: #0A0A0A;
+    --ink-2: #1F1F1F;
+    --graphite: #404040;
+    --graphite-soft: #595959;
+    --rule: rgba(10,10,10,.10);
+    --rule-strong: rgba(10,10,10,.32);
+    --accent-alarm: #7A2F1F;
+
+    --ease-paper: cubic-bezier(0.22, 0.61, 0.36, 1);
+    --ease-decisive: cubic-bezier(0.16, 1, 0.30, 1);
+
+    --display: 'Source Serif Pro', 'Lyon', Georgia, serif;
+    --body: 'Inter', -apple-system, sans-serif;
+    --mono: 'Courier New', monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 14px;
+    line-height: 1.43;
+    -webkit-font-smoothing: antialiased;
+  }
+  .smcp { font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
+  .label { font-family: var(--mono); font-size: 12px; line-height: 16px; }
+  .meta  { font-size: 13px; line-height: 18px; color: var(--graphite); }
+  .body  { font-size: 14px; line-height: 20px; }
+  .fact  { font-size: 16px; line-height: 22px; font-weight: 500; letter-spacing: -.005em; font-variant-numeric: tabular-nums; }
+  .title { font-family: var(--display); font-size: 22px; line-height: 26px; font-weight: 600; letter-spacing: -.012em; }
+  .page  { font-family: var(--display); font-size: 32px; line-height: 36px; letter-spacing: -.018em; }
+  .mono  { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .italic { font-style: italic; color: var(--graphite-soft); }
+  .alarm { color: var(--accent-alarm); }
+
+  /* layout */
+  .shell {
+    display: grid;
+    grid-template-columns: 240px 1fr 320px;
+    gap: 24px;
+    padding: 0 48px 48px;
+    min-height: 100vh;
+  }
+  header.matter {
+    padding: 24px 48px;
+    border-bottom: 1px solid var(--rule);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 24px;
+    background: var(--paper);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header.matter .left { display: flex; align-items: baseline; gap: 16px; min-width: 0; }
+  header.matter .pill {
+    border: 1px solid var(--ink-2);
+    padding: 2px 8px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+  }
+  header.matter .right { display: flex; align-items: baseline; gap: 12px; }
+  .gate-banner {
+    font-size: 13px;
+    color: var(--ink-2);
+    border-left: 2px solid var(--accent-alarm);
+    padding-left: 10px;
+    animation: alarm-breath 2s var(--ease-paper) 1;
+  }
+  .gate-banner .alarm-glyph { color: var(--accent-alarm); margin-right: 6px; }
+
+  @keyframes alarm-breath {
+    0%   { border-left-color: rgba(122,47,31,.55); }
+    50%  { border-left-color: rgba(122,47,31,1); }
+    100% { border-left-color: rgba(122,47,31,1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition-duration: 1ms !important; }
+  }
+
+  /* anchor rail */
+  aside.anchors { padding-top: 32px; }
+  aside.anchors .smcp { color: var(--graphite); margin-bottom: 16px; display: block; }
+  aside.anchors ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
+  aside.anchors li {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: baseline;
+    padding: 8px 12px 8px 14px;
+    border-left: 2px solid transparent;
+    cursor: pointer;
+    transition: background-color 120ms var(--ease-paper), border-color 120ms var(--ease-paper);
+  }
+  aside.anchors li:hover { background: var(--paper-2); }
+  aside.anchors li.active {
+    border-left-color: var(--ink);
+    color: var(--ink);
+    background: var(--paper-2);
+    font-weight: 500;
+  }
+  aside.anchors li.alarm { border-left-color: var(--accent-alarm); }
+  aside.anchors li .name { font-size: 14px; }
+  aside.anchors li .glyph { font-family: var(--mono); font-size: 13px; color: var(--graphite-soft); }
+  aside.anchors li .glyph.set { color: var(--ink); }
+  aside.anchors li .glyph.alarm { color: var(--accent-alarm); }
+
+  /* fact sheet center */
+  main.sheet {
+    padding-top: 32px;
+    padding-right: 14px; /* room for audit gutter */
+    position: relative;
+  }
+  .audit-gutter {
+    position: absolute;
+    right: 0;
+    top: 32px;
+    bottom: 0;
+    width: 14px;
+    background: var(--paper-3);
+    opacity: .6;
+  }
+  .audit-gutter .dot {
+    position: absolute;
+    right: 5px;
+    width: 4px;
+    height: 4px;
+    background: var(--ink);
+    border-radius: 50%;
+    transition: width 120ms var(--ease-paper);
+  }
+  .audit-gutter .dot:hover { width: 60px; right: 6px; }
+
+  section.facts { margin-bottom: 56px; }
+  section.facts header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 16px;
+    position: sticky;
+    top: 96px;
+    background: var(--paper);
+    z-index: 5;
+  }
+  section.facts header .smcp { color: var(--graphite); }
+  section.facts header .count { font-family: var(--mono); font-size: 12px; color: var(--graphite-soft); margin-left: auto; }
+
+  .row {
+    display: grid;
+    grid-template-columns: 180px 1fr auto auto;
+    align-items: baseline;
+    gap: 16px;
+    padding: 6px 12px 6px 14px;
+    border-left: 2px solid transparent;
+    cursor: pointer;
+    transition: background-color 120ms var(--ease-paper);
+  }
+  .row:hover { background: rgba(240,240,240,.5); }
+  .row.alarm { border-left-color: var(--accent-alarm); }
+  .row .label-cell { font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--graphite); }
+  .row .value-cell { font-size: 16px; line-height: 22px; font-weight: 500; letter-spacing: -.005em; font-variant-numeric: tabular-nums; }
+  .row .value-cell.mono { font-family: var(--mono); font-weight: 400; }
+  .row .glyph-cell { font-family: var(--mono); color: var(--graphite); font-size: 13px; }
+  .row .src-cell { font-family: var(--mono); font-size: 12px; color: var(--graphite-soft); }
+
+  /* dinkus */
+  .dinkus {
+    text-align: center;
+    color: var(--graphite);
+    letter-spacing: .8em;
+    font-family: var(--mono);
+    font-size: 12px;
+    margin: 32px 0;
+    user-select: none;
+  }
+  .dinkus::before, .dinkus::after {
+    content: '';
+    display: inline-block;
+    width: 80px;
+    border-top: 1px solid var(--rule);
+    margin: 0 16px;
+    transform: translateY(-4px);
+  }
+
+  /* sof chain (simplified static svg) */
+  .chain {
+    background: var(--paper-3);
+    padding: 16px;
+    margin-bottom: 24px;
+  }
+  .chain svg { width: 100%; height: 200px; display: block; }
+  .chain .summary {
+    display: flex;
+    gap: 24px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--graphite);
+    margin-top: 8px;
+  }
+  .chain .summary .alarm { color: var(--accent-alarm); }
+
+  /* right rail */
+  aside.right {
+    padding-top: 32px;
+    border-left: 1px solid var(--rule);
+    padding-left: 24px;
+  }
+  aside.right .smcp { color: var(--graphite); display: block; margin-bottom: 12px; }
+  aside.right .pane {
+    background: var(--paper-2);
+    padding: 16px;
+    border: 1px solid var(--rule);
+  }
+  aside.right .pane .field-name { font-family: var(--mono); font-size: 12px; color: var(--graphite); margin-bottom: 8px; }
+  aside.right .pane .field-value { font-size: 16px; line-height: 22px; margin-bottom: 16px; }
+  aside.right .pane .quote {
+    font-size: 13px;
+    color: var(--ink-2);
+    font-style: italic;
+    border-left: 1px solid var(--rule-strong);
+    padding-left: 10px;
+    margin: 12px 0;
+    line-height: 18px;
+  }
+  aside.right .pane .audit {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--graphite);
+    line-height: 18px;
+    border-top: 1px solid var(--rule);
+    padding-top: 12px;
+    margin-top: 12px;
+  }
+  aside.right .pane .audit div { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<header class="matter">
+  <div class="left">
+    <span class="smcp" style="color: var(--graphite);">⁂ the matter</span>
+    <h1 class="page" style="margin: 0; font-weight: 700;">Mehmet K. Demir</h1>
+    <span class="title" style="font-weight: 500;">E-2 · Individual investor</span>
+    <span class="pill">USCIS — change of status</span>
+  </div>
+  <div class="right">
+    <span class="gate-banner">
+      <span class="alarm-glyph">‡</span>
+      3 facts unset · 1 sev-5 conflict · drafts gated
+    </span>
+    <span class="label" style="color: var(--graphite-soft);">last touched: AS · 14:32</span>
+  </div>
+</header>
+
+<div class="shell">
+
+  <!-- left anchor rail -->
+  <aside class="anchors">
+    <span class="smcp">anchors</span>
+    <ul>
+      <li class="active alarm"><span class="name">Facts</span>           <span class="glyph alarm">‡</span></li>
+      <li class="alarm"><span class="name">SOF chain</span>              <span class="glyph alarm">‡</span></li>
+      <li><span class="name">Proof slots</span>                          <span class="glyph">·</span></li>
+      <li class="alarm"><span class="name">Conflicts</span>              <span class="glyph alarm">‡</span></li>
+      <li><span class="name">Exhibits</span>                             <span class="glyph set">✓</span></li>
+      <li><span class="name">Drafts</span>                               <span class="glyph">·</span></li>
+      <li><span class="name">Audit</span>                                <span class="glyph set">✓</span></li>
+    </ul>
+    <div style="margin-top: 32px; font-size: 12px; color: var(--graphite-soft); line-height: 18px;">
+      <span class="label">?</span> shortcuts<br/>
+      <span class="label">⌘K</span> jump<br/>
+      <span class="label">j/k</span> row up/down<br/>
+      <span class="label">e</span> edit
+    </div>
+  </aside>
+
+  <!-- center fact sheet -->
+  <main class="sheet">
+    <div class="audit-gutter">
+      <div class="dot" style="top: 60px;"  title="AS · 14:32"></div>
+      <div class="dot" style="top: 110px;" title="AS · 14:30"></div>
+      <div class="dot" style="top: 160px;" title="bot · 12:08"></div>
+      <div class="dot" style="top: 240px;" title="AS · 09:14"></div>
+      <div class="dot" style="top: 320px;" title="AS · 09:12"></div>
+    </div>
+
+    <section class="facts">
+      <header>
+        <span class="smcp">identity</span>
+        <span class="count">06/07 set</span>
+      </header>
+
+      <div class="row">
+        <span class="label-cell">full name</span>
+        <span class="value-cell">Mehmet Kerim Demir</span>
+        <span class="glyph-cell">✓</span>
+        <span class="src-cell">passport.pdf p.1</span>
+      </div>
+      <div class="row">
+        <span class="label-cell">nationality</span>
+        <span class="value-cell">Republic of Türkiye</span>
+        <span class="glyph-cell">✓</span>
+        <span class="src-cell">passport.pdf p.1</span>
+      </div>
+      <div class="row">
+        <span class="label-cell">passport</span>
+        <span class="value-cell mono">••••8472</span>
+        <span class="glyph-cell">✓</span>
+        <span class="src-cell">passport.pdf p.1</span>
+      </div>
+      <div class="row">
+        <span class="label-cell">passport expiry</span>
+        <span class="value-cell mono">2031-04-08</span>
+        <span class="glyph-cell">✓</span>
+        <span class="src-cell">passport.pdf p.1</span>
+      </div>
+      <div class="row alarm">
+        <span class="label-cell">us status</span>
+        <span class="value-cell italic">unset</span>
+        <span class="glyph-cell alarm">‡</span>
+        <span class="src-cell">required for filing</span>
+      </div>
+      <div class="row">
+        <span class="label-cell">dependents</span>
+        <span class="value-cell">spouse + 1 minor</span>
+        <span class="glyph-cell">✓</span>
+        <span class="src-cell">marriage_cert.pdf, birth_cert.pdf</span>
+      </div>
+    </section>
+
+    <div class="dinkus">⁂</div>
+
+    <section class="facts">
+      <header>
+        <span class="smcp">enterprise</span>
+        <span class="count">04/06 set</span>
+      </header>
+
+      <div class="row">
+        <span class="label-cell">legal name</span>
+        <span class="value-cell">Bosphorus Hospitality LLC</span>
+        <span class="glyph-cell">✓</span>
+        <span class="src-cell">articles.pdf p.1</span>
+      </div>
+      <div class="row">
+        <span class="label-cell">ein</span>
+        <span class="value-cell mono">••••7104</span>
+        <span class="glyph-cell">✓</span>
+        <span class="src-cell">EIN_letter_CP575.pdf p.1</span>
+      </div>
+      <div class="row">
+        <span class="label-cell">formed</span>
+        <span class="value-cell mono">2024-08-19 · FL</span>
+        <span class="glyph-cell">✓</span>
+        <span class="src-cell">articles.pdf p.1</span>
+      </div>
+      <div class="row">
+        <span class="label-cell">naics</span>
+        <span class="value-cell mono">722511 <span style="color: var(--graphite-soft); font-family: var(--body); font-size: 12px;">(detect 0.72)</span></span>
+        <span class="glyph-cell">·</span>
+        <span class="src-cell">lease.pdf p.4</span>
+      </div>
+      <div class="row alarm">
+        <span class="label-cell">premises addr</span>
+        <span class="value-cell italic">unset — conflict on file</span>
+        <span class="glyph-cell alarm">‡</span>
+        <span class="src-cell">see register</span>
+      </div>
+      <div class="row">
+        <span class="label-cell">lease term</span>
+        <span class="value-cell">60 mo · expires 2029-08-31</span>
+        <span class="glyph-cell">✓</span>
+        <span class="src-cell">lease.pdf p.2</span>
+      </div>
+    </section>
+
+    <div class="dinkus">⁂</div>
+
+    <section class="facts">
+      <header>
+        <span class="smcp">source-of-funds chain</span>
+        <span class="count" style="margin-right: 12px;"><span class="alarm">−$15,000 unreconciled</span></span>
+      </header>
+
+      <div class="chain">
+        <svg viewBox="0 0 720 200" preserveAspectRatio="none">
+          <!-- origin nodes -->
+          <rect x="0"   y="40"  width="120" height="40"  fill="#0A0A0A"/>
+          <rect x="0"   y="110" width="120" height="60"  fill="#1F1F1F"/>
+          <!-- intermediate -->
+          <rect x="300" y="40"  width="120" height="120" fill="#1F1F1F"/>
+          <!-- destination -->
+          <rect x="600" y="40"  width="120" height="120" fill="#0A0A0A"/>
+
+          <!-- legs -->
+          <path d="M 120 60  C 200 60, 220 80, 300 80"   stroke="#1F1F1F" stroke-width="14" fill="none" />
+          <path d="M 120 140 C 200 140, 220 120, 300 120" stroke="#7A2F1F" stroke-width="20" fill="none" stroke-dasharray="0" />
+          <path d="M 420 100 C 500 100, 520 100, 600 100" stroke="#1F1F1F" stroke-width="22" fill="none" />
+
+          <!-- node labels -->
+          <text x="60"  y="34"  text-anchor="middle" font-family="Courier New" font-size="11" fill="#404040">tapu sale</text>
+          <text x="60"  y="100" text-anchor="middle" font-family="Courier New" font-size="11" fill="#404040">gift letter</text>
+          <text x="360" y="34"  text-anchor="middle" font-family="Courier New" font-size="11" fill="#404040">garanti TR acct</text>
+          <text x="660" y="34"  text-anchor="middle" font-family="Courier New" font-size="11" fill="#404040">wells fargo US</text>
+
+          <!-- amounts -->
+          <text x="60"  y="68"  text-anchor="middle" font-family="Courier New" font-size="13" fill="#FAFAFA" font-weight="700">$280K</text>
+          <text x="60"  y="148" text-anchor="middle" font-family="Courier New" font-size="13" fill="#FAFAFA" font-weight="700">$145K</text>
+          <text x="360" y="108" text-anchor="middle" font-family="Courier New" font-size="13" fill="#FAFAFA" font-weight="700">$425K</text>
+          <text x="660" y="108" text-anchor="middle" font-family="Courier New" font-size="13" fill="#FAFAFA" font-weight="700">$410K</text>
+
+          <!-- delta -->
+          <text x="510" y="80"  text-anchor="middle" font-family="Courier New" font-size="13" fill="#7A2F1F" font-weight="700">−$15,000</text>
+          <text x="510" y="96"  text-anchor="middle" font-family="Courier New" font-size="11" fill="#7A2F1F">unreconciled</text>
+
+          <!-- leg glyphs -->
+          <text x="210" y="84"  text-anchor="middle" font-family="Courier New" font-size="14" fill="#1F1F1F">✓</text>
+          <text x="210" y="124" text-anchor="middle" font-family="Courier New" font-size="14" fill="#7A2F1F">‡</text>
+          <text x="510" y="124" text-anchor="middle" font-family="Courier New" font-size="14" fill="#1F1F1F">✓</text>
+        </svg>
+        <div class="summary">
+          <span>Σ chain $425K committed</span>
+          <span>chain depth 3</span>
+          <span>2 legs corroborated</span>
+          <span class="alarm">1 leg discrepancy</span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- right citation rail -->
+  <aside class="right">
+    <span class="smcp">citation</span>
+    <div class="pane">
+      <div class="field-name">enterprise.premises_address</div>
+      <div class="field-value italic" style="color: var(--graphite-soft);">unset</div>
+
+      <div style="margin-bottom: 10px;">
+        <span class="label" style="color: var(--accent-alarm); font-weight: 700;">‡ DISPOSITIVE</span>
+        <span class="label" style="color: var(--graphite-soft); margin-left: 6px;">address_mismatch</span>
+      </div>
+      <div class="body" style="margin-bottom: 14px;">
+        Articles of Organization list the registered office at
+        <span class="mono">3401 NE 1st Ave Suite 305, Miami, FL 33137</span>;
+        the executed lease lists the premises at
+        <span class="mono">3145 NE 7th Ave, Miami, FL 33137</span>.
+      </div>
+
+      <div class="quote">"The Company's principal office shall be located at 3401 NE 1st Ave, Suite 305, Miami, FL 33137."</div>
+      <div class="label" style="color: var(--graphite-soft); margin-bottom: 8px;">articles_of_organization_FL.pdf p.1</div>
+
+      <div class="quote">"Premises: 3145 NE 7th Ave, Miami, FL 33137 (Wynwood)."</div>
+      <div class="label" style="color: var(--graphite-soft);">commercial_lease_signed.pdf p.2</div>
+
+      <div class="audit">
+        <div>flagged · bot · 12:08 · sev 5</div>
+        <div>last touched · AS · 14:32</div>
+        <div>action · awaiting attorney decision</div>
+      </div>
+
+      <div style="margin-top: 16px; display: flex; gap: 8px;">
+        <button style="font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; padding: 6px 12px; background: var(--ink); color: var(--paper); border: 1px solid var(--ink); cursor: pointer;">resolve to lease addr</button>
+        <button style="font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; padding: 6px 12px; background: var(--paper); color: var(--graphite); border: 1px solid var(--rule-strong); cursor: pointer;">amend articles</button>
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+</body>
+</html>

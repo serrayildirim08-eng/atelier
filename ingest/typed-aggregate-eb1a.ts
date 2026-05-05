@@ -34,10 +34,24 @@ import type { PassportFactsRich } from './extractors/passport.schema';
 import type { ServiceRecordFacts } from './extractors/service-record.schema';
 import type { RecommendationLetterFacts } from './extractors/recommendation-letter.schema';
 import type { CredentialFacts } from './extractors/credential.schema';
+import type { I94Facts } from './extractors/i94.schema';
+import type { VisaStampFacts } from './extractors/visa-stamp.schema';
 import {
   classifyFieldOfEndeavor,
   type FieldOfEndeavorInput,
 } from './extractors/field-of-endeavor';
+import {
+  synthesizeCaseTheory,
+  type CaseTheoryInput,
+} from './extractors/case-theory';
+import type { CaseTheory } from './extractors/case-theory.schema';
+import {
+  collectPassportCandidates,
+  collectMarriageBindings,
+  collectBirthBindings,
+  collectNufusBindings,
+} from './typed-aggregate';
+import { inferDependentsFromFamilyDocs } from '@/lib/e2/dependent-inference';
 
 /* ---------------------------------------------------------------------- */
 /* Field<T> helpers                                                        */
@@ -112,6 +126,22 @@ function firstPassport(memory: TypedMemory): { p: PassportFactsRich; filename: s
 function firstCv(memory: TypedMemory): { cv: CvFacts; filename: string } | null {
   for (const entry of iterMemory(memory)) {
     if (entry.cv) return { cv: entry.cv, filename: entry.filename };
+  }
+  return null;
+}
+
+function firstI94(memory: TypedMemory): { i: I94Facts; filename: string } | null {
+  for (const entry of iterMemory(memory)) {
+    if (entry.i94) return { i: entry.i94, filename: entry.filename };
+  }
+  return null;
+}
+
+function firstVisaStamp(
+  memory: TypedMemory,
+): { v: VisaStampFacts; filename: string } | null {
+  for (const entry of iterMemory(memory)) {
+    if (entry.visaStamp) return { v: entry.visaStamp, filename: entry.filename };
   }
   return null;
 }
@@ -200,9 +230,14 @@ function inferTenureType(title: string | null, employer: string | null): TenureT
 /* Builders                                                                */
 /* ---------------------------------------------------------------------- */
 
-function buildBeneficiary(memory: TypedMemory): EB1AFacts['beneficiary'] {
+function buildBeneficiary(
+  memory: TypedMemory,
+  fieldLabel: FieldShape<string> | null,
+): EB1AFacts['beneficiary'] {
   const passport = firstPassport(memory);
   const cv = firstCv(memory);
+  const i94 = firstI94(memory);
+  const visaStamp = firstVisaStamp(memory);
 
   return {
     full_name:
@@ -212,12 +247,71 @@ function buildBeneficiary(memory: TypedMemory): EB1AFacts['beneficiary'] {
     country_of_nationality: passthrough(passport?.p.nationality),
     passport_number: passthrough(passport?.p.passport_number),
     passport_expiry: passthrough(passport?.p.date_of_expiration),
-    current_us_status: nullField<string>(),
-    highest_degree: nullField<string>(),
-    field_of_endeavor: nullField<string>(),
+    current_us_status: deriveCurrentUsStatus(i94, visaStamp),
+    highest_degree: deriveHighestDegree(cv),
+    field_of_endeavor: fieldLabel ?? nullField<string>(),
     current_position: passthrough(cv?.cv.current_position_title),
     current_employer: passthrough(cv?.cv.current_employer),
   };
+}
+
+/**
+ * Current US status priority: I-94 class_of_admission (most authoritative,
+ * carries D/S marker) → visa-stamp/I-797 classification (fallback).
+ */
+function deriveCurrentUsStatus(
+  i94: { i: I94Facts; filename: string } | null,
+  visaStamp: { v: VisaStampFacts; filename: string } | null,
+): FieldShape<string> {
+  if (i94?.i.class_of_admission?.value) {
+    const dsMarker = i94.i.duration_of_status_marker?.value === true ? ' (D/S)' : '';
+    const base = passthrough(i94.i.class_of_admission);
+    if (dsMarker) {
+      return { ...base, value: `${base.value}${dsMarker}` };
+    }
+    return base;
+  }
+  if (visaStamp?.v.classification?.value) {
+    return passthrough(visaStamp.v.classification);
+  }
+  return nullField<string>();
+}
+
+/**
+ * Highest degree priority: PhD/Doctorate > MD/JD > Master > Bachelor.
+ * Falls back to first entry if priority can't be parsed.
+ */
+function deriveHighestDegree(
+  cv: { cv: CvFacts; filename: string } | null,
+): FieldShape<string> {
+  if (!cv?.cv.education?.length) return nullField<string>();
+  const ranks: Array<[RegExp, number]> = [
+    [/ph\.?d|doctor(ate)?|d\.?phil/i, 4],
+    [/\bm\.?d\b|\bj\.?d\b|\bsj\.?d\b|\bdds\b|\bdvm\b/i, 3],
+    [/master|m\.?[sa]\.?|mba|llm|m\.?eng|m\.?phil/i, 2],
+    [/bachelor|b\.?[sa]\.?|b\.?eng|llb/i, 1],
+  ];
+  let best: { degree: FieldShape<string>; rank: number } | null = null;
+  for (const e of cv.cv.education) {
+    const value = e.degree?.value;
+    if (!value) continue;
+    let rank = 0;
+    for (const [re, r] of ranks) {
+      if (re.test(value)) {
+        rank = r;
+        break;
+      }
+    }
+    if (!best || rank > best.rank) {
+      best = { degree: passthrough(e.degree), rank };
+    }
+  }
+  if (best) return best.degree;
+  // No regex hit — return first non-null degree as fallback.
+  for (const e of cv.cv.education) {
+    if (e.degree?.value) return passthrough(e.degree);
+  }
+  return nullField<string>();
 }
 
 function passsportName(
@@ -451,6 +545,216 @@ function deriveIsCurrent(
   };
 }
 
+/**
+ * EB-1A derivatives — spouse + unmarried under-21 children. Reuses the
+ * deterministic E-2 dependent-inference ladder (marriage → spouse,
+ * birth → child, passport binding by name match). The principal here is
+ * the EB-1A beneficiary; passports not bound to any family doc surface
+ * as conflict_register entries (already handled inside the inference
+ * helper — left out of this aggregator until conflict_register is wired).
+ */
+function buildDerivatives(
+  memory: TypedMemory,
+  beneficiary: EB1AFacts['beneficiary'],
+): EB1AFacts['derivatives'] {
+  const principalName = beneficiary.full_name?.value ?? null;
+  if (!principalName) return [];
+
+  const passports = collectPassportCandidates(memory);
+  let principalPassportFilename: string | null = null;
+  for (const p of passports) {
+    if (p.full_name && p.full_name.trim() === principalName.trim()) {
+      principalPassportFilename = p.filename;
+      break;
+    }
+  }
+
+  const result = inferDependentsFromFamilyDocs({
+    passports,
+    principal_name: principalName,
+    principal_nationality: beneficiary.country_of_nationality?.value ?? null,
+    principal_passport_filename: principalPassportFilename,
+    marriages: collectMarriageBindings(memory),
+    births: collectBirthBindings(memory),
+    nufus: collectNufusBindings(memory),
+  });
+
+  return result.dependents as EB1AFacts['derivatives'];
+}
+
+/**
+ * EB-1A visa history timeline. Walks every passport, visa-stamp / I-797,
+ * and I-94 in TypedMemory and emits one row per discrete event. Sorted
+ * ascending by ISO date string; rows missing a date are dropped (cover
+ * letter cannot reason about undated events). Powers the "prior
+ * immigration history" paragraph and the sustained-presence framing.
+ */
+function buildVisaHistory(memory: TypedMemory): EB1AFacts['visa_history'] {
+  const rows: EB1AFacts['visa_history'] = [];
+
+  for (const entry of iterMemory(memory)) {
+    if (entry.passport?.date_of_issue?.value) {
+      rows.push({
+        date: passthrough(entry.passport.date_of_issue),
+        event_type: lift('passport_issued', entry.filename, 1),
+        classification: nullField<string>(),
+        port_or_consulate: passthrough(entry.passport.country_of_issue),
+        source_doc: lift(entry.filename, entry.filename, 1),
+      });
+    }
+
+    if (entry.visaStamp) {
+      const v = entry.visaStamp;
+      if (v.validity_start_date?.value) {
+        rows.push({
+          date: passthrough(v.validity_start_date),
+          event_type: lift(
+            v.i797_receipt_number?.value ? 'status_grant' : 'visa_issued',
+            entry.filename,
+            1,
+          ),
+          classification: passthrough(v.classification),
+          port_or_consulate: passthrough(v.issuing_consulate),
+          source_doc: lift(entry.filename, entry.filename, 1),
+        });
+      }
+      if (v.validity_end_date?.value) {
+        rows.push({
+          date: passthrough(v.validity_end_date),
+          event_type: lift('status_expiration', entry.filename, 1),
+          classification: passthrough(v.classification),
+          port_or_consulate: passthrough(v.issuing_consulate),
+          source_doc: lift(entry.filename, entry.filename, 1),
+        });
+      }
+      for (const adm of v.prior_admissions ?? []) {
+        if (!adm.admission_date?.value) continue;
+        rows.push({
+          date: passthrough(adm.admission_date),
+          event_type: lift('admission', entry.filename, 0.9),
+          classification: passthrough(adm.classification),
+          port_or_consulate: passthrough(adm.port_of_entry),
+          source_doc: lift(entry.filename, entry.filename, 1),
+        });
+      }
+    }
+
+    if (entry.i94) {
+      const i = entry.i94;
+      if (i.admission_date?.value) {
+        rows.push({
+          date: passthrough(i.admission_date),
+          event_type: lift('admission', entry.filename, 1),
+          classification: passthrough(i.class_of_admission),
+          port_or_consulate: passthrough(i.port_of_entry),
+          source_doc: lift(entry.filename, entry.filename, 1),
+        });
+      }
+      if (i.admit_until_date?.value) {
+        rows.push({
+          date: passthrough(i.admit_until_date),
+          event_type: lift('status_expiration', entry.filename, 1),
+          classification: passthrough(i.class_of_admission),
+          port_or_consulate: passthrough(i.port_of_entry),
+          source_doc: lift(entry.filename, entry.filename, 1),
+        });
+      }
+    }
+  }
+
+  return rows
+    .filter((r) => typeof r.date.value === 'string' && r.date.value.length > 0)
+    .sort((a, b) => (a.date.value! < b.date.value! ? -1 : a.date.value! > b.date.value! ? 1 : 0));
+}
+
+function caseTheoryStub(): EB1AFacts['case_theory'] {
+  return {
+    one_line: nullField<string>(),
+    specialized_knowledge_arc: nullField<string>(),
+    evidence_anchors: [],
+    confidence: {
+      value: 'LOW',
+      source_page: null,
+      source_quote: '[synthesizer not yet run]',
+      confidence: 0,
+    },
+    gaps: nullField<string>(),
+    manual_override_used: {
+      value: false,
+      source_page: null,
+      source_quote: null,
+      confidence: 1,
+    },
+  };
+}
+
+function buildCaseTheoryInput(
+  memory: TypedMemory,
+  fieldClassification: EB1AFacts['field_classification'],
+): CaseTheoryInput {
+  const cv = firstCv(memory);
+  const recs = allRecommendationLetters(memory);
+
+  const fullName =
+    cv?.cv.full_name_ascii.value ?? cv?.cv.full_name_native.value ?? null;
+
+  return {
+    field_of_endeavor: {
+      label: fieldClassification.label.value,
+      peer_set_description: fieldClassification.peer_set_description.value,
+      specificity: fieldClassification.specificity.value,
+      confidence: fieldClassification.confidence.value,
+    },
+    cv: cv
+      ? {
+          full_name: fullName,
+          current_title: cv.cv.current_position_title.value,
+          current_employer: cv.cv.current_employer.value,
+          prior_titles:
+            cv.cv.roles
+              ?.map((r) => r.position_title.value)
+              .filter((v): v is string => v !== null)
+              .slice(0, 3) ?? [],
+          role_descriptions:
+            cv.cv.roles
+              ?.map((r) => r.key_responsibilities_summary.value)
+              .filter((v): v is string => v !== null)
+              .slice(0, 5) ?? [],
+          source_id: cv.filename,
+        }
+      : undefined,
+    recommendation_letter_excerpts: recs.length
+      ? recs
+          .map(({ r, filename }) => ({
+            excerpt: r.specialized_expertise_described_verbatim.value,
+            source_id: filename,
+          }))
+          .filter(
+            (e): e is { excerpt: string; source_id: string } => e.excerpt !== null,
+          )
+      : undefined,
+  };
+}
+
+function liftCaseTheory(theory: CaseTheory): EB1AFacts['case_theory'] {
+  return {
+    one_line: lift(theory.one_line, '[synthesizer]', 0.9),
+    specialized_knowledge_arc: lift(theory.specialized_knowledge_arc, '[synthesizer]', 0.9),
+    evidence_anchors: theory.evidence_anchors.map((a) => ({
+      source_id: lift(a.source_id, '[synthesizer]', 0.9),
+      why_it_matters: lift(a.why_it_matters, '[synthesizer]', 0.9),
+    })),
+    confidence: lift(theory.confidence, '[synthesizer]', 1),
+    gaps: lift(theory.gaps, '[synthesizer]', 0.9),
+    manual_override_used: {
+      value: false,
+      source_page: null,
+      source_quote: null,
+      confidence: 1,
+    },
+  };
+}
+
 function fieldClassificationStub(): EB1AFacts['field_classification'] {
   return {
     label: nullField<string>(),
@@ -529,15 +833,20 @@ export interface EB1AAggregateOptions {
    * the deterministic mapping shape.
    */
   classifyField?: boolean;
+  /**
+   * When true (default), runs the Haiku 4.5 case-theory synthesizer
+   * after the field-of-endeavor classifier. Skipped automatically when
+   * classifyField=false (synthesizer depends on the classifier output).
+   */
+  synthesizeCaseTheory?: boolean;
 }
 
 export async function aggregateTypedMemoryToEb1a(
   memory: TypedMemory,
   options: EB1AAggregateOptions = {},
 ): Promise<EB1AFacts> {
-  const { classifyField = true } = options;
+  const { classifyField = true, synthesizeCaseTheory: doSynthesize = true } = options;
 
-  const beneficiary = buildBeneficiary(memory);
   const education_history = buildEducationHistory(memory);
   const tenure_table = buildTenureTable(memory);
 
@@ -566,12 +875,29 @@ export async function aggregateTypedMemoryToEb1a(
     }
   }
 
+  const beneficiary = buildBeneficiary(memory, field_classification.label);
+
+  const derivatives = buildDerivatives(memory, beneficiary);
+  const visa_history = buildVisaHistory(memory);
+
+  let case_theory = caseTheoryStub();
+  if (classifyField && doSynthesize) {
+    const ctInput = buildCaseTheoryInput(memory, field_classification);
+    if (ctInput.cv !== undefined) {
+      const synthesized = await synthesizeCaseTheory(ctInput);
+      case_theory = liftCaseTheory(synthesized);
+    }
+  }
+
   const facts: EB1AFacts = {
     beneficiary,
     filing_metadata: defaultFilingMetadata(),
     education_history,
     tenure_table,
     field_classification,
+    case_theory,
+    derivatives,
+    visa_history,
     claimed_criteria: [],
     expert_letters: [],
     kazarian_step_two: {

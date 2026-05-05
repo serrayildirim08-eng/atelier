@@ -20,12 +20,18 @@ import type { E2CaseSubtype } from '@/ingest/extractors/subtype-detect.schema';
 import { detectCaseType } from '@/ingest/detect';
 import type { CaseType } from '@/ingest/schema';
 import { extractPdfText } from '@/ingest/pdf';
+import { classifyEb1aVariant } from '@/ingest/extractors/eb1a-variant-classify';
 import { getMatterOverride } from '@/lib/matter-overrides';
 
 export const runtime = 'nodejs';
 export const maxDuration = 3600;
 
-const INGESTABLE_EXTENSIONS = ['.pdf', '.docx', '.jpg', '.jpeg', '.png', '.webp', '.gif'];
+const INGESTABLE_EXTENSIONS = [
+  '.pdf', '.docx', '.eml', '.msg', '.txt',
+  '.html', '.htm', '.mhtml', '.mht', '.webarchive',
+  '.xlsx', '.xls', '.ods', '.csv',
+  '.jpg', '.jpeg', '.png', '.webp', '.gif',
+];
 
 async function walkIngestableFiles(root: string): Promise<string[]> {
   const out: string[] = [];
@@ -300,6 +306,11 @@ export async function POST(request: Request): Promise<Response> {
             filename: item.filename,
             buffer,
             forcedDocType: docOverride?.doc_type_override ?? undefined,
+            // When the user forced EB1A via UI, run the deterministic
+            // variant classifier inline. The detection-driven path runs
+            // it post-detection below since `caseTypePromise` resolves
+            // after Phase-1 has already started.
+            caseTypeHint: caseTypeOverride === 'EB1A' ? 'EB1A' : undefined,
           });
         },
         (i, r) => {
@@ -358,6 +369,12 @@ export async function POST(request: Request): Promise<Response> {
               incentiveDocument: r.incentiveDocument ?? null,
               bankStatement: r.bankStatement ?? null,
             },
+            // EB-1A 41-variant classification (only populated when the
+            // user forced caseTypeOverride === 'EB1A' OR the detection-
+            // driven post-pass below has run). The frontend EB-1A
+            // criteria UI consumes this for per-criterion document
+            // counts and (h)(3) routing.
+            eb1aVariant: r.eb1aVariant ?? null,
           });
         },
       );
@@ -478,6 +495,50 @@ export async function POST(request: Request): Promise<Response> {
             },
           } satisfies IngestSuccess;
         } else if (detected.case_type === 'EB1A') {
+          // EB-1A Tier-0 variant classifier: 41-variant manifest at
+          // ingest/extractors/eb1a-variant-manifest.ts. Pure regex/keyword
+          // pass (zero LLM cost), runs over filename + first-page text per
+          // PDF and attaches the result to the in-memory PerPdfResult so
+          // the criterion gates downstream + the frontend criteria UI can
+          // route documents into (h)(3)(i)–(x) buckets. Best-effort —
+          // first-page parse failures fall through to filename-only.
+          // pdfPaths preserves insertion order; build a relative-path →
+          // absolute-path lookup (filtered `usable` array doesn't track
+          // back to `pdfPaths` by index after the !error filter).
+          const filenameToAbs = new Map(
+            pdfPaths.map((p) => [path.relative(rootPath, p), p]),
+          );
+          await Promise.all(
+            usable.map(async (r) => {
+              if (r.eb1aVariant) return; // already attached by override path
+              const absPath = filenameToAbs.get(r.filename);
+              if (!absPath) return;
+              let firstPageText = '';
+              const lower = r.filename.toLowerCase();
+              if (lower.endsWith('.pdf')) {
+                try {
+                  const buf = await fs.readFile(absPath);
+                  const parsed = await extractPdfText(buf);
+                  firstPageText = parsed.text.slice(0, 4000);
+                } catch {
+                  /* fall through to filename-only */
+                }
+              }
+              if (
+                !firstPageText &&
+                r.facts &&
+                'one_line_summary' in r.facts &&
+                r.facts.one_line_summary?.value
+              ) {
+                firstPageText = r.facts.one_line_summary.value;
+              }
+              r.eb1aVariant = classifyEb1aVariant({
+                filename: r.filename,
+                first_page_text: firstPageText,
+              });
+            }),
+          );
+
           const facts = await aggregateTypedMemoryToEb1a(memory);
           result = {
             filename: matterName,

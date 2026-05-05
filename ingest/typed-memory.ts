@@ -807,6 +807,17 @@ export interface PerPdfResult {
    * the matter-overrides store has no manual display_name set.
    */
   bankStatement?: BankStatementRichFacts;
+  /**
+   * EB-1A variant classification. Populated by the per-PDF pipeline ONLY
+   * when the case-type is EB1A (case_theory.visa_class === 'EB1A'). Output
+   * of `ingest/extractors/eb1a-variant-classify.ts` against the 41-variant
+   * manifest. The criterion gates downstream consume this for routing
+   * (which (h)(3) bucket the document evidences); the frontend criteria UI
+   * tabulates document counts per criterion off this slot.
+   *
+   * Always Tier-0 (deterministic regex/keyword) — no LLM cost.
+   */
+  eb1aVariant?: import('./extractors/eb1a-variant-classify').Eb1aClassification;
   error?: { code: string; message: string };
 }
 

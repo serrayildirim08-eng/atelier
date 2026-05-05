@@ -4092,7 +4092,7 @@ export async function enrichInvestorFromOwnershipChainAsync(
 const NUFUS_FILENAME_REGEX =
   /(nufus.*kayit.*orne|nufus.*ornek|aile.*kayit|vukuatli.*nufus|nufus.*muduru)/i;
 
-function collectPassportCandidates(memory: TypedMemory): PassportCandidate[] {
+export function collectPassportCandidates(memory: TypedMemory): PassportCandidate[] {
   const out: PassportCandidate[] = [];
   for (const entry of iterMemoryEntries(memory)) {
     const facts = entry.facts;
@@ -4112,7 +4112,7 @@ function collectPassportCandidates(memory: TypedMemory): PassportCandidate[] {
   return out;
 }
 
-function collectMarriageBindings(memory: TypedMemory): MarriageBinding[] {
+export function collectMarriageBindings(memory: TypedMemory): MarriageBinding[] {
   const out: MarriageBinding[] = [];
   const seen = new Set<string>();
   for (const entry of iterMemoryEntries(memory)) {
@@ -4142,7 +4142,7 @@ function collectMarriageBindings(memory: TypedMemory): MarriageBinding[] {
   return out;
 }
 
-function collectBirthBindings(memory: TypedMemory): BirthBinding[] {
+export function collectBirthBindings(memory: TypedMemory): BirthBinding[] {
   const out: BirthBinding[] = [];
   const seen = new Set<string>();
   for (const entry of iterMemoryEntries(memory)) {
@@ -4173,7 +4173,7 @@ function collectBirthBindings(memory: TypedMemory): BirthBinding[] {
   return out;
 }
 
-function collectNufusBindings(memory: TypedMemory): NufusBinding[] {
+export function collectNufusBindings(memory: TypedMemory): NufusBinding[] {
   const out: NufusBinding[] = [];
   for (const entry of iterMemoryEntries(memory)) {
     const facts = entry.facts;

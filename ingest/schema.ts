@@ -551,12 +551,75 @@ const EB1AFieldClassificationSchema = z.object({
   manual_override_used: Field(z.boolean()),
 });
 
+/**
+ * Case-theory synthesis (Phase-0.8). Produced by the case-theory
+ * synthesizer in ingest/extractors/case-theory.ts. Anchors every
+ * downstream LLM gate (criteria (h)(3)(i)–(x), Kazarian step 2,
+ * expert-letter scaffolding, cover-letter draft).
+ */
+const EB1ACaseTheorySchema = z.object({
+  one_line: Field(z.string()),
+  specialized_knowledge_arc: Field(z.string()),
+  evidence_anchors: z.array(
+    z.object({
+      source_id: Field(z.string()),
+      why_it_matters: Field(z.string()),
+    }),
+  ),
+  confidence: Field(z.enum(['HIGH', 'MED', 'LOW'])),
+  gaps: Field(z.string()),
+  manual_override_used: Field(z.boolean()),
+});
+
+/**
+ * Derivative dependents — spouse + unmarried under-21 children.
+ * EB-1A derivatives follow INA §203(d); the binding shape is identical
+ * to the E-2 dependent slot (E2DependentSchema), so the inference
+ * helper in `lib/e2/dependent-inference.ts` is reused.
+ */
+const EB1ADerivativeSchema = E2DependentSchema;
+export type EB1ADerivative = z.infer<typeof EB1ADerivativeSchema>;
+
+/**
+ * Beneficiary visa history timeline. One row per discrete event:
+ *   - passport_issued  (passport.date_of_issue)
+ *   - visa_issued      (visa-stamp validity_start_date)
+ *   - admission        (i94 admission_date OR visa-stamp prior_admissions)
+ *   - status_grant     (I-797 approval — visa-stamp i797_receipt_number)
+ *   - status_expiration (visa-stamp validity_end_date OR i94 admit_until)
+ *
+ * Sorted ascending by date. Powers the cover-letter "prior immigration
+ * history" paragraph and the extraordinary-ability "sustained presence
+ * in the field" framing.
+ */
+const VisaHistoryEventTypeEnum = z.enum([
+  'passport_issued',
+  'visa_issued',
+  'admission',
+  'status_grant',
+  'status_expiration',
+]);
+
+const VisaHistoryEntrySchema = z.object({
+  date: Field(z.string()),
+  event_type: Field(VisaHistoryEventTypeEnum),
+  classification: Field(z.string()),
+  port_or_consulate: Field(z.string()),
+  source_doc: Field(z.string()),
+});
+
+export type VisaHistoryEntry = z.infer<typeof VisaHistoryEntrySchema>;
+export type VisaHistoryEventType = z.infer<typeof VisaHistoryEventTypeEnum>;
+
 export const EB1AFactsSchema = z.object({
   beneficiary: BeneficiarySchema,
   filing_metadata: EB1AFilingMetadataSchema,
   education_history: z.array(EB1AEducationEntrySchema),
   tenure_table: z.array(EB1ATenureEntrySchema),
   field_classification: EB1AFieldClassificationSchema,
+  case_theory: EB1ACaseTheorySchema,
+  derivatives: z.array(EB1ADerivativeSchema),
+  visa_history: z.array(VisaHistoryEntrySchema),
   claimed_criteria: z.array(ClaimedCriterionSchema),
   expert_letters: z.array(ExpertLetterSchema),
   kazarian_step_two: KazarianStepTwoSchema,
