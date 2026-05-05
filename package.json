@@ -11,6 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "rag:build": "tsx scripts/build-rag-index.ts",
+    "occupations:build": "tsx scripts/build-occupations.ts",
+    "occupations:enrich": "tsx --env-file=.env.local scripts/build-occupations.ts --enrich",
     "electron": "electron .",
     "electron:dev": "concurrently -k -n NEXT,ELECTRON -c blue,magenta \"next dev\" \"wait-on http://localhost:3000 && electron .\"",
     "electron:build": "next build && electron-builder",

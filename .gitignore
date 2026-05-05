@@ -86,3 +86,7 @@ db/rag-index.json
 
 # electron build output
 dist-electron/
+
+# Occupations build sources — regenerate via scripts/build-occupations.ts
+# fetch step (BLS xlsx via Wayback Machine; ONET zip via onetcenter.org).
+data/occupations/_raw/

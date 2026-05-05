@@ -1,0 +1,2784 @@
+[
+  {
+    "field_label": "software engineering",
+    "domain": "tech",
+    "aliases": [
+      "Application Developer",
+      "Application Integration Engineer",
+      "Developer"
+    ],
+    "typical_specializations": [
+      "systems design",
+      "performance optimization",
+      "architecture patterns"
+    ],
+    "representative_soc_codes": [
+      "15-1252"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "AI engineering",
+    "domain": "tech",
+    "aliases": [
+      "Application Developer",
+      "Application Integration Engineer",
+      "Developer"
+    ],
+    "typical_specializations": [
+      "model deployment",
+      "AI infrastructure",
+      "prompt engineering"
+    ],
+    "representative_soc_codes": [
+      "15-1252",
+      "15-1221"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1252, 15-1221); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "machine learning engineering",
+    "domain": "tech",
+    "aliases": [
+      "Application Developer",
+      "Application Integration Engineer",
+      "Developer"
+    ],
+    "typical_specializations": [
+      "model training",
+      "feature engineering",
+      "MLOps"
+    ],
+    "representative_soc_codes": [
+      "15-1252",
+      "15-1221"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1252, 15-1221); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "data science",
+    "domain": "tech",
+    "aliases": [
+      "Business Intelligence Analyst",
+      "Competitive Intelligence Analyst",
+      "Data Analyst"
+    ],
+    "typical_specializations": [
+      "Business Intelligence Analysts",
+      "Clinical Data Managers"
+    ],
+    "representative_soc_codes": [
+      "15-2051"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "data engineering",
+    "domain": "tech",
+    "aliases": [
+      "Application Developer",
+      "Application Integration Engineer",
+      "Developer"
+    ],
+    "typical_specializations": [
+      "ETL systems",
+      "data warehousing",
+      "stream processing"
+    ],
+    "representative_soc_codes": [
+      "15-1252",
+      "15-1245"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1252, 15-1245); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "DevOps engineering",
+    "domain": "tech",
+    "aliases": [
+      "Information Analyst",
+      "Information Technology Specialist (IT Specialist)",
+      "LAN Specialist (Local Area Network Specialist)"
+    ],
+    "typical_specializations": [
+      "CI/CD pipelines",
+      "cloud infrastructure",
+      "containerization"
+    ],
+    "representative_soc_codes": [
+      "15-1244",
+      "15-1252"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1244, 15-1252); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "site reliability engineering",
+    "domain": "tech",
+    "aliases": [
+      "Information Analyst",
+      "Information Technology Specialist (IT Specialist)",
+      "LAN Specialist (Local Area Network Specialist)"
+    ],
+    "typical_specializations": [
+      "system reliability",
+      "incident response",
+      "performance tuning"
+    ],
+    "representative_soc_codes": [
+      "15-1244",
+      "15-1252"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1244, 15-1252); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "cybersecurity engineering",
+    "domain": "tech",
+    "aliases": [
+      "Information Security Officer",
+      "Information Security Specialist",
+      "Information Systems Security Analyst"
+    ],
+    "typical_specializations": [
+      "vulnerability assessment",
+      "threat modeling",
+      "security architecture"
+    ],
+    "representative_soc_codes": [
+      "15-1212"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "penetration testing",
+    "domain": "tech",
+    "aliases": [
+      "Corporate Webmaster",
+      "Web Administrator",
+      "Web Content Coordinator"
+    ],
+    "typical_specializations": [
+      "Web Administrators",
+      "Geographic Information Systems Technologists and Technicians",
+      "Document Management Specialists",
+      "Penetration Testers"
+    ],
+    "representative_soc_codes": [
+      "15-1299.04",
+      "15-1212"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1299.04, 15-1212); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "cloud architecture",
+    "domain": "tech",
+    "aliases": [
+      "Design Engineer",
+      "Network Analyst",
+      "Network and Security Engineer"
+    ],
+    "typical_specializations": [
+      "Telecommunications Engineering Specialists",
+      "Web Administrators",
+      "Geographic Information Systems Technologists and Technicians",
+      "Document Management Specialists"
+    ],
+    "representative_soc_codes": [
+      "15-1241",
+      "15-1299.08"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1241, 15-1299.08); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "frontend engineering",
+    "domain": "tech",
+    "aliases": [
+      "Application Developer",
+      "Application Integration Engineer",
+      "Developer"
+    ],
+    "typical_specializations": [
+      "component libraries",
+      "performance optimization",
+      "accessibility"
+    ],
+    "representative_soc_codes": [
+      "15-1252"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "backend engineering",
+    "domain": "tech",
+    "aliases": [
+      "Application Developer",
+      "Application Integration Engineer",
+      "Developer"
+    ],
+    "typical_specializations": [
+      "API design",
+      "database optimization",
+      "scalability"
+    ],
+    "representative_soc_codes": [
+      "15-1252"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "full-stack engineering",
+    "domain": "tech",
+    "aliases": [
+      "Application Developer",
+      "Application Integration Engineer",
+      "Developer"
+    ],
+    "typical_specializations": [
+      "end-to-end architecture",
+      "cross-layer optimization",
+      "system integration"
+    ],
+    "representative_soc_codes": [
+      "15-1252"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "mobile application development",
+    "domain": "tech",
+    "aliases": [
+      "Application Developer",
+      "Application Integration Engineer",
+      "Developer"
+    ],
+    "typical_specializations": [
+      "native development",
+      "cross-platform frameworks",
+      "mobile UX"
+    ],
+    "representative_soc_codes": [
+      "15-1252"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "embedded systems engineering",
+    "domain": "tech",
+    "aliases": [
+      "Design Engineer",
+      "Field Service Engineer",
+      "Hardware Design Engineer"
+    ],
+    "typical_specializations": [
+      "real-time systems",
+      "hardware integration",
+      "low-level optimization"
+    ],
+    "representative_soc_codes": [
+      "17-2061",
+      "15-1252"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (17-2061, 15-1252); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "blockchain engineering",
+    "domain": "tech",
+    "aliases": [
+      "Corporate Webmaster",
+      "Web Administrator",
+      "Web Content Coordinator"
+    ],
+    "typical_specializations": [
+      "Web Administrators",
+      "Geographic Information Systems Technologists and Technicians",
+      "Document Management Specialists",
+      "Penetration Testers"
+    ],
+    "representative_soc_codes": [
+      "15-1299.07",
+      "15-1252"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1299.07, 15-1252); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "robotics software engineering",
+    "domain": "tech",
+    "aliases": [
+      "Energy Efficiency Engineer",
+      "Energy Engineer",
+      "Industrial Energy Engineer"
+    ],
+    "typical_specializations": [
+      "Energy Engineers, Except Wind and Solar",
+      "Mechatronics Engineers",
+      "Microsystems Engineers",
+      "Photonics Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2199",
+      "15-1252"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (17-2199, 15-1252); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "computer vision engineering",
+    "domain": "tech",
+    "aliases": [
+      "Computer Scientist",
+      "Computer Specialist",
+      "Control System Computer Scientist"
+    ],
+    "typical_specializations": [
+      "object detection",
+      "image segmentation",
+      "3D reconstruction"
+    ],
+    "representative_soc_codes": [
+      "15-1221",
+      "15-1252"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1221, 15-1252); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "natural language processing engineering",
+    "domain": "tech",
+    "aliases": [
+      "Computer Scientist",
+      "Computer Specialist",
+      "Control System Computer Scientist"
+    ],
+    "typical_specializations": [
+      "text analysis",
+      "language models",
+      "semantic understanding"
+    ],
+    "representative_soc_codes": [
+      "15-1221",
+      "15-1252"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1221, 15-1252); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "game development",
+    "domain": "tech",
+    "aliases": [
+      "Technology Applications Engineer",
+      "Web Architect",
+      "Web Design Specialist"
+    ],
+    "typical_specializations": [
+      "graphics rendering",
+      "physics simulation",
+      "gameplay mechanics"
+    ],
+    "representative_soc_codes": [
+      "15-1255"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "UI/UX design",
+    "domain": "tech",
+    "aliases": [
+      "Artist",
+      "Brand Designer",
+      "Designer"
+    ],
+    "typical_specializations": [
+      "user research",
+      "prototyping",
+      "design systems"
+    ],
+    "representative_soc_codes": [
+      "27-1024",
+      "15-1255"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (27-1024, 15-1255); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "technical product management",
+    "domain": "tech",
+    "aliases": [
+      "Application Development Director",
+      "Computing Services Director",
+      "Data Processing Manager"
+    ],
+    "typical_specializations": [
+      "Web Administrators",
+      "Geographic Information Systems Technologists and Technicians",
+      "Document Management Specialists",
+      "Penetration Testers"
+    ],
+    "representative_soc_codes": [
+      "11-3021",
+      "15-1299.09"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (11-3021, 15-1299.09); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "technical program management",
+    "domain": "tech",
+    "aliases": [
+      "Corporate Webmaster",
+      "Web Administrator",
+      "Web Content Coordinator"
+    ],
+    "typical_specializations": [
+      "Web Administrators",
+      "Geographic Information Systems Technologists and Technicians",
+      "Document Management Specialists",
+      "Penetration Testers"
+    ],
+    "representative_soc_codes": [
+      "15-1299.09",
+      "11-3021"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1299.09, 11-3021); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "database administration",
+    "domain": "tech",
+    "aliases": [
+      "DBA",
+      "database engineer"
+    ],
+    "typical_specializations": [
+      "query optimization",
+      "replication",
+      "backup strategies"
+    ],
+    "representative_soc_codes": [
+      "15-1245"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "network architecture",
+    "domain": "tech",
+    "aliases": [
+      "Information Analyst",
+      "Information Technology Specialist (IT Specialist)",
+      "LAN Specialist (Local Area Network Specialist)"
+    ],
+    "typical_specializations": [
+      "routing protocols",
+      "network security",
+      "load balancing"
+    ],
+    "representative_soc_codes": [
+      "15-1244",
+      "15-1241"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1244, 15-1241); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "IT systems analysis",
+    "domain": "tech",
+    "aliases": [
+      "Applications Analyst",
+      "Business Systems Analyst",
+      "Computer Analyst"
+    ],
+    "typical_specializations": [
+      "Health Informatics Specialists",
+      "Web Administrators",
+      "Geographic Information Systems Technologists and Technicians",
+      "Document Management Specialists"
+    ],
+    "representative_soc_codes": [
+      "15-1211",
+      "15-1299.10"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": "Multi-SOC mapping (15-1211, 15-1299.10); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "computer hardware engineering",
+    "domain": "tech",
+    "aliases": [
+      "Design Engineer",
+      "Field Service Engineer",
+      "Hardware Design Engineer"
+    ],
+    "typical_specializations": [
+      "PCB design",
+      "power management",
+      "thermal engineering"
+    ],
+    "representative_soc_codes": [
+      "17-2061"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "VLSI / chip design",
+    "domain": "tech",
+    "aliases": [
+      "Design Engineer",
+      "Engineer",
+      "Field Service Engineer"
+    ],
+    "typical_specializations": [
+      "digital logic",
+      "analog design",
+      "verification"
+    ],
+    "representative_soc_codes": [
+      "17-2061"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "quantum computing research",
+    "domain": "tech",
+    "aliases": [
+      "Computer Scientist",
+      "Computer Specialist",
+      "Control System Computer Scientist"
+    ],
+    "typical_specializations": [
+      "quantum circuits",
+      "error correction",
+      "quantum simulation"
+    ],
+    "representative_soc_codes": [
+      "15-1221",
+      "19-2012"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1221, 19-2012); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "AR/VR engineering",
+    "domain": "tech",
+    "aliases": [
+      "Technology Applications Engineer",
+      "Web Architect",
+      "Web Design Specialist"
+    ],
+    "typical_specializations": [
+      "spatial computing",
+      "real-time rendering",
+      "motion tracking"
+    ],
+    "representative_soc_codes": [
+      "15-1255",
+      "15-1252"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1255, 15-1252); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "mechanical engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Application Engineer",
+      "Design Engineer",
+      "Design Maintenance Engineer"
+    ],
+    "typical_specializations": [
+      "Fuel Cell Engineers",
+      "Automotive Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2141"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "electrical engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Circuits Engineer",
+      "Design Engineer",
+      "Electrical Controls Engineer"
+    ],
+    "typical_specializations": [
+      "circuit design",
+      "power distribution",
+      "control systems"
+    ],
+    "representative_soc_codes": [
+      "17-2071"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "civil engineering",
+    "domain": "engineering",
+    "aliases": [
+      "City Engineer",
+      "County Engineer",
+      "Design Engineer"
+    ],
+    "typical_specializations": [
+      "Transportation Engineers",
+      "Water/Wastewater Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2051"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "structural engineering",
+    "domain": "engineering",
+    "aliases": [
+      "City Engineer",
+      "Civil Engineer",
+      "County Engineer"
+    ],
+    "typical_specializations": [
+      "Transportation Engineers",
+      "Water/Wastewater Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2051"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "environmental engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Air Pollution Control Engineer",
+      "Engineering Consultant",
+      "Environmental Remediation Specialist"
+    ],
+    "typical_specializations": [
+      "water treatment",
+      "emissions control",
+      "renewable energy"
+    ],
+    "representative_soc_codes": [
+      "17-2081"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "biomedical engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Biomedical Electronics Technician",
+      "Biomedical Equipment Technician (BMET)",
+      "Biomedical Technician"
+    ],
+    "typical_specializations": [
+      "medical imaging",
+      "diagnostic devices",
+      "biomaterials"
+    ],
+    "representative_soc_codes": [
+      "17-2031"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "aerospace engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Aeronautical Engineer",
+      "Aerospace Stress Engineer",
+      "Avionics Engineer"
+    ],
+    "typical_specializations": [
+      "aerodynamics",
+      "structural analysis",
+      "avionics"
+    ],
+    "representative_soc_codes": [
+      "17-2011"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "chemical engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Development Engineer",
+      "Engineering Scientist",
+      "Process Control Engineer"
+    ],
+    "typical_specializations": [
+      "process design",
+      "catalysis",
+      "separation technology"
+    ],
+    "representative_soc_codes": [
+      "17-2041"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "industrial engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Continuous Improvement Engineer",
+      "Facilities Engineer",
+      "Operations Engineer"
+    ],
+    "typical_specializations": [
+      "Human Factors Engineers and Ergonomists",
+      "Validation Engineers",
+      "Manufacturing Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2112"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "materials engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Extrusion Engineer",
+      "Materials Development Engineer",
+      "Materials Research Engineer"
+    ],
+    "typical_specializations": [
+      "metallurgy",
+      "polymers",
+      "composites"
+    ],
+    "representative_soc_codes": [
+      "17-2131"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "nuclear engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Nuclear Design Engineer",
+      "Nuclear Licensing Engineer",
+      "Nuclear Process Engineer"
+    ],
+    "typical_specializations": [
+      "reactor physics",
+      "radiation protection",
+      "fuel design"
+    ],
+    "representative_soc_codes": [
+      "17-2161"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "mining engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Mine Engineer",
+      "Mining Consultant",
+      "Planning Engineer"
+    ],
+    "typical_specializations": [
+      "ore processing",
+      "mine design",
+      "geotechnical analysis"
+    ],
+    "representative_soc_codes": [
+      "17-2151"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "petroleum engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Completion Engineer",
+      "Drilling Engineer",
+      "Operations Engineer"
+    ],
+    "typical_specializations": [
+      "well drilling",
+      "reservoir simulation",
+      "production optimization"
+    ],
+    "representative_soc_codes": [
+      "17-2171"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "automotive engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Application Engineer",
+      "Design Engineer",
+      "Design Maintenance Engineer"
+    ],
+    "typical_specializations": [
+      "Fuel Cell Engineers",
+      "Automotive Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2141"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "marine engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Marine Architect",
+      "Marine Design Engineer",
+      "Marine Structural Designer"
+    ],
+    "typical_specializations": [
+      "vessel design",
+      "offshore structures",
+      "propulsion systems"
+    ],
+    "representative_soc_codes": [
+      "17-2121"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "agricultural engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Agricultural Systems Specialist",
+      "Conservation Engineer",
+      "Product Engineer"
+    ],
+    "typical_specializations": [
+      "crop optimization",
+      "equipment design",
+      "soil mechanics"
+    ],
+    "representative_soc_codes": [
+      "17-2021"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "manufacturing engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Continuous Improvement Engineer",
+      "Facilities Engineer",
+      "Industrial Engineer"
+    ],
+    "typical_specializations": [
+      "Human Factors Engineers and Ergonomists",
+      "Validation Engineers",
+      "Manufacturing Engineers",
+      "Fuel Cell Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2112",
+      "17-2141"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": "Multi-SOC mapping (17-2112, 17-2141); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "electronics engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Compatibility Test Engineer",
+      "Design Engineer",
+      "Electronics Design Engineer"
+    ],
+    "typical_specializations": [
+      "semiconductor devices",
+      "signal processing",
+      "embedded systems"
+    ],
+    "representative_soc_codes": [
+      "17-2072"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "systems engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Energy Efficiency Engineer",
+      "Energy Engineer",
+      "Industrial Energy Engineer"
+    ],
+    "typical_specializations": [
+      "Energy Engineers, Except Wind and Solar",
+      "Mechatronics Engineers",
+      "Microsystems Engineers",
+      "Photonics Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2199",
+      "15-1299.08"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": "Multi-SOC mapping (17-2199, 15-1299.08); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "power systems engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Circuits Engineer",
+      "Design Engineer",
+      "Electrical Controls Engineer"
+    ],
+    "typical_specializations": [
+      "grid stability",
+      "renewable integration",
+      "demand forecasting"
+    ],
+    "representative_soc_codes": [
+      "17-2071"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "control systems engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Energy Efficiency Engineer",
+      "Energy Engineer",
+      "Industrial Energy Engineer"
+    ],
+    "typical_specializations": [
+      "Energy Engineers, Except Wind and Solar",
+      "Mechatronics Engineers",
+      "Microsystems Engineers",
+      "Photonics Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2199",
+      "17-2071"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (17-2199, 17-2071); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "HVAC engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Application Engineer",
+      "Design Engineer",
+      "Design Maintenance Engineer"
+    ],
+    "typical_specializations": [
+      "Fuel Cell Engineers",
+      "Automotive Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2141"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "earthquake engineering",
+    "domain": "engineering",
+    "aliases": [
+      "City Engineer",
+      "Civil Engineer",
+      "County Engineer"
+    ],
+    "typical_specializations": [
+      "Transportation Engineers",
+      "Water/Wastewater Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2051"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "transportation engineering",
+    "domain": "engineering",
+    "aliases": [
+      "City Engineer",
+      "Civil Engineer",
+      "County Engineer"
+    ],
+    "typical_specializations": [
+      "Transportation Engineers",
+      "Water/Wastewater Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2051"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "water resources engineering",
+    "domain": "engineering",
+    "aliases": [
+      "City Engineer",
+      "Civil Engineer",
+      "County Engineer"
+    ],
+    "typical_specializations": [
+      "Transportation Engineers",
+      "Water/Wastewater Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2051",
+      "17-2081"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (17-2051, 17-2081); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "geotechnical engineering",
+    "domain": "engineering",
+    "aliases": [
+      "City Engineer",
+      "Civil Engineer",
+      "County Engineer"
+    ],
+    "typical_specializations": [
+      "Transportation Engineers",
+      "Water/Wastewater Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2051"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "forensic engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Energy Efficiency Engineer",
+      "Energy Engineer",
+      "Industrial Energy Engineer"
+    ],
+    "typical_specializations": [
+      "Energy Engineers, Except Wind and Solar",
+      "Mechatronics Engineers",
+      "Microsystems Engineers",
+      "Photonics Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2199",
+      "17-2051"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (17-2199, 17-2051); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "mechatronics engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Energy Efficiency Engineer",
+      "Energy Engineer",
+      "Industrial Energy Engineer"
+    ],
+    "typical_specializations": [
+      "Energy Engineers, Except Wind and Solar",
+      "Mechatronics Engineers",
+      "Microsystems Engineers",
+      "Photonics Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2199",
+      "17-2141"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (17-2199, 17-2141); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "packaging engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Continuous Improvement Engineer",
+      "Facilities Engineer",
+      "Industrial Engineer"
+    ],
+    "typical_specializations": [
+      "Human Factors Engineers and Ergonomists",
+      "Validation Engineers",
+      "Manufacturing Engineers"
+    ],
+    "representative_soc_codes": [
+      "17-2112"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "safety engineering",
+    "domain": "engineering",
+    "aliases": [
+      "Health and Safety Specialist",
+      "Industrial Hygienist",
+      "Industrial Safety Engineer"
+    ],
+    "typical_specializations": [
+      "hazard analysis",
+      "compliance",
+      "risk mitigation"
+    ],
+    "representative_soc_codes": [
+      "17-2111"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "physics",
+    "domain": "sciences",
+    "aliases": [
+      "Health Physicist",
+      "Medical Physicist",
+      "Physicist"
+    ],
+    "typical_specializations": [
+      "quantum mechanics",
+      "particle physics",
+      "condensed matter"
+    ],
+    "representative_soc_codes": [
+      "19-2012"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "chemistry",
+    "domain": "sciences",
+    "aliases": [
+      "Air Quality Chemist",
+      "Analytical Chemist",
+      "Chemical Lab Scientist (Chemical Laboratory Scientist)"
+    ],
+    "typical_specializations": [
+      "synthesis",
+      "chemical kinetics",
+      "spectroscopy"
+    ],
+    "representative_soc_codes": [
+      "19-2031"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "biology",
+    "domain": "sciences",
+    "aliases": [
+      "Bioinformaticist",
+      "Bioinformatics Scientist",
+      "Research Associate"
+    ],
+    "typical_specializations": [
+      "Bioinformatics Scientists",
+      "Molecular and Cellular Biologists",
+      "Geneticists",
+      "Biologists"
+    ],
+    "representative_soc_codes": [
+      "19-1029"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "mathematics",
+    "domain": "sciences",
+    "aliases": [
+      "Computational Mathematician",
+      "Computational Scientist",
+      "Cryptographer"
+    ],
+    "typical_specializations": [
+      "numerical analysis",
+      "topology",
+      "differential equations"
+    ],
+    "representative_soc_codes": [
+      "15-2021"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "statistics",
+    "domain": "sciences",
+    "aliases": [
+      "Demographer",
+      "Mathematical Statistician",
+      "Psychometric Consultant"
+    ],
+    "typical_specializations": [
+      "Bayesian inference",
+      "time series analysis",
+      "causal inference"
+    ],
+    "representative_soc_codes": [
+      "15-2041"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "geology",
+    "domain": "sciences",
+    "aliases": [
+      "Engineering Geologist",
+      "Environmental Protection Geologist",
+      "Exploration Geologist"
+    ],
+    "typical_specializations": [
+      "mineralogy",
+      "structural geology",
+      "paleontology"
+    ],
+    "representative_soc_codes": [
+      "19-2042"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "oceanography",
+    "domain": "sciences",
+    "aliases": [
+      "Groundwater Consultant",
+      "Hydrogeologist",
+      "Hydrologist"
+    ],
+    "typical_specializations": [
+      "physical oceanography",
+      "chemical oceanography",
+      "marine biology"
+    ],
+    "representative_soc_codes": [
+      "19-2043"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "astronomy",
+    "domain": "sciences",
+    "aliases": [
+      "Astronomer",
+      "Astrophysicist",
+      "Research Scientist"
+    ],
+    "typical_specializations": [
+      "cosmology",
+      "stellar evolution",
+      "exoplanet research"
+    ],
+    "representative_soc_codes": [
+      "19-2011"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "neuroscience",
+    "domain": "sciences",
+    "aliases": [
+      "Clinical Laboratory Scientist (Clinical Lab Scientist)",
+      "Clinical Pharmacologist",
+      "Clinical Research Scientist"
+    ],
+    "typical_specializations": [
+      "molecular neuroscience",
+      "cognitive neuroscience",
+      "neuroimaging"
+    ],
+    "representative_soc_codes": [
+      "19-1042"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "microbiology",
+    "domain": "sciences",
+    "aliases": [
+      "Bacteriologist",
+      "Clinical Laboratory Scientist",
+      "Clinical Microbiologist"
+    ],
+    "typical_specializations": [
+      "bacteriology",
+      "virology",
+      "mycology"
+    ],
+    "representative_soc_codes": [
+      "19-1022"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "molecular biology",
+    "domain": "sciences",
+    "aliases": [
+      "Bioinformaticist",
+      "Bioinformatics Scientist",
+      "Research Associate"
+    ],
+    "typical_specializations": [
+      "Bioinformatics Scientists",
+      "Molecular and Cellular Biologists",
+      "Geneticists",
+      "Biologists"
+    ],
+    "representative_soc_codes": [
+      "19-1029"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "biochemistry",
+    "domain": "sciences",
+    "aliases": [
+      "Analytical Research Chemist",
+      "Biophysics Researcher",
+      "Scientist"
+    ],
+    "typical_specializations": [
+      "enzyme kinetics",
+      "metabolic pathways",
+      "protein structure"
+    ],
+    "representative_soc_codes": [
+      "19-1021"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "genetics",
+    "domain": "sciences",
+    "aliases": [
+      "Bioinformaticist",
+      "Bioinformatics Scientist",
+      "Research Associate"
+    ],
+    "typical_specializations": [
+      "Bioinformatics Scientists",
+      "Molecular and Cellular Biologists",
+      "Geneticists",
+      "Biologists"
+    ],
+    "representative_soc_codes": [
+      "19-1029"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "ecology",
+    "domain": "sciences",
+    "aliases": [
+      "Aquatic Biologist",
+      "Conservation Biologist",
+      "Fish and Wildlife Biologist"
+    ],
+    "typical_specializations": [
+      "community ecology",
+      "ecosystem dynamics",
+      "conservation biology"
+    ],
+    "representative_soc_codes": [
+      "19-1023"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "meteorology",
+    "domain": "sciences",
+    "aliases": [
+      "Broadcast Meteorologist",
+      "Forecaster",
+      "Forensic Meteorologist"
+    ],
+    "typical_specializations": [
+      "synoptic meteorology",
+      "atmospheric dynamics",
+      "climate modeling"
+    ],
+    "representative_soc_codes": [
+      "19-2021"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "environmental science",
+    "domain": "sciences",
+    "aliases": [
+      "Environmental Analyst",
+      "Environmental Health and Safety Specialist (EHS Specialist)",
+      "Environmental Health Specialist"
+    ],
+    "typical_specializations": [
+      "Climate Change Policy Analysts",
+      "Environmental Restoration Planners",
+      "Industrial Ecologists"
+    ],
+    "representative_soc_codes": [
+      "19-2041"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "pharmacology",
+    "domain": "sciences",
+    "aliases": [
+      "Clinical Laboratory Scientist (Clinical Lab Scientist)",
+      "Clinical Pharmacologist",
+      "Clinical Research Scientist"
+    ],
+    "typical_specializations": [
+      "medicinal chemistry",
+      "drug development",
+      "toxicology"
+    ],
+    "representative_soc_codes": [
+      "19-1042"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "materials science",
+    "domain": "sciences",
+    "aliases": [
+      "Materials Scientist",
+      "Micro Electrical/Mechanical Systems Device Scientist (MEMS Device Scientist)",
+      "Polymer Materials Consultant"
+    ],
+    "typical_specializations": [
+      "nanotechnology",
+      "crystallography",
+      "composite materials"
+    ],
+    "representative_soc_codes": [
+      "19-2032",
+      "17-2131"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": "Multi-SOC mapping (19-2032, 17-2131); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "computational biology",
+    "domain": "sciences",
+    "aliases": [
+      "Clinical Laboratory Scientist (Clinical Lab Scientist)",
+      "Clinical Pharmacologist",
+      "Clinical Research Scientist"
+    ],
+    "typical_specializations": [
+      "sequence analysis",
+      "structural prediction",
+      "systems modeling"
+    ],
+    "representative_soc_codes": [
+      "19-1042",
+      "15-2099.01"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (19-1042, 15-2099.01); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "bioinformatics",
+    "domain": "sciences",
+    "aliases": [
+      "Biotechnician",
+      "Museum Informatics Specialist",
+      "Research Scientist"
+    ],
+    "typical_specializations": [
+      "genome sequencing",
+      "proteomics",
+      "database development"
+    ],
+    "representative_soc_codes": [
+      "15-2099.01",
+      "19-1042"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-2099.01, 19-1042); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "internal medicine",
+    "domain": "medicine",
+    "aliases": [
+      "Doctor",
+      "Gastroenterologist",
+      "General Internist"
+    ],
+    "typical_specializations": [
+      "gastroenterology",
+      "endocrinology",
+      "rheumatology"
+    ],
+    "representative_soc_codes": [
+      "29-1216"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "general surgery",
+    "domain": "medicine",
+    "aliases": [
+      "General Surgeon",
+      "Hand Surgeon",
+      "Orthopaedic Surgeon"
+    ],
+    "typical_specializations": [
+      "trauma surgery",
+      "vascular surgery",
+      "gastrointestinal surgery"
+    ],
+    "representative_soc_codes": [
+      "29-1242"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "radiology",
+    "domain": "medicine",
+    "aliases": [
+      "Attending Physician",
+      "Diagnostic Radiologist",
+      "Interventional Neuroradiologist"
+    ],
+    "typical_specializations": [
+      "MRI imaging",
+      "CT scanning",
+      "interventional radiology"
+    ],
+    "representative_soc_codes": [
+      "29-1224"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "oncology",
+    "domain": "medicine",
+    "aliases": [
+      "cancer medicine",
+      "tumor research"
+    ],
+    "typical_specializations": [
+      "medical oncology",
+      "radiation oncology",
+      "hematologic malignancies"
+    ],
+    "representative_soc_codes": [
+      "29-1228"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "cardiology",
+    "domain": "medicine",
+    "aliases": [
+      "cardiac medicine",
+      "cardiovascular disease"
+    ],
+    "typical_specializations": [
+      "interventional cardiology",
+      "electrophysiology",
+      "heart failure"
+    ],
+    "representative_soc_codes": [
+      "29-1212"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "neurology",
+    "domain": "medicine",
+    "aliases": [
+      "Adult and Pediatric Neurologist",
+      "Adult Neurologist",
+      "General Neurologist"
+    ],
+    "typical_specializations": [
+      "neuromuscular disease",
+      "stroke medicine",
+      "epilepsy"
+    ],
+    "representative_soc_codes": [
+      "29-1217"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "pediatrics",
+    "domain": "medicine",
+    "aliases": [
+      "Developmental Pediatrician",
+      "Emergency Room Pediatrician (ER Pediatrician)",
+      "General Pediatrician"
+    ],
+    "typical_specializations": [
+      "neonatology",
+      "developmental pediatrics",
+      "pediatric subspecialties"
+    ],
+    "representative_soc_codes": [
+      "29-1221"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "psychiatry",
+    "domain": "medicine",
+    "aliases": [
+      "Adult Psychiatrist",
+      "Child Psychiatrist",
+      "Consulting Psychiatrist"
+    ],
+    "typical_specializations": [
+      "psychopharmacology",
+      "child psychiatry",
+      "addiction medicine"
+    ],
+    "representative_soc_codes": [
+      "29-1223"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "emergency medicine",
+    "domain": "medicine",
+    "aliases": [
+      "acute care medicine",
+      "trauma medicine"
+    ],
+    "typical_specializations": [
+      "critical care",
+      "emergency procedures",
+      "mass casualty management"
+    ],
+    "representative_soc_codes": [
+      "29-1214"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "anesthesiology",
+    "domain": "medicine",
+    "aliases": [
+      "Medical Doctor (MD)",
+      "Obstetrical Anesthesiologist",
+      "Staff Anesthesiologist"
+    ],
+    "typical_specializations": [
+      "regional anesthesia",
+      "pediatric anesthesia",
+      "pain management"
+    ],
+    "representative_soc_codes": [
+      "29-1211"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "dermatology",
+    "domain": "medicine",
+    "aliases": [
+      "Board Certified Dermatologist",
+      "Dermatologist MD (Dermatologist Medical Doctor)",
+      "Dermatologist Physician"
+    ],
+    "typical_specializations": [
+      "dermatopathology",
+      "cosmetic dermatology",
+      "surgical dermatology"
+    ],
+    "representative_soc_codes": [
+      "29-1213"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "obstetrics and gynecology",
+    "domain": "medicine",
+    "aliases": [
+      "GYN (Gynecologist)",
+      "MD (Medical Doctor)",
+      "OB (Obstetrician)"
+    ],
+    "typical_specializations": [
+      "maternal-fetal medicine",
+      "reproductive endocrinology",
+      "gynecologic oncology"
+    ],
+    "representative_soc_codes": [
+      "29-1218"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "dentistry",
+    "domain": "medicine",
+    "aliases": [
+      "Dental Surgery Doctor (DDS)",
+      "Doctor of Dental Medicine (DMD)",
+      "Doctor of Dental Surgery (DDS)"
+    ],
+    "typical_specializations": [
+      "prosthodontics",
+      "oral surgery",
+      "orthodontics"
+    ],
+    "representative_soc_codes": [
+      "29-1021"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "pharmacy",
+    "domain": "medicine",
+    "aliases": [
+      "Clinical Pharmacist",
+      "Hospital Pharmacist",
+      "Informatics Pharmacist"
+    ],
+    "typical_specializations": [
+      "pharmacotherapy",
+      "compounding",
+      "medication management"
+    ],
+    "representative_soc_codes": [
+      "29-1051"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "physical therapy",
+    "domain": "medicine",
+    "aliases": [
+      "Acute Care PT (Acute Care Physical Therapist)",
+      "Home Care Physical Therapist (Home Care PT)",
+      "Inpatient Physical Therapist (Inpatient PT)"
+    ],
+    "typical_specializations": [
+      "orthopedic rehabilitation",
+      "neurological rehabilitation",
+      "sports therapy"
+    ],
+    "representative_soc_codes": [
+      "29-1123"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "film direction",
+    "domain": "arts",
+    "aliases": [
+      "Artistic Director",
+      "Director",
+      "Executive Producer"
+    ],
+    "typical_specializations": [
+      "Media Programming Directors",
+      "Talent Directors",
+      "Media Technical Directors/Managers"
+    ],
+    "representative_soc_codes": [
+      "27-2012"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "cinematography",
+    "domain": "arts",
+    "aliases": [
+      "Camera Operator",
+      "Cameraman",
+      "Master Control Operator (MCO)"
+    ],
+    "typical_specializations": [
+      "lighting design",
+      "color grading",
+      "digital cinematography"
+    ],
+    "representative_soc_codes": [
+      "27-4031"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "music composition",
+    "domain": "arts",
+    "aliases": [
+      "Arranger",
+      "Choir Director",
+      "Composer"
+    ],
+    "typical_specializations": [
+      "film scoring",
+      "symphonic composition",
+      "electronic music"
+    ],
+    "representative_soc_codes": [
+      "27-2041"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "conducting",
+    "domain": "arts",
+    "aliases": [
+      "Arranger",
+      "Choir Director",
+      "Composer"
+    ],
+    "typical_specializations": [
+      "symphonic conducting",
+      "operatic conducting",
+      "choral direction"
+    ],
+    "representative_soc_codes": [
+      "27-2041"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "choreography",
+    "domain": "arts",
+    "aliases": [
+      "Ballet Director",
+      "Choreographer",
+      "Dance Director"
+    ],
+    "typical_specializations": [
+      "contemporary choreography",
+      "ballet choreography",
+      "theatrical choreography"
+    ],
+    "representative_soc_codes": [
+      "27-2032"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "acting",
+    "domain": "arts",
+    "aliases": [
+      "Actor",
+      "Actress",
+      "Comedian"
+    ],
+    "typical_specializations": [
+      "dramatic acting",
+      "film acting",
+      "Shakespeare performance"
+    ],
+    "representative_soc_codes": [
+      "27-2011"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "fine art",
+    "domain": "arts",
+    "aliases": [
+      "Artist",
+      "Automotive Artist",
+      "Blacksmith"
+    ],
+    "typical_specializations": [
+      "painting",
+      "printmaking",
+      "mixed media"
+    ],
+    "representative_soc_codes": [
+      "27-1013"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "sculpture",
+    "domain": "arts",
+    "aliases": [
+      "Artist",
+      "Automotive Artist",
+      "Blacksmith"
+    ],
+    "typical_specializations": [
+      "abstract sculpture",
+      "figurative sculpture",
+      "installation art"
+    ],
+    "representative_soc_codes": [
+      "27-1013"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "architecture",
+    "domain": "arts",
+    "aliases": [
+      "Design Architect",
+      "Planner",
+      "Project Architect"
+    ],
+    "typical_specializations": [
+      "sustainable design",
+      "urban design",
+      "heritage conservation"
+    ],
+    "representative_soc_codes": [
+      "17-1011"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "graphic design",
+    "domain": "arts",
+    "aliases": [
+      "Artist",
+      "Brand Designer",
+      "Designer"
+    ],
+    "typical_specializations": [
+      "typography",
+      "digital design",
+      "brand identity"
+    ],
+    "representative_soc_codes": [
+      "27-1024"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "animation",
+    "domain": "arts",
+    "aliases": [
+      "3D Animator (Three-Dimensional Animator)",
+      "3D Artist (Three-Dimensional Artist)",
+      "Animator"
+    ],
+    "typical_specializations": [
+      "character animation",
+      "visual effects",
+      "motion design"
+    ],
+    "representative_soc_codes": [
+      "27-1014"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "game design",
+    "domain": "arts",
+    "aliases": [
+      "Technology Applications Engineer",
+      "Web Architect",
+      "Web Design Specialist"
+    ],
+    "typical_specializations": [
+      "game mechanics",
+      "narrative design",
+      "level design"
+    ],
+    "representative_soc_codes": [
+      "15-1255",
+      "27-1014"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (15-1255, 27-1014); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "industrial design",
+    "domain": "arts",
+    "aliases": [
+      "Design Engineer",
+      "Designer",
+      "Mechanical Designer"
+    ],
+    "typical_specializations": [
+      "ergonomic design",
+      "sustainable design",
+      "mechanical design"
+    ],
+    "representative_soc_codes": [
+      "27-1021"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "fashion design",
+    "domain": "arts",
+    "aliases": [
+      "Clothing Designer",
+      "Costume Designer",
+      "Dance Costume Designer"
+    ],
+    "typical_specializations": [
+      "haute couture",
+      "sustainable fashion",
+      "textile design"
+    ],
+    "representative_soc_codes": [
+      "27-1022"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "photography",
+    "domain": "arts",
+    "aliases": [
+      "Advertising Photographer",
+      "Commercial Photographer",
+      "Graduation Photographer"
+    ],
+    "typical_specializations": [
+      "portrait photography",
+      "landscape photography",
+      "editorial photography"
+    ],
+    "representative_soc_codes": [
+      "27-4021"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "investment banking",
+    "domain": "business",
+    "aliases": [
+      "Investment Portfolio Control Consultant",
+      "Investment Strategist",
+      "Portfolio Manager"
+    ],
+    "typical_specializations": [
+      "Financial Quantitative Analysts",
+      "Fraud Examiners, Investigators and Analysts"
+    ],
+    "representative_soc_codes": [
+      "13-2099"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "private equity",
+    "domain": "business",
+    "aliases": [
+      "Investment Portfolio Control Consultant",
+      "Investment Strategist",
+      "Portfolio Manager"
+    ],
+    "typical_specializations": [
+      "Financial Quantitative Analysts",
+      "Fraud Examiners, Investigators and Analysts"
+    ],
+    "representative_soc_codes": [
+      "13-2099"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "venture capital",
+    "domain": "business",
+    "aliases": [
+      "Investment Portfolio Control Consultant",
+      "Investment Strategist",
+      "Portfolio Manager"
+    ],
+    "typical_specializations": [
+      "Financial Quantitative Analysts",
+      "Fraud Examiners, Investigators and Analysts"
+    ],
+    "representative_soc_codes": [
+      "13-2099"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "management consulting",
+    "domain": "business",
+    "aliases": [
+      "Administrative Analyst",
+      "Business Analyst",
+      "Business Consultant"
+    ],
+    "typical_specializations": [
+      "organizational transformation",
+      "process improvement",
+      "market entry strategy"
+    ],
+    "representative_soc_codes": [
+      "13-1111"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "marketing",
+    "domain": "business",
+    "aliases": [
+      "Business Development Specialist",
+      "Communications Specialist",
+      "Demographic Analyst"
+    ],
+    "typical_specializations": [
+      "brand marketing",
+      "content strategy",
+      "marketing analytics"
+    ],
+    "representative_soc_codes": [
+      "13-1161"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "brand strategy",
+    "domain": "business",
+    "aliases": [
+      "Account Supervisor",
+      "Brand Manager",
+      "Business Development Director"
+    ],
+    "typical_specializations": [
+      "brand identity design",
+      "brand architecture",
+      "consumer insights"
+    ],
+    "representative_soc_codes": [
+      "11-2021",
+      "13-1161"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (11-2021, 13-1161); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "supply chain management",
+    "domain": "business",
+    "aliases": [
+      "Distribution Center Manager",
+      "Distribution Manager",
+      "Fleet Manager"
+    ],
+    "typical_specializations": [
+      "inventory optimization",
+      "vendor management",
+      "network design"
+    ],
+    "representative_soc_codes": [
+      "11-3071"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "operations management",
+    "domain": "business",
+    "aliases": [
+      "Business Manager",
+      "Center Manager",
+      "Department Manager"
+    ],
+    "typical_specializations": [
+      "lean manufacturing",
+      "quality assurance",
+      "capacity planning"
+    ],
+    "representative_soc_codes": [
+      "11-1021"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "entrepreneurship",
+    "domain": "business",
+    "aliases": [
+      "Business Manager",
+      "Center Manager",
+      "Department Manager"
+    ],
+    "typical_specializations": [
+      "venture scaling",
+      "product-market fit",
+      "fundraising"
+    ],
+    "representative_soc_codes": [
+      "11-1021"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "financial analysis",
+    "domain": "business",
+    "aliases": [
+      "Analyst",
+      "Credit Products Officer",
+      "Equity Research Analyst"
+    ],
+    "typical_specializations": [
+      "valuation analysis",
+      "equity research",
+      "financial forecasting"
+    ],
+    "representative_soc_codes": [
+      "13-2051"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "risk management",
+    "domain": "business",
+    "aliases": [
+      "Bank Examiner",
+      "Bank Secrecy Act Anti-Money Laundering Officer (BSA/AML Officer)",
+      "Community Reinvestment Act Officer (CRA Officer)"
+    ],
+    "typical_specializations": [
+      "operational risk",
+      "regulatory compliance",
+      "risk analytics"
+    ],
+    "representative_soc_codes": [
+      "13-2061"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "accounting",
+    "domain": "business",
+    "aliases": [
+      "Accountant",
+      "Audit Partner",
+      "Auditor"
+    ],
+    "typical_specializations": [
+      "GAAP accounting",
+      "financial reporting",
+      "consolidation accounting"
+    ],
+    "representative_soc_codes": [
+      "13-2011"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "auditing",
+    "domain": "business",
+    "aliases": [
+      "Accountant",
+      "Accounting Officer",
+      "Audit Partner"
+    ],
+    "typical_specializations": [
+      "compliance auditing",
+      "operational auditing",
+      "IT auditing"
+    ],
+    "representative_soc_codes": [
+      "13-2011"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "human resources",
+    "domain": "business",
+    "aliases": [
+      "talent management",
+      "HR operations"
+    ],
+    "typical_specializations": [
+      "talent acquisition",
+      "organizational development",
+      "compensation design"
+    ],
+    "representative_soc_codes": [
+      "11-3121"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "corporate strategy",
+    "domain": "business",
+    "aliases": [
+      "Business Manager",
+      "Center Manager",
+      "Department Manager"
+    ],
+    "typical_specializations": [
+      "strategic planning",
+      "M&A strategy",
+      "competitive strategy"
+    ],
+    "representative_soc_codes": [
+      "11-1021"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "corporate law",
+    "domain": "law",
+    "aliases": [
+      "Attorney",
+      "Attorney at Law",
+      "Attorney General"
+    ],
+    "typical_specializations": [
+      "contract law",
+      "corporate governance",
+      "commercial transactions"
+    ],
+    "representative_soc_codes": [
+      "23-1011"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "intellectual property law",
+    "domain": "law",
+    "aliases": [
+      "Attorney",
+      "Attorney at Law",
+      "Attorney General"
+    ],
+    "typical_specializations": [
+      "patent prosecution",
+      "trademark law",
+      "copyright law"
+    ],
+    "representative_soc_codes": [
+      "23-1011"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "immigration law",
+    "domain": "law",
+    "aliases": [
+      "Attorney",
+      "Attorney at Law",
+      "Attorney General"
+    ],
+    "typical_specializations": [
+      "employment immigration",
+      "family immigration",
+      "removal defense"
+    ],
+    "representative_soc_codes": [
+      "23-1011"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "litigation",
+    "domain": "law",
+    "aliases": [
+      "Attorney",
+      "Attorney at Law",
+      "Attorney General"
+    ],
+    "typical_specializations": [
+      "commercial litigation",
+      "civil litigation",
+      "appellate practice"
+    ],
+    "representative_soc_codes": [
+      "23-1011"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "tax law",
+    "domain": "law",
+    "aliases": [
+      "Attorney",
+      "Attorney at Law",
+      "Attorney General"
+    ],
+    "typical_specializations": [
+      "corporate taxation",
+      "international tax",
+      "estate planning"
+    ],
+    "representative_soc_codes": [
+      "23-1011"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "higher education teaching",
+    "domain": "education",
+    "aliases": [
+      "university instruction",
+      "academic teaching"
+    ],
+    "typical_specializations": [
+      "curriculum instruction",
+      "academic research",
+      "student mentoring"
+    ],
+    "representative_soc_codes": [
+      "25-1199"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "K-12 instruction",
+    "domain": "education",
+    "aliases": [
+      "Art Teacher",
+      "Classroom Teacher",
+      "Educator"
+    ],
+    "typical_specializations": [
+      "classroom instruction",
+      "student assessment",
+      "lesson planning"
+    ],
+    "representative_soc_codes": [
+      "25-2021",
+      "25-2030"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": "Multi-SOC mapping (25-2021, 25-2030); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "curriculum design",
+    "domain": "education",
+    "aliases": [
+      "Curriculum and Instruction Director",
+      "Curriculum Coordinator",
+      "Curriculum Director"
+    ],
+    "typical_specializations": [
+      "learning objectives design",
+      "assessment design",
+      "educational content creation"
+    ],
+    "representative_soc_codes": [
+      "25-9031"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "educational technology",
+    "domain": "education",
+    "aliases": [
+      "Assistant Professor",
+      "Associate Professor",
+      "Clinical Professor"
+    ],
+    "typical_specializations": [
+      "learning management systems",
+      "digital learning platforms",
+      "instructional technology"
+    ],
+    "representative_soc_codes": [
+      "25-1071",
+      "15-1252"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": "Multi-SOC mapping (25-1071, 15-1252); attorney picks the closest fit per beneficiary."
+  },
+  {
+    "field_label": "school administration",
+    "domain": "education",
+    "aliases": [
+      "Athletic Director",
+      "Elementary Principal",
+      "High School Principal"
+    ],
+    "typical_specializations": [
+      "school operations",
+      "staff management",
+      "academic improvement"
+    ],
+    "representative_soc_codes": [
+      "11-9032"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "culinary arts",
+    "domain": "other",
+    "aliases": [
+      "Banquet Chef",
+      "Certified Executive Chef (CEC)",
+      "Chef"
+    ],
+    "typical_specializations": [
+      "fine dining",
+      "pastry arts",
+      "restaurant management"
+    ],
+    "representative_soc_codes": [
+      "35-1011"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "sports coaching",
+    "domain": "other",
+    "aliases": [
+      "Baseball Coach",
+      "Basketball Coach",
+      "Cross Country Coach"
+    ],
+    "typical_specializations": [
+      "competitive coaching",
+      "athlete development",
+      "sports performance"
+    ],
+    "representative_soc_codes": [
+      "27-2022"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "journalism",
+    "domain": "other",
+    "aliases": [
+      "Anchor",
+      "News Anchor",
+      "News Reporter"
+    ],
+    "typical_specializations": [
+      "news writing",
+      "feature journalism",
+      "media analysis"
+    ],
+    "representative_soc_codes": [
+      "27-3023"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "creative writing",
+    "domain": "other",
+    "aliases": [
+      "Advertisement Agency Copywriter (Ad Agency Copywriter)",
+      "Advertising Associate",
+      "Advertising Copywriter"
+    ],
+    "typical_specializations": [
+      "fiction authorship",
+      "screenwriting",
+      "literary publication"
+    ],
+    "representative_soc_codes": [
+      "27-3043"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "public administration",
+    "domain": "other",
+    "aliases": [
+      "government management",
+      "public sector administration"
+    ],
+    "typical_specializations": [
+      "policy implementation",
+      "budget management",
+      "interagency coordination"
+    ],
+    "representative_soc_codes": [
+      "11-1031"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "urban planning",
+    "domain": "other",
+    "aliases": [
+      "City Planner",
+      "Community Development Planner",
+      "Community Planner"
+    ],
+    "typical_specializations": [
+      "land use planning",
+      "transportation planning",
+      "community development"
+    ],
+    "representative_soc_codes": [
+      "19-3051"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "agricultural management",
+    "domain": "other",
+    "aliases": [
+      "Aquaculture Director",
+      "Farm Manager",
+      "Farm Operations Technical Director"
+    ],
+    "typical_specializations": [
+      "crop management",
+      "sustainable agriculture",
+      "agricultural operations"
+    ],
+    "representative_soc_codes": [
+      "11-9013"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "non-profit leadership",
+    "domain": "other",
+    "aliases": [
+      "Adoption Services Manager",
+      "Child Welfare Services Director",
+      "Children's Service Supervisor"
+    ],
+    "typical_specializations": [
+      "fundraising strategy",
+      "program management",
+      "mission development"
+    ],
+    "representative_soc_codes": [
+      "11-9151"
+    ],
+    "goldilocks_specificity": "specialty_within_field",
+    "notes": null
+  },
+  {
+    "field_label": "religious leadership",
+    "domain": "other",
+    "aliases": [
+      "Bishop",
+      "Catholic Priest",
+      "Children's Minister"
+    ],
+    "typical_specializations": [
+      "spiritual guidance",
+      "community ministry",
+      "religious education"
+    ],
+    "representative_soc_codes": [
+      "21-2011"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  },
+  {
+    "field_label": "library science",
+    "domain": "other",
+    "aliases": [
+      "Catalog Librarian",
+      "Instructional Technology Specialist",
+      "Librarian"
+    ],
+    "typical_specializations": [
+      "library management",
+      "digital collections",
+      "information organization"
+    ],
+    "representative_soc_codes": [
+      "25-4022"
+    ],
+    "goldilocks_specificity": "broad_field",
+    "notes": null
+  }
+]

@@ -1,0 +1,1620 @@
+[
+  {
+    "field_label": "accounting",
+    "primary_soc": "13-2011",
+    "primary_soc_title": "Accountants and Auditors",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "13-2011.00"
+    ]
+  },
+  {
+    "field_label": "acting",
+    "primary_soc": "27-2011",
+    "primary_soc_title": "Actors",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-2011.00"
+    ]
+  },
+  {
+    "field_label": "aerospace engineering",
+    "primary_soc": "17-2011",
+    "primary_soc_title": "Aerospace Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2011.00"
+    ]
+  },
+  {
+    "field_label": "agricultural engineering",
+    "primary_soc": "17-2021",
+    "primary_soc_title": "Agricultural Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2021.00"
+    ]
+  },
+  {
+    "field_label": "agricultural management",
+    "primary_soc": "11-9013",
+    "primary_soc_title": "Farmers, Ranchers, and Other Agricultural Managers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "11-9013.00"
+    ]
+  },
+  {
+    "field_label": "AI engineering",
+    "primary_soc": "15-1252",
+    "primary_soc_title": "Software Developers",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1221",
+        "title": "Computer and Information Research Scientists",
+        "rationale": "secondary mapping for \"AI engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1221.00",
+      "15-1252.00"
+    ]
+  },
+  {
+    "field_label": "anesthesiology",
+    "primary_soc": "29-1211",
+    "primary_soc_title": "Anesthesiologists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "29-1211.00"
+    ]
+  },
+  {
+    "field_label": "animation",
+    "primary_soc": "27-1014",
+    "primary_soc_title": "Special Effects Artists and Animators",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-1014.00"
+    ]
+  },
+  {
+    "field_label": "AR/VR engineering",
+    "primary_soc": "15-1255",
+    "primary_soc_title": "Web and Digital Interface Designers",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1252",
+        "title": "Software Developers",
+        "rationale": "secondary mapping for \"AR/VR engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1252.00",
+      "15-1255.00",
+      "15-1255.01"
+    ]
+  },
+  {
+    "field_label": "architecture",
+    "primary_soc": "17-1011",
+    "primary_soc_title": "Architects, Except Landscape and Naval",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-1011.00"
+    ]
+  },
+  {
+    "field_label": "astronomy",
+    "primary_soc": "19-2011",
+    "primary_soc_title": "Astronomers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-2011.00"
+    ]
+  },
+  {
+    "field_label": "auditing",
+    "primary_soc": "13-2011",
+    "primary_soc_title": "Accountants and Auditors",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "13-2011.00"
+    ]
+  },
+  {
+    "field_label": "automotive engineering",
+    "primary_soc": "17-2141",
+    "primary_soc_title": "Mechanical Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2141.00",
+      "17-2141.01",
+      "17-2141.02"
+    ]
+  },
+  {
+    "field_label": "backend engineering",
+    "primary_soc": "15-1252",
+    "primary_soc_title": "Software Developers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "15-1252.00"
+    ]
+  },
+  {
+    "field_label": "biochemistry",
+    "primary_soc": "19-1021",
+    "primary_soc_title": "Biochemists and Biophysicists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-1021.00"
+    ]
+  },
+  {
+    "field_label": "bioinformatics",
+    "primary_soc": "15-2099",
+    "primary_soc_title": "Mathematical Science Occupations, All Other",
+    "alternate_socs": [
+      {
+        "soc_code": "19-1042",
+        "title": "Medical Scientists, Except Epidemiologists",
+        "rationale": "secondary mapping for \"bioinformatics\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-2099.00",
+      "15-2099.01",
+      "19-1042.00"
+    ]
+  },
+  {
+    "field_label": "biology",
+    "primary_soc": "19-1029",
+    "primary_soc_title": "Biological Scientists, All Other",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-1029.00",
+      "19-1029.01",
+      "19-1029.02"
+    ]
+  },
+  {
+    "field_label": "biomedical engineering",
+    "primary_soc": "17-2031",
+    "primary_soc_title": "Bioengineers and Biomedical Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2031.00"
+    ]
+  },
+  {
+    "field_label": "blockchain engineering",
+    "primary_soc": "15-1299",
+    "primary_soc_title": "Computer Occupations, All Other",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1252",
+        "title": "Software Developers",
+        "rationale": "secondary mapping for \"blockchain engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1252.00",
+      "15-1299.00",
+      "15-1299.01",
+      "15-1299.02",
+      "15-1299.07"
+    ]
+  },
+  {
+    "field_label": "brand strategy",
+    "primary_soc": "11-2021",
+    "primary_soc_title": "Marketing Managers",
+    "alternate_socs": [
+      {
+        "soc_code": "13-1161",
+        "title": "Market Research Analysts and Marketing Specialists",
+        "rationale": "secondary mapping for \"brand strategy\""
+      }
+    ],
+    "closest_onet_codes": [
+      "11-2021.00",
+      "13-1161.00",
+      "13-1161.01"
+    ]
+  },
+  {
+    "field_label": "cardiology",
+    "primary_soc": "29-1212",
+    "primary_soc_title": "Cardiologists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "29-1212.00"
+    ]
+  },
+  {
+    "field_label": "chemical engineering",
+    "primary_soc": "17-2041",
+    "primary_soc_title": "Chemical Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2041.00"
+    ]
+  },
+  {
+    "field_label": "chemistry",
+    "primary_soc": "19-2031",
+    "primary_soc_title": "Chemists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-2031.00"
+    ]
+  },
+  {
+    "field_label": "choreography",
+    "primary_soc": "27-2032",
+    "primary_soc_title": "Choreographers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-2032.00"
+    ]
+  },
+  {
+    "field_label": "cinematography",
+    "primary_soc": "27-4031",
+    "primary_soc_title": "Camera Operators, Television, Video, and Film",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-4031.00"
+    ]
+  },
+  {
+    "field_label": "civil engineering",
+    "primary_soc": "17-2051",
+    "primary_soc_title": "Civil Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2051.00",
+      "17-2051.01",
+      "17-2051.02"
+    ]
+  },
+  {
+    "field_label": "cloud architecture",
+    "primary_soc": "15-1241",
+    "primary_soc_title": "Computer Network Architects",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1299",
+        "title": "Computer Occupations, All Other",
+        "rationale": "secondary mapping for \"cloud architecture\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1241.00",
+      "15-1241.01",
+      "15-1299.00",
+      "15-1299.01",
+      "15-1299.02",
+      "15-1299.08"
+    ]
+  },
+  {
+    "field_label": "computational biology",
+    "primary_soc": "19-1042",
+    "primary_soc_title": "Medical Scientists, Except Epidemiologists",
+    "alternate_socs": [
+      {
+        "soc_code": "15-2099",
+        "title": "Mathematical Science Occupations, All Other",
+        "rationale": "secondary mapping for \"computational biology\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-2099.00",
+      "15-2099.01",
+      "19-1042.00"
+    ]
+  },
+  {
+    "field_label": "computer hardware engineering",
+    "primary_soc": "17-2061",
+    "primary_soc_title": "Computer Hardware Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2061.00"
+    ]
+  },
+  {
+    "field_label": "computer vision engineering",
+    "primary_soc": "15-1221",
+    "primary_soc_title": "Computer and Information Research Scientists",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1252",
+        "title": "Software Developers",
+        "rationale": "secondary mapping for \"computer vision engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1221.00",
+      "15-1252.00"
+    ]
+  },
+  {
+    "field_label": "conducting",
+    "primary_soc": "27-2041",
+    "primary_soc_title": "Music Directors and Composers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-2041.00"
+    ]
+  },
+  {
+    "field_label": "control systems engineering",
+    "primary_soc": "17-2199",
+    "primary_soc_title": "Engineers, All Other",
+    "alternate_socs": [
+      {
+        "soc_code": "17-2071",
+        "title": "Electrical Engineers",
+        "rationale": "secondary mapping for \"control systems engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "17-2071.00",
+      "17-2199.00",
+      "17-2199.03",
+      "17-2199.05"
+    ]
+  },
+  {
+    "field_label": "corporate law",
+    "primary_soc": "23-1011",
+    "primary_soc_title": "Lawyers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "23-1011.00"
+    ]
+  },
+  {
+    "field_label": "corporate strategy",
+    "primary_soc": "11-1021",
+    "primary_soc_title": "General and Operations Managers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "11-1021.00"
+    ]
+  },
+  {
+    "field_label": "creative writing",
+    "primary_soc": "27-3043",
+    "primary_soc_title": "Writers and Authors",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-3043.00",
+      "27-3043.05"
+    ]
+  },
+  {
+    "field_label": "culinary arts",
+    "primary_soc": "35-1011",
+    "primary_soc_title": "Chefs and Head Cooks",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "35-1011.00"
+    ]
+  },
+  {
+    "field_label": "curriculum design",
+    "primary_soc": "25-9031",
+    "primary_soc_title": "Instructional Coordinators",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "25-9031.00"
+    ]
+  },
+  {
+    "field_label": "cybersecurity engineering",
+    "primary_soc": "15-1212",
+    "primary_soc_title": "Information Security Analysts",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "15-1212.00"
+    ]
+  },
+  {
+    "field_label": "data engineering",
+    "primary_soc": "15-1252",
+    "primary_soc_title": "Software Developers",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1245",
+        "title": "(SOC 15-1245 not found in BLS list)",
+        "rationale": "secondary mapping for \"data engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1252.00"
+    ]
+  },
+  {
+    "field_label": "data science",
+    "primary_soc": "15-2051",
+    "primary_soc_title": "Data Scientists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "15-2051.00",
+      "15-2051.01",
+      "15-2051.02"
+    ]
+  },
+  {
+    "field_label": "database administration",
+    "primary_soc": "15-1245",
+    "primary_soc_title": "(SOC 15-1245 not found in BLS list)",
+    "alternate_socs": [],
+    "closest_onet_codes": []
+  },
+  {
+    "field_label": "dentistry",
+    "primary_soc": "29-1021",
+    "primary_soc_title": "Dentists, General",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "29-1021.00"
+    ]
+  },
+  {
+    "field_label": "dermatology",
+    "primary_soc": "29-1213",
+    "primary_soc_title": "Dermatologists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "29-1213.00"
+    ]
+  },
+  {
+    "field_label": "DevOps engineering",
+    "primary_soc": "15-1244",
+    "primary_soc_title": "Network and Computer Systems Administrators",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1252",
+        "title": "Software Developers",
+        "rationale": "secondary mapping for \"DevOps engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1244.00",
+      "15-1252.00"
+    ]
+  },
+  {
+    "field_label": "earthquake engineering",
+    "primary_soc": "17-2051",
+    "primary_soc_title": "Civil Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2051.00",
+      "17-2051.01",
+      "17-2051.02"
+    ]
+  },
+  {
+    "field_label": "ecology",
+    "primary_soc": "19-1023",
+    "primary_soc_title": "Zoologists and Wildlife Biologists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-1023.00"
+    ]
+  },
+  {
+    "field_label": "educational technology",
+    "primary_soc": "25-1071",
+    "primary_soc_title": "Health Specialties Teachers, Postsecondary",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1252",
+        "title": "Software Developers",
+        "rationale": "secondary mapping for \"educational technology\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1252.00",
+      "25-1071.00"
+    ]
+  },
+  {
+    "field_label": "electrical engineering",
+    "primary_soc": "17-2071",
+    "primary_soc_title": "Electrical Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2071.00"
+    ]
+  },
+  {
+    "field_label": "electronics engineering",
+    "primary_soc": "17-2072",
+    "primary_soc_title": "Electronics Engineers, Except Computer",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2072.00",
+      "17-2072.01"
+    ]
+  },
+  {
+    "field_label": "embedded systems engineering",
+    "primary_soc": "17-2061",
+    "primary_soc_title": "Computer Hardware Engineers",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1252",
+        "title": "Software Developers",
+        "rationale": "secondary mapping for \"embedded systems engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1252.00",
+      "17-2061.00"
+    ]
+  },
+  {
+    "field_label": "emergency medicine",
+    "primary_soc": "29-1214",
+    "primary_soc_title": "Emergency Medicine Physicians",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "29-1214.00"
+    ]
+  },
+  {
+    "field_label": "entrepreneurship",
+    "primary_soc": "11-1021",
+    "primary_soc_title": "General and Operations Managers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "11-1021.00"
+    ]
+  },
+  {
+    "field_label": "environmental engineering",
+    "primary_soc": "17-2081",
+    "primary_soc_title": "Environmental Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2081.00"
+    ]
+  },
+  {
+    "field_label": "environmental science",
+    "primary_soc": "19-2041",
+    "primary_soc_title": "Environmental Scientists and Specialists, Including Health",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-2041.00",
+      "19-2041.01",
+      "19-2041.02"
+    ]
+  },
+  {
+    "field_label": "fashion design",
+    "primary_soc": "27-1022",
+    "primary_soc_title": "Fashion Designers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-1022.00"
+    ]
+  },
+  {
+    "field_label": "film direction",
+    "primary_soc": "27-2012",
+    "primary_soc_title": "Producers and Directors",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-2012.00",
+      "27-2012.03",
+      "27-2012.04"
+    ]
+  },
+  {
+    "field_label": "financial analysis",
+    "primary_soc": "13-2051",
+    "primary_soc_title": "Financial and Investment Analysts",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "13-2051.00"
+    ]
+  },
+  {
+    "field_label": "fine art",
+    "primary_soc": "27-1013",
+    "primary_soc_title": "Fine Artists, Including Painters, Sculptors, and Illustrators",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-1013.00"
+    ]
+  },
+  {
+    "field_label": "forensic engineering",
+    "primary_soc": "17-2199",
+    "primary_soc_title": "Engineers, All Other",
+    "alternate_socs": [
+      {
+        "soc_code": "17-2051",
+        "title": "Civil Engineers",
+        "rationale": "secondary mapping for \"forensic engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "17-2051.00",
+      "17-2051.01",
+      "17-2051.02",
+      "17-2199.00",
+      "17-2199.03",
+      "17-2199.05"
+    ]
+  },
+  {
+    "field_label": "frontend engineering",
+    "primary_soc": "15-1252",
+    "primary_soc_title": "Software Developers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "15-1252.00"
+    ]
+  },
+  {
+    "field_label": "full-stack engineering",
+    "primary_soc": "15-1252",
+    "primary_soc_title": "Software Developers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "15-1252.00"
+    ]
+  },
+  {
+    "field_label": "game design",
+    "primary_soc": "15-1255",
+    "primary_soc_title": "Web and Digital Interface Designers",
+    "alternate_socs": [
+      {
+        "soc_code": "27-1014",
+        "title": "Special Effects Artists and Animators",
+        "rationale": "secondary mapping for \"game design\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1255.00",
+      "15-1255.01",
+      "27-1014.00"
+    ]
+  },
+  {
+    "field_label": "game development",
+    "primary_soc": "15-1255",
+    "primary_soc_title": "Web and Digital Interface Designers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "15-1255.00",
+      "15-1255.01"
+    ]
+  },
+  {
+    "field_label": "general surgery",
+    "primary_soc": "29-1242",
+    "primary_soc_title": "Orthopedic Surgeons, Except Pediatric",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "29-1242.00"
+    ]
+  },
+  {
+    "field_label": "genetics",
+    "primary_soc": "19-1029",
+    "primary_soc_title": "Biological Scientists, All Other",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-1029.00",
+      "19-1029.01",
+      "19-1029.02"
+    ]
+  },
+  {
+    "field_label": "geology",
+    "primary_soc": "19-2042",
+    "primary_soc_title": "Geoscientists, Except Hydrologists and Geographers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-2042.00"
+    ]
+  },
+  {
+    "field_label": "geotechnical engineering",
+    "primary_soc": "17-2051",
+    "primary_soc_title": "Civil Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2051.00",
+      "17-2051.01",
+      "17-2051.02"
+    ]
+  },
+  {
+    "field_label": "graphic design",
+    "primary_soc": "27-1024",
+    "primary_soc_title": "Graphic Designers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-1024.00"
+    ]
+  },
+  {
+    "field_label": "higher education teaching",
+    "primary_soc": "25-1199",
+    "primary_soc_title": "Postsecondary Teachers, All Other",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "25-1199.00"
+    ]
+  },
+  {
+    "field_label": "human resources",
+    "primary_soc": "11-3121",
+    "primary_soc_title": "Human Resources Managers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "11-3121.00"
+    ]
+  },
+  {
+    "field_label": "HVAC engineering",
+    "primary_soc": "17-2141",
+    "primary_soc_title": "Mechanical Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2141.00",
+      "17-2141.01",
+      "17-2141.02"
+    ]
+  },
+  {
+    "field_label": "immigration law",
+    "primary_soc": "23-1011",
+    "primary_soc_title": "Lawyers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "23-1011.00"
+    ]
+  },
+  {
+    "field_label": "industrial design",
+    "primary_soc": "27-1021",
+    "primary_soc_title": "Commercial and Industrial Designers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-1021.00"
+    ]
+  },
+  {
+    "field_label": "industrial engineering",
+    "primary_soc": "17-2112",
+    "primary_soc_title": "Industrial Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2112.00",
+      "17-2112.01",
+      "17-2112.02"
+    ]
+  },
+  {
+    "field_label": "intellectual property law",
+    "primary_soc": "23-1011",
+    "primary_soc_title": "Lawyers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "23-1011.00"
+    ]
+  },
+  {
+    "field_label": "internal medicine",
+    "primary_soc": "29-1216",
+    "primary_soc_title": "General Internal Medicine Physicians",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "29-1216.00"
+    ]
+  },
+  {
+    "field_label": "investment banking",
+    "primary_soc": "13-2099",
+    "primary_soc_title": "Financial Specialists, All Other",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "13-2099.00",
+      "13-2099.01",
+      "13-2099.04"
+    ]
+  },
+  {
+    "field_label": "IT systems analysis",
+    "primary_soc": "15-1211",
+    "primary_soc_title": "Computer Systems Analysts",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1299",
+        "title": "Computer Occupations, All Other",
+        "rationale": "secondary mapping for \"IT systems analysis\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1211.00",
+      "15-1211.01",
+      "15-1299.00",
+      "15-1299.01",
+      "15-1299.02",
+      "15-1299.10"
+    ]
+  },
+  {
+    "field_label": "journalism",
+    "primary_soc": "27-3023",
+    "primary_soc_title": "News Analysts, Reporters, and Journalists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-3023.00"
+    ]
+  },
+  {
+    "field_label": "K-12 instruction",
+    "primary_soc": "25-2021",
+    "primary_soc_title": "Elementary School Teachers, Except Special Education",
+    "alternate_socs": [
+      {
+        "soc_code": "25-2030",
+        "title": "(SOC 25-2030 not found in BLS list)",
+        "rationale": "secondary mapping for \"K-12 instruction\""
+      }
+    ],
+    "closest_onet_codes": [
+      "25-2021.00"
+    ]
+  },
+  {
+    "field_label": "library science",
+    "primary_soc": "25-4022",
+    "primary_soc_title": "Librarians and Media Collections Specialists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "25-4022.00"
+    ]
+  },
+  {
+    "field_label": "litigation",
+    "primary_soc": "23-1011",
+    "primary_soc_title": "Lawyers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "23-1011.00"
+    ]
+  },
+  {
+    "field_label": "machine learning engineering",
+    "primary_soc": "15-1252",
+    "primary_soc_title": "Software Developers",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1221",
+        "title": "Computer and Information Research Scientists",
+        "rationale": "secondary mapping for \"machine learning engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1221.00",
+      "15-1252.00"
+    ]
+  },
+  {
+    "field_label": "management consulting",
+    "primary_soc": "13-1111",
+    "primary_soc_title": "Management Analysts",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "13-1111.00"
+    ]
+  },
+  {
+    "field_label": "manufacturing engineering",
+    "primary_soc": "17-2112",
+    "primary_soc_title": "Industrial Engineers",
+    "alternate_socs": [
+      {
+        "soc_code": "17-2141",
+        "title": "Mechanical Engineers",
+        "rationale": "secondary mapping for \"manufacturing engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "17-2112.00",
+      "17-2112.01",
+      "17-2112.02",
+      "17-2141.00",
+      "17-2141.01",
+      "17-2141.02"
+    ]
+  },
+  {
+    "field_label": "marine engineering",
+    "primary_soc": "17-2121",
+    "primary_soc_title": "Marine Engineers and Naval Architects",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2121.00"
+    ]
+  },
+  {
+    "field_label": "marketing",
+    "primary_soc": "13-1161",
+    "primary_soc_title": "Market Research Analysts and Marketing Specialists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "13-1161.00",
+      "13-1161.01"
+    ]
+  },
+  {
+    "field_label": "materials engineering",
+    "primary_soc": "17-2131",
+    "primary_soc_title": "Materials Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2131.00"
+    ]
+  },
+  {
+    "field_label": "materials science",
+    "primary_soc": "19-2032",
+    "primary_soc_title": "Materials Scientists",
+    "alternate_socs": [
+      {
+        "soc_code": "17-2131",
+        "title": "Materials Engineers",
+        "rationale": "secondary mapping for \"materials science\""
+      }
+    ],
+    "closest_onet_codes": [
+      "17-2131.00",
+      "19-2032.00"
+    ]
+  },
+  {
+    "field_label": "mathematics",
+    "primary_soc": "15-2021",
+    "primary_soc_title": "Mathematicians",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "15-2021.00"
+    ]
+  },
+  {
+    "field_label": "mechanical engineering",
+    "primary_soc": "17-2141",
+    "primary_soc_title": "Mechanical Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2141.00",
+      "17-2141.01",
+      "17-2141.02"
+    ]
+  },
+  {
+    "field_label": "mechatronics engineering",
+    "primary_soc": "17-2199",
+    "primary_soc_title": "Engineers, All Other",
+    "alternate_socs": [
+      {
+        "soc_code": "17-2141",
+        "title": "Mechanical Engineers",
+        "rationale": "secondary mapping for \"mechatronics engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "17-2141.00",
+      "17-2141.01",
+      "17-2141.02",
+      "17-2199.00",
+      "17-2199.03",
+      "17-2199.05"
+    ]
+  },
+  {
+    "field_label": "meteorology",
+    "primary_soc": "19-2021",
+    "primary_soc_title": "Atmospheric and Space Scientists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-2021.00"
+    ]
+  },
+  {
+    "field_label": "microbiology",
+    "primary_soc": "19-1022",
+    "primary_soc_title": "Microbiologists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-1022.00"
+    ]
+  },
+  {
+    "field_label": "mining engineering",
+    "primary_soc": "17-2151",
+    "primary_soc_title": "Mining and Geological Engineers, Including Mining Safety Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2151.00"
+    ]
+  },
+  {
+    "field_label": "mobile application development",
+    "primary_soc": "15-1252",
+    "primary_soc_title": "Software Developers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "15-1252.00"
+    ]
+  },
+  {
+    "field_label": "molecular biology",
+    "primary_soc": "19-1029",
+    "primary_soc_title": "Biological Scientists, All Other",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-1029.00",
+      "19-1029.01",
+      "19-1029.02"
+    ]
+  },
+  {
+    "field_label": "music composition",
+    "primary_soc": "27-2041",
+    "primary_soc_title": "Music Directors and Composers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-2041.00"
+    ]
+  },
+  {
+    "field_label": "natural language processing engineering",
+    "primary_soc": "15-1221",
+    "primary_soc_title": "Computer and Information Research Scientists",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1252",
+        "title": "Software Developers",
+        "rationale": "secondary mapping for \"natural language processing engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1221.00",
+      "15-1252.00"
+    ]
+  },
+  {
+    "field_label": "network architecture",
+    "primary_soc": "15-1244",
+    "primary_soc_title": "Network and Computer Systems Administrators",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1241",
+        "title": "Computer Network Architects",
+        "rationale": "secondary mapping for \"network architecture\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1241.00",
+      "15-1241.01",
+      "15-1244.00"
+    ]
+  },
+  {
+    "field_label": "neurology",
+    "primary_soc": "29-1217",
+    "primary_soc_title": "Neurologists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "29-1217.00"
+    ]
+  },
+  {
+    "field_label": "neuroscience",
+    "primary_soc": "19-1042",
+    "primary_soc_title": "Medical Scientists, Except Epidemiologists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-1042.00"
+    ]
+  },
+  {
+    "field_label": "non-profit leadership",
+    "primary_soc": "11-9151",
+    "primary_soc_title": "Social and Community Service Managers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "11-9151.00"
+    ]
+  },
+  {
+    "field_label": "nuclear engineering",
+    "primary_soc": "17-2161",
+    "primary_soc_title": "Nuclear Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2161.00"
+    ]
+  },
+  {
+    "field_label": "obstetrics and gynecology",
+    "primary_soc": "29-1218",
+    "primary_soc_title": "Obstetricians and Gynecologists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "29-1218.00"
+    ]
+  },
+  {
+    "field_label": "oceanography",
+    "primary_soc": "19-2043",
+    "primary_soc_title": "Hydrologists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-2043.00"
+    ]
+  },
+  {
+    "field_label": "oncology",
+    "primary_soc": "29-1228",
+    "primary_soc_title": "(SOC 29-1228 not found in BLS list)",
+    "alternate_socs": [],
+    "closest_onet_codes": []
+  },
+  {
+    "field_label": "operations management",
+    "primary_soc": "11-1021",
+    "primary_soc_title": "General and Operations Managers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "11-1021.00"
+    ]
+  },
+  {
+    "field_label": "packaging engineering",
+    "primary_soc": "17-2112",
+    "primary_soc_title": "Industrial Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2112.00",
+      "17-2112.01",
+      "17-2112.02"
+    ]
+  },
+  {
+    "field_label": "pediatrics",
+    "primary_soc": "29-1221",
+    "primary_soc_title": "Pediatricians, General",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "29-1221.00"
+    ]
+  },
+  {
+    "field_label": "penetration testing",
+    "primary_soc": "15-1299",
+    "primary_soc_title": "Computer Occupations, All Other",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1212",
+        "title": "Information Security Analysts",
+        "rationale": "secondary mapping for \"penetration testing\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1212.00",
+      "15-1299.00",
+      "15-1299.01",
+      "15-1299.02",
+      "15-1299.04"
+    ]
+  },
+  {
+    "field_label": "petroleum engineering",
+    "primary_soc": "17-2171",
+    "primary_soc_title": "Petroleum Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2171.00"
+    ]
+  },
+  {
+    "field_label": "pharmacology",
+    "primary_soc": "19-1042",
+    "primary_soc_title": "Medical Scientists, Except Epidemiologists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-1042.00"
+    ]
+  },
+  {
+    "field_label": "pharmacy",
+    "primary_soc": "29-1051",
+    "primary_soc_title": "Pharmacists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "29-1051.00"
+    ]
+  },
+  {
+    "field_label": "photography",
+    "primary_soc": "27-4021",
+    "primary_soc_title": "Photographers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-4021.00"
+    ]
+  },
+  {
+    "field_label": "physical therapy",
+    "primary_soc": "29-1123",
+    "primary_soc_title": "Physical Therapists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "29-1123.00"
+    ]
+  },
+  {
+    "field_label": "physics",
+    "primary_soc": "19-2012",
+    "primary_soc_title": "Physicists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-2012.00"
+    ]
+  },
+  {
+    "field_label": "power systems engineering",
+    "primary_soc": "17-2071",
+    "primary_soc_title": "Electrical Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2071.00"
+    ]
+  },
+  {
+    "field_label": "private equity",
+    "primary_soc": "13-2099",
+    "primary_soc_title": "Financial Specialists, All Other",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "13-2099.00",
+      "13-2099.01",
+      "13-2099.04"
+    ]
+  },
+  {
+    "field_label": "psychiatry",
+    "primary_soc": "29-1223",
+    "primary_soc_title": "Psychiatrists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "29-1223.00"
+    ]
+  },
+  {
+    "field_label": "public administration",
+    "primary_soc": "11-1031",
+    "primary_soc_title": "Legislators",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "11-1031.00"
+    ]
+  },
+  {
+    "field_label": "quantum computing research",
+    "primary_soc": "15-1221",
+    "primary_soc_title": "Computer and Information Research Scientists",
+    "alternate_socs": [
+      {
+        "soc_code": "19-2012",
+        "title": "Physicists",
+        "rationale": "secondary mapping for \"quantum computing research\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1221.00",
+      "19-2012.00"
+    ]
+  },
+  {
+    "field_label": "radiology",
+    "primary_soc": "29-1224",
+    "primary_soc_title": "Radiologists",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "29-1224.00"
+    ]
+  },
+  {
+    "field_label": "religious leadership",
+    "primary_soc": "21-2011",
+    "primary_soc_title": "Clergy",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "21-2011.00"
+    ]
+  },
+  {
+    "field_label": "risk management",
+    "primary_soc": "13-2061",
+    "primary_soc_title": "Financial Examiners",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "13-2061.00"
+    ]
+  },
+  {
+    "field_label": "robotics software engineering",
+    "primary_soc": "17-2199",
+    "primary_soc_title": "Engineers, All Other",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1252",
+        "title": "Software Developers",
+        "rationale": "secondary mapping for \"robotics software engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1252.00",
+      "17-2199.00",
+      "17-2199.03",
+      "17-2199.05"
+    ]
+  },
+  {
+    "field_label": "safety engineering",
+    "primary_soc": "17-2111",
+    "primary_soc_title": "Health and Safety Engineers, Except Mining Safety Engineers and Inspectors",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2111.00",
+      "17-2111.02"
+    ]
+  },
+  {
+    "field_label": "school administration",
+    "primary_soc": "11-9032",
+    "primary_soc_title": "Education Administrators, Kindergarten through Secondary",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "11-9032.00"
+    ]
+  },
+  {
+    "field_label": "sculpture",
+    "primary_soc": "27-1013",
+    "primary_soc_title": "Fine Artists, Including Painters, Sculptors, and Illustrators",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-1013.00"
+    ]
+  },
+  {
+    "field_label": "site reliability engineering",
+    "primary_soc": "15-1244",
+    "primary_soc_title": "Network and Computer Systems Administrators",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1252",
+        "title": "Software Developers",
+        "rationale": "secondary mapping for \"site reliability engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1244.00",
+      "15-1252.00"
+    ]
+  },
+  {
+    "field_label": "software engineering",
+    "primary_soc": "15-1252",
+    "primary_soc_title": "Software Developers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "15-1252.00"
+    ]
+  },
+  {
+    "field_label": "sports coaching",
+    "primary_soc": "27-2022",
+    "primary_soc_title": "Coaches and Scouts",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "27-2022.00"
+    ]
+  },
+  {
+    "field_label": "statistics",
+    "primary_soc": "15-2041",
+    "primary_soc_title": "Statisticians",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "15-2041.00",
+      "15-2041.01"
+    ]
+  },
+  {
+    "field_label": "structural engineering",
+    "primary_soc": "17-2051",
+    "primary_soc_title": "Civil Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2051.00",
+      "17-2051.01",
+      "17-2051.02"
+    ]
+  },
+  {
+    "field_label": "supply chain management",
+    "primary_soc": "11-3071",
+    "primary_soc_title": "Transportation, Storage, and Distribution Managers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "11-3071.00",
+      "11-3071.04"
+    ]
+  },
+  {
+    "field_label": "systems engineering",
+    "primary_soc": "17-2199",
+    "primary_soc_title": "Engineers, All Other",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1299",
+        "title": "Computer Occupations, All Other",
+        "rationale": "secondary mapping for \"systems engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1299.00",
+      "15-1299.01",
+      "15-1299.02",
+      "15-1299.08",
+      "17-2199.00",
+      "17-2199.03",
+      "17-2199.05"
+    ]
+  },
+  {
+    "field_label": "tax law",
+    "primary_soc": "23-1011",
+    "primary_soc_title": "Lawyers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "23-1011.00"
+    ]
+  },
+  {
+    "field_label": "technical product management",
+    "primary_soc": "11-3021",
+    "primary_soc_title": "Computer and Information Systems Managers",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1299",
+        "title": "Computer Occupations, All Other",
+        "rationale": "secondary mapping for \"technical product management\""
+      }
+    ],
+    "closest_onet_codes": [
+      "11-3021.00",
+      "15-1299.00",
+      "15-1299.01",
+      "15-1299.02",
+      "15-1299.09"
+    ]
+  },
+  {
+    "field_label": "technical program management",
+    "primary_soc": "15-1299",
+    "primary_soc_title": "Computer Occupations, All Other",
+    "alternate_socs": [
+      {
+        "soc_code": "11-3021",
+        "title": "Computer and Information Systems Managers",
+        "rationale": "secondary mapping for \"technical program management\""
+      }
+    ],
+    "closest_onet_codes": [
+      "11-3021.00",
+      "15-1299.00",
+      "15-1299.01",
+      "15-1299.02",
+      "15-1299.09"
+    ]
+  },
+  {
+    "field_label": "transportation engineering",
+    "primary_soc": "17-2051",
+    "primary_soc_title": "Civil Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2051.00",
+      "17-2051.01",
+      "17-2051.02"
+    ]
+  },
+  {
+    "field_label": "UI/UX design",
+    "primary_soc": "27-1024",
+    "primary_soc_title": "Graphic Designers",
+    "alternate_socs": [
+      {
+        "soc_code": "15-1255",
+        "title": "Web and Digital Interface Designers",
+        "rationale": "secondary mapping for \"UI/UX design\""
+      }
+    ],
+    "closest_onet_codes": [
+      "15-1255.00",
+      "15-1255.01",
+      "27-1024.00"
+    ]
+  },
+  {
+    "field_label": "urban planning",
+    "primary_soc": "19-3051",
+    "primary_soc_title": "Urban and Regional Planners",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "19-3051.00"
+    ]
+  },
+  {
+    "field_label": "venture capital",
+    "primary_soc": "13-2099",
+    "primary_soc_title": "Financial Specialists, All Other",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "13-2099.00",
+      "13-2099.01",
+      "13-2099.04"
+    ]
+  },
+  {
+    "field_label": "VLSI / chip design",
+    "primary_soc": "17-2061",
+    "primary_soc_title": "Computer Hardware Engineers",
+    "alternate_socs": [],
+    "closest_onet_codes": [
+      "17-2061.00"
+    ]
+  },
+  {
+    "field_label": "water resources engineering",
+    "primary_soc": "17-2051",
+    "primary_soc_title": "Civil Engineers",
+    "alternate_socs": [
+      {
+        "soc_code": "17-2081",
+        "title": "Environmental Engineers",
+        "rationale": "secondary mapping for \"water resources engineering\""
+      }
+    ],
+    "closest_onet_codes": [
+      "17-2051.00",
+      "17-2051.01",
+      "17-2051.02",
+      "17-2081.00"
+    ]
+  }
+]

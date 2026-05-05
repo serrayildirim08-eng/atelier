@@ -4442,26 +4442,37 @@ export async function aggregateTypedMemoryToE2(
   const sofChainBlock = buildSofChainHintsBlock(memory);
   const userMessage = `${USER_INSTRUCTION}${inventorySection}\n\n${investorOwnerBlock}\n\n${sofChainBlock}\n\n# Typed memory\n\n${memoryBlock}\n\nRespond with ONLY a single JSON object matching the E2FactsSchema. No prose, no markdown fences, no commentary.`;
 
-  // Pre-flight token count (free; observability only). Surfaces growth in
-  // typed memory before it lands as a request the API truncates or
-  // refuses. Threshold is well below Sonnet 4.6's context ceiling — this
-  // is an early-warning, not a hard gate. Failure is non-fatal.
+  // Pre-flight token count (free) — gates the adaptive-thinking budget.
+  // Small corpora (< 80K tokens) get a cheaper direct path: no thinking,
+  // 16K output budget. Big corpora (≥ 80K) keep the original 32K + adaptive
+  // thinking + retry path because the cross-document reconciliation
+  // genuinely benefits from intermediate reasoning when there's a lot to
+  // cross-reference. Saves ~$0.08-$0.12/case on the common path.
   const PREFLIGHT_WARN_TOKENS = 150_000;
+  const ADAPTIVE_THINKING_THRESHOLD = 80_000;
+  let preflightTokens = 0;
   try {
     const count = await countMessageTokens({
       model: 'claude-sonnet-4-6',
       system: [{ type: 'text', text: SYSTEM_PROMPT }],
       messages: [{ role: 'user', content: userMessage }],
     });
-    if (count.input_tokens > PREFLIGHT_WARN_TOKENS) {
+    preflightTokens = count.input_tokens;
+    if (preflightTokens > PREFLIGHT_WARN_TOKENS) {
       console.warn(
-        `[typed-aggregate] input_tokens=${count.input_tokens} exceeds ${PREFLIGHT_WARN_TOKENS} threshold; review schema growth.`,
+        `[typed-aggregate] input_tokens=${preflightTokens} exceeds ${PREFLIGHT_WARN_TOKENS} threshold; review schema growth.`,
       );
     }
   } catch (e: unknown) {
     console.warn(
       '[typed-aggregate] countTokens failed:',
       e instanceof Error ? e.message : String(e),
+    );
+  }
+  const useAdaptiveThinking = preflightTokens === 0 || preflightTokens >= ADAPTIVE_THINKING_THRESHOLD;
+  if (!useAdaptiveThinking) {
+    console.log(
+      `[typed-aggregate] preflight ${preflightTokens} < ${ADAPTIVE_THINKING_THRESHOLD} → direct path (no thinking, 16K output)`,
     );
   }
 
@@ -4485,12 +4496,13 @@ export async function aggregateTypedMemoryToE2(
   // could exceed 10 minutes wall-clock, and a 158K-input + adaptive-thinking
   // call can easily cross that. We stream and assemble the final message;
   // no UI deltas are surfaced — the route's heartbeat covers that.
-  const FIRST_PASS_MAX_TOKENS = 32_000;
+  const FIRST_PASS_MAX_TOKENS = useAdaptiveThinking ? 32_000 : 16_000;
   const stream = getAnthropic().messages.stream({
     model: 'claude-sonnet-4-6',
     max_tokens: FIRST_PASS_MAX_TOKENS,
-    thinking: { type: 'adaptive' },
-    output_config: { effort: 'low' },
+    ...(useAdaptiveThinking
+      ? { thinking: { type: 'adaptive' as const }, output_config: { effort: 'low' as const } }
+      : {}),
     system: [
       {
         type: 'text',

@@ -45,6 +45,7 @@ import {
   type CaseTheoryInput,
 } from './extractors/case-theory';
 import type { CaseTheory } from './extractors/case-theory.schema';
+import { synthesizeEb1aReasoning } from './extractors/eb1a-reasoning';
 import {
   collectPassportCandidates,
   collectMarriageBindings,
@@ -851,20 +852,31 @@ export async function aggregateTypedMemoryToEb1a(
   const tenure_table = buildTenureTable(memory);
 
   let field_classification = fieldClassificationStub();
+  let case_theory = caseTheoryStub();
+
   if (classifyField) {
-    const input = buildFieldClassifierInput(memory);
+    const fieldInput = buildFieldClassifierInput(memory);
     const hasAnyInput =
-      input.cv !== undefined ||
-      (input.diplomas?.length ?? 0) > 0 ||
-      (input.recommendation_letter_excerpts?.length ?? 0) > 0;
+      fieldInput.cv !== undefined ||
+      (fieldInput.diplomas?.length ?? 0) > 0 ||
+      (fieldInput.recommendation_letter_excerpts?.length ?? 0) > 0;
     if (hasAnyInput) {
-      const classified = await classifyFieldOfEndeavor(input);
+      // Bundled EB-1A reasoning call: one Haiku round-trip returns BOTH
+      // field-of-endeavor classification AND case-theory synthesis. Saves
+      // a round-trip + redundant CV-payload retransmission vs. running
+      // classifyFieldOfEndeavor + synthesizeCaseTheory sequentially.
+      const ctInput = buildCaseTheoryInput(memory, field_classification);
+      const bundled = await synthesizeEb1aReasoning({
+        ...fieldInput,
+        ...ctInput,
+      });
+
       field_classification = {
-        label: lift(classified.label, '[classifier]', 0.9),
-        peer_set_description: lift(classified.peer_set_description, '[classifier]', 0.9),
-        specificity: lift(classified.specificity, '[classifier]', 0.9),
-        confidence: lift(classified.confidence, '[classifier]', 1),
-        reasoning: lift(classified.reasoning, '[classifier]', 0.9),
+        label: lift(bundled.field_of_endeavor.label, '[reasoning-bundle]', 0.9),
+        peer_set_description: lift(bundled.field_of_endeavor.peer_set_description, '[reasoning-bundle]', 0.9),
+        specificity: lift(bundled.field_of_endeavor.specificity, '[reasoning-bundle]', 0.9),
+        confidence: lift(bundled.field_of_endeavor.confidence, '[reasoning-bundle]', 1),
+        reasoning: lift(bundled.field_of_endeavor.reasoning, '[reasoning-bundle]', 0.9),
         manual_override_used: {
           value: false,
           source_page: null,
@@ -872,6 +884,10 @@ export async function aggregateTypedMemoryToEb1a(
           confidence: 1,
         },
       };
+
+      if (doSynthesize) {
+        case_theory = liftCaseTheory(bundled.case_theory);
+      }
     }
   }
 
@@ -879,15 +895,6 @@ export async function aggregateTypedMemoryToEb1a(
 
   const derivatives = buildDerivatives(memory, beneficiary);
   const visa_history = buildVisaHistory(memory);
-
-  let case_theory = caseTheoryStub();
-  if (classifyField && doSynthesize) {
-    const ctInput = buildCaseTheoryInput(memory, field_classification);
-    if (ctInput.cv !== undefined) {
-      const synthesized = await synthesizeCaseTheory(ctInput);
-      case_theory = liftCaseTheory(synthesized);
-    }
-  }
 
   const facts: EB1AFacts = {
     beneficiary,
@@ -924,3 +931,29 @@ export async function aggregateTypedMemoryToEb1a(
   // builder ever drifts.
   return EB1AFactsSchema.parse(facts);
 }
+
+/* ====================================================================== */
+/* Sort-out pipeline (2026-05-05) — IdentitySheet + CriterionMap          */
+/*                                                                        */
+/* MOVED 2026-05-05 sprint to ./aggregators/identity-sheet.ts and         */
+/* ./aggregators/criterion-map.ts. The exports below are re-exports for   */
+/* back-compat — DO NOT ADD NEW LOGIC HERE.                               */
+/* ====================================================================== */
+
+export {
+  aggregateIdentitySheet,
+  type IdentitySheet,
+  type IdentityNameChangeEvent,
+  type IdentityParents,
+  type PreChangeEvidenceWarning,
+} from './aggregators/identity-sheet';
+
+export {
+  buildCriterionMap,
+  CRITERION_NAMES,
+  type CriterionId,
+  type CriterionStatus,
+  type CriterionRow,
+  type CvSignalSlice,
+} from './aggregators/criterion-map';
+
