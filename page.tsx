@@ -267,7 +267,7 @@ function Header({ now }: { now: Date }) {
       <div className="flex items-center gap-3">
         <span className="sigil" aria-hidden>A</span>
         <div className="flex items-baseline gap-2.5 leading-none">
-          <span className="font-display text-[1.05rem] tracking-wide">akalan</span>
+          <span className="font-display text-[1.05rem] tracking-wide">atelier</span>
           <span className="text-rule-strong">·</span>
           <span className="display-italic text-[1.05rem] text-rubric">atelier</span>
         </div>
@@ -283,7 +283,7 @@ function Header({ now }: { now: Date }) {
         <span className="text-rule-strong">·</span>
         <span>{time}</span>
         <span className="text-rule-strong">·</span>
-        <span>sy@akalan.law</span>
+        <span>counsel@firm.example</span>
       </div>
     </header>
   );
@@ -1459,7 +1459,7 @@ function StatusBar({
         <span className="text-rule-strong">·</span>
         <span>{time}</span>
         <span className="text-rule-strong">·</span>
-        <span className="smcp">akalan atelier v.0.2</span>
+        <span className="smcp">atelier v.0.2</span>
       </div>
     </footer>
   );
