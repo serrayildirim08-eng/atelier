@@ -1,19 +1,19 @@
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: akalan-postgres
+    container_name: atelier-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: akalan
-      POSTGRES_PASSWORD: akalan
-      POSTGRES_DB: akalan_portal
+      POSTGRES_USER: atelier
+      POSTGRES_PASSWORD: atelier
+      POSTGRES_DB: atelier
     ports:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U akalan -d akalan_portal"]
+      test: ["CMD-SHELL", "pg_isready -U atelier -d atelier"]
       interval: 5s
       timeout: 3s
       retries: 10
