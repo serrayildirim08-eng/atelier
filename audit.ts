@@ -53,7 +53,7 @@ export function recordGeneration(input: AuditGenerationInput): void {
   if (!cfg) return;
 
   const now = new Date().toISOString();
-  const id = `akalan-${input.stage}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const id = `atelier-${input.stage}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   const event = {
     batch: [
@@ -63,7 +63,7 @@ export function recordGeneration(input: AuditGenerationInput): void {
         timestamp: now,
         body: {
           id,
-          name: `akalan-portal-${input.stage}`,
+          name: `atelier-${input.stage}`,
           startTime: now,
           endTime: now,
           model: input.model,
