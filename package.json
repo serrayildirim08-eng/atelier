@@ -1,5 +1,5 @@
 {
-  "name": "akalan-portal",
+  "name": "atelier",
   "version": "0.1.0",
   "private": true,
   "main": "electron/main.cjs",
@@ -38,8 +38,8 @@
     "wait-on": "^8.0.1"
   },
   "build": {
-    "appId": "law.akalan.atelier",
-    "productName": "AKALAN Atelier",
+    "appId": "com.serrayildirim.atelier",
+    "productName": "Atelier",
     "directories": {
       "output": "dist-electron"
     },
@@ -68,7 +68,7 @@
       "target": [
         { "target": "nsis", "arch": ["x64"] }
       ],
-      "artifactName": "AKALAN-Atelier-Setup-${version}.${ext}"
+      "artifactName": "Atelier-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": false,
