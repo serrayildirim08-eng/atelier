@@ -1,5 +1,5 @@
 /**
- * Electron main process for AKALAN Atelier.
+ * Electron main process for Atelier.
  *
  * Dev:   loads http://localhost:3000 (run `next dev` separately or via npm script).
  * Prod:  spawns the Next.js standalone server on a free port and loads that.
@@ -83,7 +83,7 @@ function createWindow(targetUrl) {
     minHeight: 720,
     backgroundColor: '#F1E9D6',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-    title: 'AKALAN Atelier',
+    title: 'Atelier',
     show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
@@ -138,7 +138,7 @@ app.whenReady().then(async () => {
     const url = isDev ? 'http://localhost:3000' : await startNextServer();
     createWindow(url);
   } catch (err) {
-    console.error('Failed to start AKALAN Atelier:', err);
+    console.error('Failed to start Atelier:', err);
     app.quit();
   }
 
