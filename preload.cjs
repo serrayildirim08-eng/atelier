@@ -1,6 +1,6 @@
 const { contextBridge } = require('electron');
 
-contextBridge.exposeInMainWorld('akalan', {
+contextBridge.exposeInMainWorld('atelier', {
   platform: process.platform,
   isDesktop: true,
 });
