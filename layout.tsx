@@ -26,7 +26,7 @@ const mono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'AKALAN Atelier',
+  title: 'Atelier',
   description: 'AI paralegal — E-2 · EB-1A · EB-1B · EB-1C',
 };
 
