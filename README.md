@@ -1,36 +1,64 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Atelier
 
-## Getting Started
+**An AI paralegal for evidence-heavy legal drafting.** Drop a case folder in, get a structured fact record, a drafted brief, and a reviewer pass that checks the draft against the evidence — with every model call logged.
 
-First, run the development server:
+Built solo by an attorney who got tired of doing the same forensic reading by hand. First workflow shipped: US business-immigration petitions (E-2, EB-1A / EB-1B / EB-1C). The pipeline is domain-agnostic; the prompts and schemas are the only immigration-specific parts.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## How it works
+
+```
+case folder (PDFs, scans, images)
+   │
+   ▼
+ingest/    detect file types → parse PDFs (pdf-parse) → vision pass for scans
+           → Claude extracts facts into a typed schema (zod) with exhibit references
+   │
+   ▼
+reason/    checker audits the draft against the extracted record:
+           unsupported claims, missing exhibits, weakest counter-argument
+   │
+   ▼
+draft/     Claude drafts the cover letter / petition memorandum in the firm's voice
+   │
+   ▼
+lib/       Anthropic client, per-stage audit trail, usage + cost log
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+- **Provenance first.** Every extracted fact carries an exhibit reference; the reviewer flags anything in the draft that the record doesn't support.
+- **Structured, not freeform.** Extraction and review are schema-validated (zod) so downstream steps can trust the shape.
+- **Auditable.** Each stage writes to an audit log (`lib/audit.ts`) and a usage log (`lib/usage-log.ts`).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Stack
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Next.js (App Router) · TypeScript · Tailwind · Anthropic SDK · zod · pdf-parse · Postgres + pgvector (docker-compose) · Electron desktop build (electron-builder, macOS + Windows)
 
-## Learn More
+## Run it
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+cp .env.example .env.local     # add your Anthropic key
+docker compose up -d           # Postgres + pgvector
+npm install
+npm run dev                    # web: http://localhost:3000
+npm run electron:dev           # desktop shell
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Layout
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```
+app/          Next.js UI + /api/ingest route
+ingest/       detect · pdf · vision · claude · schema
+reason/       checker · schema
+draft/        cover-letter
+lib/          anthropic · audit · usage-log
+electron/     main · preload
+db/init/      Postgres extensions (pgvector)
+research/     design notes and frontier research that shaped the architecture
+```
 
-## Deploy on Vercel
+## Status
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Working MVP (v0.2). Roadmap items live in `research/`: Citations-API-based provenance, firm-voice style extraction, and a broader set of drafting workflows beyond immigration.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Author
+
+Serra Yıldırım — attorney (Istanbul Bar), LL.M. Law & Technology candidate at Erasmus University Rotterdam. Built with Claude Code.
